@@ -59,7 +59,7 @@ A plan for building an expressive violin synthesizer as a VST3 plugin (plus AU a
 - **CI:** GitHub Actions with a matrix of ubuntu-latest, macos-latest and windows-latest. It builds, runs unit tests, runs pluginval and uploads the build artifacts.
 - **Code quality:** `clang-format`, `clang-tidy` and, on Linux debug builds, the address and undefined-behaviour sanitizers.
 
-**Licensing to decide early:** JUCE 9 is dual-licensed under **AGPLv3** or a commercial license. Pick one before any public release, because it decides whether the source must be open. Also check the current Steinberg VST3 SDK license terms and the AU/Apple requirements.
+**Licensing (decided):** JUCE 9 is dual-licensed under **AGPLv3** or a commercial license. The project uses **AGPLv3**: it is open source and its repository is public (see `LICENSE` and the README). The Steinberg VST3 SDK bundled with JUCE is MIT-licensed. A closed-source or commercial release would need a JUCE commercial licence.
 
 ---
 
@@ -255,7 +255,7 @@ Durations assume one developer working part-time and are only indicative.
 | Tuning drift from the loop filter and interpolation | Medium | Compensate for phase delay analytically and verify with automated pitch tests |
 | CPU cost with 4 strings, oversampling and a large modal bank | Medium | Update coefficients at control rate, use SIMD, and offer an oversampling quality switch |
 | Too complex to play from a plain keyboard | Medium | Automatic bow envelope and sensible defaults; "Easy" presets |
-| JUCE licensing constraints | Medium | Decide AGPL or commercial in Phase 0 |
+| JUCE licensing constraints | Resolved | AGPLv3 chosen; the project is open source |
 | Code-signing and notarisation friction | Low | Automate it in CI early, in Phase 7 |
 
 ---
