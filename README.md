@@ -14,13 +14,13 @@ See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis appro
 
 ### 1. Get a build
 
-Every push runs the **Build** workflow on GitHub Actions for Linux, macOS (universal: Apple silicon and Intel) and Windows.
+The **Build** workflow on GitHub Actions builds and tests the plugin. To keep metered Actions minutes low, it builds automatically on **Linux only** (every push). Windows and macOS (universal: Apple silicon and Intel) are built for release tags (`v*`) or on request:
 
-1. Open the repository's **Actions** tab, then the latest green **Build** run for your branch.
-2. Under **Artifacts**, download `ViolinSynth-macOS`, `ViolinSynth-Windows` or `ViolinSynth-Linux`.
+1. Open the repository's **Actions** tab and choose **Build**. To get Windows or macOS builds, click **Run workflow**, pick your branch, set **platforms** to `all`, and run it. Windows and macOS minutes cost several times more than Linux.
+2. When the run is green, download `ViolinSynth-Windows`, `ViolinSynth-macOS` or `ViolinSynth-Linux` under **Artifacts**.
 3. Unzip it. Inside are one zip per format (`ViolinSynth-VST3-…zip`, `ViolinSynth-AU-…zip`, `ViolinSynth-Standalone-…zip`). Unzip the ones you need.
 
-You can also build locally (see [Building from source](#building-from-source)).
+You can also build locally for free (see [Building from source](#building-from-source)). On Windows that needs Visual Studio 2022 with the "Desktop development with C++" workload, plus CMake.
 
 ### 2. Install it
 
@@ -112,7 +112,7 @@ Useful options:
 
 ### Validating
 
-CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 on all platforms, and `auval -strict` on the AU on macOS. To run it locally:
+CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 of every platform it builds, and `auval -strict` on the AU when it builds macOS. To run it locally:
 
 ```sh
 pluginval --strictness-level 10 --validate "build/ViolinSynth_artefacts/Release/VST3/Violin Synthesizer.vst3"
