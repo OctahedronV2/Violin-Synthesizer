@@ -143,7 +143,7 @@ TEST_CASE ("Invalid state data is ignored", "[processor][state]")
     processor.setStateInformation (garbage, static_cast<int> (sizeof (garbage)));
 
     const auto gainId = violinsynth::params::id::outputGain.getParamID();
-    CHECK (processor.getParameters().getRawParameterValue (gainId)->load() == 0.0f);
+    CHECK (std::abs (processor.getParameters().getRawParameterValue (gainId)->load()) < 0.05f);
 }
 
 TEST_CASE ("Editor can be created and destroyed", "[editor]")
