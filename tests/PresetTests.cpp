@@ -141,17 +141,14 @@ TEST_CASE ("User presets save, load and delete", "[presets]")
     CHECK (f.manager.getCurrentIndex() == -1);
 }
 
-TEST_CASE ("Host programs are the factory presets", "[presets]")
+TEST_CASE ("Presets are not exposed as host programs", "[presets]")
 {
+    // A host program change would rewrite every parameter behind the host's back.
     juce::ScopedJuceInitialiser_GUI juce;
     ViolinSynthProcessor processor;
-    const auto& list = presets::factoryPresets();
-
-    CHECK (processor.getNumPrograms() == static_cast<int> (list.size()));
-    CHECK (processor.getProgramName (3) == juce::String (list[3].name));
+    CHECK (processor.getNumPrograms() == 1);
     processor.setCurrentProgram (3);
-    CHECK (processor.getCurrentProgram() == 3);
-    CHECK (processor.getPresetManager().getCurrentName() == juce::String (list[3].name));
+    CHECK (processor.getPresetManager().getCurrentIndex() == 0);
 }
 
 TEST_CASE ("The current preset is saved with the project", "[presets]")
@@ -160,7 +157,7 @@ TEST_CASE ("The current preset is saved with the project", "[presets]")
     juce::MemoryBlock saved;
     {
         ViolinSynthProcessor processor;
-        processor.setCurrentProgram (5);
+        processor.getPresetManager().load (5);
         auto* room = processor.getParameters().getParameter ("room");
         room->setValueNotifyingHost (0.77f); // an edit on top of the preset
         processor.getStateInformation (saved);

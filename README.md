@@ -52,7 +52,7 @@ In **FL Studio**:
 
 Things to try:
 
-- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. They also appear in FL Studio's own preset menu. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Violin Synthesizer/Presets`.
+- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Violin Synthesizer/Presets`.
 - **Play expressively:**
   - Velocity sets how hard the bow is drawn.
   - Overlapping notes glide legato; separate notes get a new bow stroke.

@@ -424,14 +424,14 @@ TEST_CASE ("Render a tour of the factory presets", "[.presettour]")
     const auto segment = static_cast<int> (4.6 * fs);
 
     ViolinSynthProcessor probe;
-    const auto count = probe.getNumPrograms();
+    const auto count = probe.getPresetManager().getNumFactoryPresets();
     juce::AudioBuffer<float> output (2, segment * count);
     juce::String index;
 
     for (int program = 0; program < count; ++program)
     {
         ViolinSynthProcessor processor;
-        processor.setCurrentProgram (program);
+        processor.getPresetManager().load (program);
         processor.setRateAndBufferSizeDetails (fs, block);
         processor.prepareToPlay (fs, block);
         processor.applyBodyChange();
@@ -464,7 +464,7 @@ TEST_CASE ("Render a tour of the factory presets", "[.presettour]")
 
         const auto seconds = program * segment / static_cast<int> (fs);
         index << juce::String (seconds / 60) << ":" << juce::String (seconds % 60).paddedLeft ('0', 2) << "  "
-              << processor.getProgramName (program) << "\n";
+              << processor.getPresetManager().getCurrentName() << "\n";
     }
 
     const auto directory = juce::File::getCurrentWorkingDirectory();

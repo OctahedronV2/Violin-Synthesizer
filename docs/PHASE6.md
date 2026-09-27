@@ -12,7 +12,7 @@ This phase adds 27 factory presets that load with one click, user presets, and a
   - Hover over the name to see the preset's description.
 - **Save** stores the current settings as a user preset, with a name and a category (default "User"). Saving under an existing name overwrites that preset. **Delete** removes the current user preset; factory presets can't be deleted.
 - User presets are small XML files (`.vspreset`) in `Documents/OctahedronV2/Violin Synthesizer/Presets`. Copy them between computers or share them.
-- **In the DAW:** the factory presets are also the plugin's *programs*, so they appear in the host's own preset list. In FL Studio, that is the plugin wrapper's preset menu.
+- **In the DAW:** presets live only in the plugin's own browser. They are deliberately not exposed as host *programs*. A program change rewrites every parameter behind the host's back, which made pluginval's state-restoration test fail on Windows, and some hosts select program 0 when loading a project, which would wipe your settings. The host's own preset save and load (in FL Studio, the wrapper's preset menu) still stores the complete plugin state, including the current preset.
 - **Saving with the project:** the current preset name and any edits are saved in the host project and come back when it is reopened.
 
 A preset always sets every parameter. Anything a preset doesn't mention goes back to its default, so the same preset always sounds the same whatever was loaded before.
@@ -65,11 +65,11 @@ Keyswitches still work on top of any preset. They change the articulation until 
   - The factory presets are unique, fully valid and in range, and the first is the default sound.
   - Loading a preset sets every parameter, and the modified flag works, as do previous and next.
   - User presets save, load, overwrite and delete, including names with characters that can't go in a file name.
-  - Host programs map to the factory presets.
+  - Presets are not exposed as host programs.
   - The current preset survives a project save and reload, including edits on top.
   - The presets are level-matched.
 - **Editor:** it scales in proportion, and every control has an accessible title.
-- All 63 test cases pass in Release and under AddressSanitizer + UBSan. pluginval passes at strictness 10, including its editor and program tests.
+- All 63 test cases pass in Release and under AddressSanitizer + UBSan. pluginval passes at strictness 10, including its editor and state-restoration tests.
 - **Renders:** `ViolinSynthTests "[.presettour]"` renders one phrase through every preset, and `"[.screenshot]"` writes the editor screenshot.
 
 **Still to do for "done":** the plan's UX review and a save/restore check in several DAWs. These need you in FL Studio and any other hosts you use.

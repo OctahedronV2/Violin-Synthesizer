@@ -31,11 +31,13 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 3.0; }
 
-    // Host programs are the factory presets.
-    int getNumPrograms() override;
-    int getCurrentProgram() override;
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
+    // Presets live in the editor's preset browser, not in host programs: a
+    // host program change would rewrite every parameter behind the host's
+    // back (and some hosts select program 0 when loading a project).
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override { }
+    const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override { }
 
     void getStateInformation (juce::MemoryBlock& destData) override;

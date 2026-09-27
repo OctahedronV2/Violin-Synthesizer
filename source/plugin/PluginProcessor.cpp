@@ -59,30 +59,6 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     midiMessages.clear();
 }
 
-int ViolinSynthProcessor::getNumPrograms()
-{
-    return presets.getNumFactoryPresets();
-}
-
-int ViolinSynthProcessor::getCurrentProgram()
-{
-    const auto index = presets.getCurrentIndex();
-    return index >= 0 && index < presets.getNumFactoryPresets() ? index : 0;
-}
-
-void ViolinSynthProcessor::setCurrentProgram (int index)
-{
-    if (index >= 0 && index < presets.getNumFactoryPresets())
-        presets.load (index);
-}
-
-const juce::String ViolinSynthProcessor::getProgramName (int index)
-{
-    return index >= 0 && index < presets.getNumFactoryPresets()
-        ? presets.getPresets()[static_cast<std::size_t> (index)].name
-        : juce::String();
-}
-
 juce::AudioProcessorEditor* ViolinSynthProcessor::createEditor()
 {
     return new ViolinSynthEditor (*this);
