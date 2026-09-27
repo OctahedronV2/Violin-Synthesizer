@@ -121,7 +121,7 @@ private:
     double logF0 = 0.0, targetLogF0 = 0.0, glideCoeff = 0.0;
     double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;
-    double pressure = 0.5, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
+    double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0;
     std::uint32_t random = 1;

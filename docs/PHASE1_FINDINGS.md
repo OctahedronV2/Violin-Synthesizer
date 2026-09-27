@@ -127,6 +127,8 @@ Open strings, β = 0.1, v_bow = 0.2 m/s. Force is given as a fraction of Schelle
 | A | 0.197 | 1.58 | 0.09 | 0.87 |
 | E | 0.180 | 1.44 | 0.11 | 0.87 |
 
+**Update:** the plugin now caps the G, D and E windows lower, where the tone is still clean after the attack (see [BOW_NOISE.md](BOW_NOISE.md)).
+
 The lower limit scales with Z² and F_max only with Z, so the heavy G string has a narrower window that starts higher. A single force curve for all strings would make low notes scratch or fail to speak. At 0.3·F_max, G3 took 1.4 s to reach Helmholtz motion; at 0.5·F_max it took 0.1 s.
 
 ### 2.7 Body

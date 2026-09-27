@@ -203,8 +203,10 @@ void Violin::render (float* out, int numSamples)
     {
         time += dt;
 
-        // Automatic bow change when the hair runs out: speed dips, the bow
-        // turns at the slowest point, then speeds up again.
+        // Automatic bow change when the hair runs out: a quick turn in which
+        // the speed passes smoothly through zero instead of jumping direction.
+        // The force follows the speed, so the string is not jolted and keeps
+        // ringing through the turn.
         context.bowChangeGain = 1.0;
         if (bowChangePhase >= 0.0)
         {
@@ -215,7 +217,7 @@ void Violin::render (float* out, int numSamples)
             if (bowChangePhase >= 1.0)
                 bowChangePhase = -1.0;
             else
-                context.bowChangeGain = 1.0 - 0.85 * std::sin (std::numbers::pi * bowChangePhase);
+                context.bowChangeGain = std::abs (std::cos (std::numbers::pi * bowChangePhase));
         }
         context.direction = direction;
 
