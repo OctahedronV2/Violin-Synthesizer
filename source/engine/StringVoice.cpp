@@ -21,7 +21,7 @@ constexpr double detacheMaxAttack = 0.04;
 constexpr double staccatoAttack = 0.012;
 constexpr double staccatoStroke = 0.11; // bow moving at full speed
 constexpr double staccatoStop = 0.035; // bow decelerating on the string
-constexpr double staccatoBite = 0.9; // extra force at the onset ...
+constexpr double staccatoBite = 0.3; // extra force at the onset ...
 constexpr double staccatoBiteSeconds = 0.02; // ... decaying with this time constant
 constexpr double spiccatoContact = 0.06; // bow on the string per bounce, at full dynamics
 constexpr double tremoloRateHz = 13.0; // strokes per second
@@ -65,6 +65,7 @@ void StringVoice::reset()
     vibratoPhase = 0.0;
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
+    forceFraction = 0.48;
     lastSpeed = 0.0;
     peakLevel = 0.0;
     betaFloor = std::max (0.02, 1.2 * string.minBeta (midiToHz (spec->openMidiNote + 14)));
@@ -352,27 +353,38 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         {
             const auto target = context.dynamicsOverride >= 0.0 ? context.dynamicsOverride : dynamicsTarget;
             dynamics = target + dynamicsCoeff * (dynamics - target);
-            auto pressureTarget = context.pressureOverride >= 0.0 ? context.pressureOverride : settings.bowPressure;
+            // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
+            // (or CC1) across the string's clean window, unless the articulation
+            // fixes it. Articulations set the fraction itself, so they sound the
+            // same on every string.
+            const auto setting = context.pressureOverride >= 0.0 ? context.pressureOverride : settings.bowPressure;
+            auto fractionTarget = spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * setting;
             auto speedScale = 1.0;
             switch (noteArticulation)
             {
                 case Articulation::sulPonticello:
                     // Light bow near the bridge: weak fundamental, strong upper partials.
-                    pressureTarget = std::min (pressureTarget, 0.15);
+                    fractionTarget = std::min (fractionTarget, 0.21);
                     break;
                 case Articulation::sulTasto:
                     // Over the fingerboard: slower, firmer bow for a steady, soft tone.
-                    pressureTarget = std::max (pressureTarget, 0.5);
+                    fractionTarget = std::max (fractionTarget, 0.48);
                     speedScale = 0.85;
                     break;
                 case Articulation::harmonics:
-                    pressureTarget = std::min (pressureTarget, 0.2);
+                    fractionTarget = std::min (fractionTarget, 0.25);
                     speedScale = 0.9;
                     break;
                 default:
                     break;
             }
-            pressure = pressureTarget + smoothingCoeff * (pressure - pressureTarget);
+            // A short stroke lands with its weight already set; smoothing from the
+            // previous note would give it that note's weight for its first 20 ms.
+            const bool shortStroke
+                = noteArticulation == Articulation::staccato || noteArticulation == Articulation::spiccato;
+            if (shortStroke && strokeSeconds <= dt)
+                forceFraction = fractionTarget;
+            forceFraction = fractionTarget + smoothingCoeff * (forceFraction - fractionTarget);
 
             // Speed from dynamics; force follows speed within the string's playable window.
             const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * std::pow (dynamics, 1.5)) * speedScale
@@ -385,10 +397,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             {
                 case Articulation::staccato:
                 {
-                    // Bitten onset, then the bow stops on the string with the force kept.
+                    // Bitten onset, then the bow stops on the string. The weight eases
+                    // with the speed: at full weight on a slowing bow the string crunches.
                     forceGain = 1.0 + staccatoBite * std::exp (-strokeSeconds / staccatoBiteSeconds);
                     const auto stopping = (strokeSeconds - stopAt) / staccatoStop;
-                    speed *= stopping <= 0.0 ? 1.0 : 0.5 + 0.5 * std::cos (std::numbers::pi * std::min (stopping, 1.0));
+                    const auto slowing
+                        = stopping <= 0.0 ? 1.0 : 0.5 + 0.5 * std::cos (std::numbers::pi * std::min (stopping, 1.0));
+                    speed *= slowing;
+                    forceSpeed *= slowing;
                     if (stopping >= 1.0)
                     {
                         setDamping (Damping::damped);
@@ -431,8 +447,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             }
 
             const auto fMax = 2.0 * friction.impedance * forceSpeed / (beta * (friction.muS - friction.muD));
-            force
-                = forceGain * fMax * (spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * pressure);
+            force = forceGain * fMax * forceFraction;
         }
     }
 

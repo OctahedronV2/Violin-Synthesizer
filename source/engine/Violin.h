@@ -37,7 +37,7 @@ class Violin
 public:
     static constexpr int numStrings = StringAllocator::numStrings;
     static constexpr double bowLengthMetres = 0.62; // usable bow hair
-    static constexpr double bowChangeSeconds = 0.08;
+    static constexpr double bowChangeSeconds = 0.04;
 
     void prepare (double internalSampleRate);
     void reset();

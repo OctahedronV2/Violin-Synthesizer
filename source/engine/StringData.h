@@ -8,8 +8,11 @@ namespace violinsynth::engine
 // The four violin strings. Impedances come from typical tensions and a
 // 328 mm vibrating length (research/violin_model/strings.py). The force
 // window is the range of bow force, as a fraction of Schelleng's F_max, that
-// gave Helmholtz motion on the open string at beta = 0.1
-// (docs/PHASE1_FINDINGS.md, section 2.6).
+// the Bow Pressure setting spans. It starts where Helmholtz motion begins on
+// the open string at beta = 0.1 (docs/PHASE1_FINDINGS.md, section 2.6) and
+// ends where the tone is still clean after the attack: above that the model
+// scratches long before a real string would, most on the heavy G string and
+// the thin E string (docs/BOW_NOISE.md).
 struct StringSpec
 {
     const char* name;
@@ -20,10 +23,10 @@ struct StringSpec
 };
 
 inline constexpr std::array<StringSpec, 4> strings { {
-    { "G", 55, 0.350, 0.24, 0.74 },
-    { "D", 62, 0.234, 0.13, 0.87 },
+    { "G", 55, 0.350, 0.24, 0.44 },
+    { "D", 62, 0.234, 0.13, 0.55 },
     { "A", 69, 0.197, 0.09, 0.87 },
-    { "E", 76, 0.180, 0.11, 0.87 },
+    { "E", 76, 0.180, 0.11, 0.36 },
 } };
 
 // Highest string whose open pitch is at or below the note (the usual choice).
