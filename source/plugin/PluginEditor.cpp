@@ -17,15 +17,20 @@ constexpr int headerHeight = 64;
 constexpr int keyboardHeight = 88;
 constexpr int creditsHeight = 18;
 
-// Bottom-row panels are built from two bands of equal height. Knobs sit in
-// fixed-width cells so they are the same size in every panel, and each panel
-// leaves room for another knob per row and another line of options.
+// Knobs in the bottom row sit in fixed-width cells, and each panel leaves
+// room for another knob per row and another line of options.
 constexpr int knobCellWidth = 84;
-constexpr int bandGap = 6;
+constexpr int rowGap = 6;
 constexpr int choiceWidth = 130;
 constexpr int toggleColumnWidth = 140;
 constexpr int optionGap = 14;
-constexpr int optionHeight = 46; // a choice's label and box, or two stacked toggles
+constexpr int optionLabelHeight = 18;
+constexpr int optionHeight = optionLabelHeight + 28; // a drop-down's label and box
+constexpr int optionLineGap = 8;
+constexpr int toggleHeight = 22;
+
+// Every knob in the editor: label, dial and value box.
+constexpr int knobHeight = 18 + 58 + 18;
 } // namespace
 
 //==============================================================================
@@ -197,10 +202,9 @@ public:
                     buttonHeight);
         }
 
-        // Bottom row: pitch, play, body and output. Each panel has an upper and a
-        // lower band. Pitch puts vibrato above glide and bend; Play and Body put
-        // their options (drop-downs and switches) above their knobs, so all
-        // knob rows line up across the editor.
+        // Bottom row: pitch, play, body and output. Pitch puts vibrato above
+        // glide and bend; Play and Body put their options (drop-downs and
+        // switches) above their knobs. Each panel's content is centred in it.
         {
             auto pitch = addPanel ("Pitch", bottom.removeFromLeft (3 * knobCellWidth + 24));
             bottom.removeFromLeft (gap);
@@ -208,16 +212,12 @@ public:
             bottom.removeFromLeft (gap);
             auto body = addPanel ("Body & Output", bottom);
 
-            const auto bandHeight = (pitch.getHeight() - bandGap) / 2;
+            const auto rowHeight = (pitch.getHeight() - rowGap) / 2;
+            layoutKnobRow ({ pitchKnobs.begin(), pitchKnobs.begin() + 3 }, pitch.removeFromTop (rowHeight));
+            layoutKnobRow ({ pitchKnobs.begin() + 3, pitchKnobs.end() }, pitch.removeFromBottom (rowHeight));
 
-            layoutKnobRow ({ pitchKnobs.begin(), pitchKnobs.begin() + 3 }, pitch.removeFromTop (bandHeight));
-            layoutKnobRow ({ pitchKnobs.begin() + 3, pitchKnobs.end() }, pitch.removeFromBottom (bandHeight));
-
-            layoutOptions (playChoices, playToggles, play.removeFromTop (bandHeight));
-            layoutKnobRow (playKnobs, play.removeFromBottom (bandHeight));
-
-            layoutOptions (bodyChoices, {}, body.removeFromTop (bandHeight));
-            layoutKnobRow (bodyKnobs, body.removeFromBottom (bandHeight));
+            layoutOptionsAndKnobs (playChoices, playToggles, playKnobs, play);
+            layoutOptionsAndKnobs (bodyChoices, {}, bodyKnobs, body);
         }
     }
 
@@ -314,10 +314,27 @@ private:
         return bounds.reduced (12, 8).withTrimmedTop (titleHeight - 6);
     }
 
+    // A knob with its label above and value below, centred in the area.
     static void layoutKnob (Knob& k, juce::Rectangle<int> area)
     {
+        area = area.withSizeKeepingCentre (area.getWidth(), juce::jmin (area.getHeight(), knobHeight));
         k.label.setBounds (area.removeFromTop (18));
         k.slider.setBounds (area.reduced (2, 0));
+    }
+
+    // Options above a knob row, centred together in the area.
+    static void layoutOptionsAndKnobs (const std::vector<Choice*>& choiceList,
+                                       const std::vector<Toggle*>& toggleList,
+                                       const std::vector<Knob*>& knobRow,
+                                       juce::Rectangle<int> area)
+    {
+        constexpr int spacing = 18;
+        const auto optionsHeight = layoutOptions (choiceList, toggleList, area); // measures first
+        auto block = area.withSizeKeepingCentre (area.getWidth(),
+                                                 juce::jmin (area.getHeight(), optionsHeight + spacing + knobHeight));
+        layoutOptions (choiceList, toggleList, block.removeFromTop (optionsHeight));
+        block.removeFromTop (spacing);
+        layoutKnobRow (knobRow, block);
     }
 
     // A centred row of fixed-width knob cells.
@@ -342,27 +359,32 @@ private:
         }
     }
 
-    // Drop-downs side by side, then the switches stacked in pairs, centred in
-    // the area. Items that do not fit on one line wrap onto the next.
-    static void layoutOptions (const std::vector<Choice*>& choiceList,
-                               const std::vector<Toggle*>& toggleList,
-                               juce::Rectangle<int> area)
+    // Drop-downs side by side, then the switches stacked in pairs beside
+    // them, centred across the top of the area. Items that do not fit on one
+    // line wrap onto the next. Returns the height used.
+    static int layoutOptions (const std::vector<Choice*>& choiceList,
+                              const std::vector<Toggle*>& toggleList,
+                              juce::Rectangle<int> area)
     {
         std::vector<std::pair<int, std::function<void (juce::Rectangle<int>)>>> items;
         for (auto* c : choiceList)
             items.emplace_back (choiceWidth,
                                 [c] (juce::Rectangle<int> r)
                                 {
-                                    c->label.setBounds (r.removeFromTop (18));
-                                    c->box.setBounds (r.removeFromTop (28));
+                                    c->label.setBounds (r.removeFromTop (optionLabelHeight));
+                                    c->box.setBounds (r);
                                 });
         for (std::size_t i = 0; i < toggleList.size(); i += 2)
             items.emplace_back (toggleColumnWidth,
                                 [&toggleList, i] (juce::Rectangle<int> r)
                                 {
-                                    const auto rowHeight = r.getHeight() / 2;
-                                    for (auto t = i; t < juce::jmin (i + 2, toggleList.size()); ++t)
-                                        toggleList[t]->button.setBounds (r.removeFromTop (rowHeight));
+                                    // Centred on the drop-downs' boxes rather than their labels.
+                                    const auto count
+                                        = static_cast<int> (juce::jmin (std::size_t { 2 }, toggleList.size() - i));
+                                    auto column = r.withTrimmedTop (optionLabelHeight)
+                                                      .withSizeKeepingCentre (r.getWidth(), count * toggleHeight);
+                                    for (auto t = i; t < i + static_cast<std::size_t> (count); ++t)
+                                        toggleList[t]->button.setBounds (column.removeFromTop (toggleHeight));
                                 });
 
         std::vector<std::vector<std::size_t>> lines (1);
@@ -380,21 +402,21 @@ private:
             lineWidth += needed;
         }
 
-        const auto numLines = static_cast<int> (lines.size());
-        auto block = area.withSizeKeepingCentre (area.getWidth(), numLines * optionHeight + (numLines - 1) * 8);
         for (const auto& line : lines)
         {
             int width = -optionGap;
             for (auto i : line)
                 width += items[i].first + optionGap;
-            auto row = block.removeFromTop (optionHeight).withSizeKeepingCentre (width, optionHeight);
-            block.removeFromTop (8);
+            auto row = area.removeFromTop (optionHeight).withSizeKeepingCentre (width, optionHeight);
+            area.removeFromTop (optionLineGap);
             for (auto i : line)
             {
                 items[i].second (row.removeFromLeft (items[i].first));
                 row.removeFromLeft (optionGap);
             }
         }
+        const auto numLines = static_cast<int> (lines.size());
+        return numLines * optionHeight + (numLines - 1) * optionLineGap;
     }
 
     void timerCallback() override
