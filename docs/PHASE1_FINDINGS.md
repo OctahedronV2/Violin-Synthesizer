@@ -13,7 +13,7 @@ The Phase 1 "done when" criteria are met:
 | Criterion | Result |
 |---|---|
 | Stable Helmholtz motion inside the Schelleng playable range | ✅ Textbook Helmholtz motion. Its upper force limit matches Schelleng's F_max. |
-| Convincing sustained bowed tone and pizzicato rendered offline | ✅ 10 reference renders in `research/renders/`. **These still need a listening check.** |
+| Convincing sustained bowed tone and pizzicato rendered offline | ✅ 10 reference renders in `research/renders/`. A listening check confirmed authentic bowing and good pizzicato ([§3.1](#31-listening-check)). |
 | Parameter ranges documented | ✅ See [§4](#4-parameters-for-the-c-port). |
 
 Key decisions for the C++ port that came out of this phase:
@@ -22,6 +22,8 @@ Key decisions for the C++ port that came out of this phase:
 2. **Specify string losses physically**, as two T60 decay times, never as raw filter coefficients. Otherwise the string sounds different at every sample rate.
 3. **Tune bowed notes with a harmonic-weighted loss-filter delay**, and plucked notes with the delay at f0.
 4. **Map bow force per string.** The G string needs about 2.5× more of its F_max to speak than the A string.
+5. **Make bow force follow bow speed on attacks.** F_max is proportional to speed, so full force on a slow bow gives a crunchy start ([§3.1](#31-listening-check)).
+6. **Keep bow force below F_max by default.** Past it, this friction model collapses into noise instead of a pitched crunch ([§3.1](#31-listening-check)).
 
 ---
 
@@ -154,10 +156,28 @@ In `research/renders/`: 48 kHz, 24-bit mono, normalised to −1 dBFS, and passed
 | `G3_mf_vibrato.wav` | Low G string (0.5·F_max, see §2.6) |
 | `E5_f_vibrato.wav` | Forte on the E string (faster bow) |
 | `A4_p_sul_tasto.wav` | β = 0.2, slow bow |
-| `A4_f_sul_ponticello.wav` | β = 0.04 at 0.7·F_max: bright, and 6 cents flat from heavy force |
+| `A4_f_sul_ponticello.wav` | β = 0.04 at 0.7·F_max: bright, and 6 cents flat from heavy force. Speaks in 12 ms. |
 | `A4_too_little_force.wav` | Multiple slipping ("surface sound") |
 | `A4_too_much_force.wav` | Raucous, crushed tone |
 | `A4_pizzicato.wav`, `G3_pizzicato.wav` | Velocity-pulse pluck |
+
+### 3.1 Listening check
+
+Heard on a phone, with the renders converted to 16-bit:
+
+| Render | Verdict | Follow-up |
+|---|---|---|
+| 01–05 bowed notes | Sound like authentic bowing | — |
+| 06 sul ponticello | Distortion at the start | **Fixed** (see below) |
+| 07–08 pizzicato | Sound good | — |
+| 09 too little force | Fine, but quiet at first and then swells | Expected |
+| 10 too much force | Almost white noise | **Open model limitation** |
+
+**06, crunchy attack (fixed).** The bow envelope applied force faster than bow speed. Because F_max = 2Z·v_bow / (β(μs−μd)) is proportional to speed, the start of the note was far above F_max. The motion stayed aperiodic, with periodicity 0.4–0.7, for the first 0.45 s. Near the bridge the playable window is narrow, so this was most audible there. Force now follows the speed envelope, keeping F at a constant fraction of F_max(v_bow(t)). Ponticello then reaches Helmholtz motion in 12 ms, and the other bowed notes in 0.16–0.20 s.
+
+**09, slow swell (expected).** With too little force the bow can't hold the string for a full Helmholtz cycle, so energy builds up gradually through repeated partial slips.
+
+**10, overpressure turns to noise (open).** Periodicity of the steady tone against force, as a fraction of F_max: 0.94 at 0.9, 0.81 at 1.0, 0.47 at 1.1, 0.27 at 1.2, and 0.10 at 1.6. A real violin bowed too hard crunches but keeps a recognisable pitch; this model loses it almost completely just past F_max. Until overpressure is modelled properly (see §5), the plugin should cap force a little below F_max, around 0.9, and treat "crunch" as a separate, controlled effect.
 
 `renders/measurements.json` records each render's settings, motion label, pitch error, RMS, spectral centroid and Helmholtz onset time. **Phase 2 regression tests** should run the C++ engine with the same settings and compare against these measurements: same motion label, pitch within 0.5 cents, centroid within 5%, onset within 20 ms. Bit-exact comparison won't work because of the floating-point and implementation differences.
 
@@ -176,6 +196,8 @@ In `research/renders/`: 48 kHz, 24-bit mono, normalised to −1 dBFS, and passed
 | Bow position β | max(0.02, 1.2·β_min(f0)) … 0.3 | β_min = (2 + τ)/P |
 | Bow velocity | 0.05 – 1.0 m/s | Main dynamics control |
 | Bow force | Normalised 0–1 mapped into each string's window (§2.6) | Relative to F_max(β, v_bow, Z) |
+| Bow force envelope | F = fraction · F_max(β, v_bow(t), Z) | Force follows speed through attack and release |
+| Bow force ceiling | ≈ 0.9 · F_max until overpressure is modelled | Above F_max the model turns to noise (§3.1) |
 | Pizzicato | 0.5 ms raised-cosine velocity pulse, T60 0.8 s / 0.15 s | Placeholder excitation |
 
 ---
@@ -187,7 +209,7 @@ In `research/renders/`: 48 kHz, 24-bit mono, normalised to −1 dBFS, and passed
 - **Not yet modelled:** string stiffness (dispersion), torsional waves, finite bow width and bow-hair noise. Torsion in particular is known to lower the minimum bow force and to stabilise Helmholtz motion.
 - **Top-octave tuning:** a residual 2–3 cents at C7–E7, even at 176 kHz.
 - **The analysis thresholds** separating Helmholtz, multiple slip and raucous motion are practical choices, which affect where the diagram's boundaries fall by about one grid step.
-- **Needs a listening check:** the renders have been verified by measurement but not yet by ear.
+- **Overpressure sounds like noise, not crunch** (§3.1). A real bow pressed too hard gives a gritty but still pitched sound. Likely missing ingredients: bow-hair compliance, finite bow width, torsional waves, or a friction model with thermal memory in place of the hyperbolic curve.
 
 ## References
 

@@ -57,8 +57,11 @@ def render_bowed_note(midi_note: float, stroke: BowStroke, params: BowedStringPa
     f_max = 2.0 * params.impedance * stroke.bow_speed / (beta * (params.mu_s - params.mu_d))
     env = _envelope(n, params.fs, stroke.attack_s, stroke.release_s)
     v_bow = stroke.bow_speed * env
-    # Force leads the speed slightly on the attack, as players "set" the bow.
-    f_bow = stroke.force_fraction * f_max * np.clip(env * 1.5, 0.0, 1.0)
+    # F_max is proportional to bow speed, so force must follow the speed
+    # envelope. Applying full force while the bow is still slow overshoots
+    # F_max and gives a crunchy, aperiodic attack (most audible near the
+    # bridge, where the playable window is narrow).
+    f_bow = stroke.force_fraction * f_max * env
 
     render = simulate(vibrato_f0(f0, n, params.fs, stroke), beta, v_bow, f_bow, n, params)
     audio = BodyModel().process(render.bridge_force, params.fs)
