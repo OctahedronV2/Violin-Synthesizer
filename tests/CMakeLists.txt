@@ -1,5 +1,6 @@
 set(VIOLINSYNTH_TEST_SOURCES
-    PluginProcessorTests.cpp)
+    PluginProcessorTests.cpp
+    StringDspTests.cpp)
 
 add_executable(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})
 
@@ -10,7 +11,8 @@ target_link_libraries(ViolinSynthTests PRIVATE ViolinSynth Catch2::Catch2WithMai
 target_include_directories(ViolinSynthTests SYSTEM PRIVATE
     $<TARGET_PROPERTY:ViolinSynth,INCLUDE_DIRECTORIES>)
 target_compile_definitions(ViolinSynthTests PRIVATE
-    $<TARGET_PROPERTY:ViolinSynth,COMPILE_DEFINITIONS>)
+    $<TARGET_PROPERTY:ViolinSynth,COMPILE_DEFINITIONS>
+    VIOLINSYNTH_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 violinsynth_set_warnings(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})
 

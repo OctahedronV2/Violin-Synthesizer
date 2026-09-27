@@ -1,4 +1,5 @@
 set(VIOLINSYNTH_SOURCES
+    dsp/BowedString.cpp
     plugin/Parameters.cpp
     plugin/PlaceholderVoice.cpp
     plugin/PluginEditor.cpp
