@@ -14,10 +14,10 @@ See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis appro
 
 ### 1. Get a build
 
-The **Build** workflow on GitHub Actions builds and tests the plugin. To keep metered Actions minutes low, it builds automatically on **Linux only** (every push). Windows and macOS (universal: Apple silicon and Intel) are built for release tags (`v*`) or on request:
+Every push runs the **Build** workflow on GitHub Actions for Linux, macOS (universal: Apple silicon and Intel) and Windows. The repository is public, so this is free.
 
-1. Open the repository's **Actions** tab and choose **Build**. To get Windows or macOS builds, click **Run workflow**, pick your branch, set **platforms** to `all`, and run it. Windows and macOS minutes cost several times more than Linux.
-2. When the run is green, download `ViolinSynth-Windows`, `ViolinSynth-macOS` or `ViolinSynth-Linux` under **Artifacts**.
+1. Open the repository's **Actions** tab, then the latest green **Build** run for your branch.
+2. Under **Artifacts**, download `ViolinSynth-Windows`, `ViolinSynth-macOS` or `ViolinSynth-Linux`.
 3. Unzip it. Inside are one zip per format (`ViolinSynth-VST3-…zip`, `ViolinSynth-AU-…zip`, `ViolinSynth-Standalone-…zip`). Unzip the ones you need.
 
 You can also build locally for free (see [Building from source](#building-from-source)). On Windows that needs Visual Studio 2022 with the "Desktop development with C++" workload, plus CMake.
@@ -112,7 +112,7 @@ Useful options:
 
 ### Validating
 
-CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 of every platform it builds, and `auval -strict` on the AU when it builds macOS. To run it locally:
+CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 on all platforms, and `auval -strict` on the AU on macOS. To run it locally:
 
 ```sh
 pluginval --strictness-level 10 --validate "build/ViolinSynth_artefacts/Release/VST3/Violin Synthesizer.vst3"
@@ -151,4 +151,20 @@ The measured violin bodies come from the [CNSM Dataset](https://doi.org/10.5281/
 
 ## Licensing
 
-The project uses JUCE, which is dual-licensed under AGPLv3 and a commercial licence. A licensing decision for this project is still open (see the development plan); until then, builds are for private testing only.
+Violin Synthesizer is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License, version 3** (AGPLv3), as published by the Free Software Foundation. See [LICENSE](LICENSE).
+
+It is distributed in the hope that it will be useful, but **without any warranty**; without even the implied warranty of merchantability or fitness for a particular purpose. See the licence for details.
+
+Copyright © 2026 Jake Farr (OctahedronV2).
+
+Third-party components and data:
+
+| Component | Licence | Use |
+|---|---|---|
+| [JUCE](https://juce.com) | AGPLv3 (this project's choice of JUCE's dual licence) | Plugin framework, fetched at build time |
+| Steinberg VST3 SDK (bundled with JUCE) | MIT | VST3 format |
+| [Catch2](https://github.com/catchorg/Catch2) | Boost Software License 1.0 | Tests only |
+| [CNSM Dataset](https://doi.org/10.5281/zenodo.18696786) (Pauget Ballesteros 2026) | CC BY 4.0 | Measured bodies (Levaggi, Klimke, Stoppani) |
+| [University of Iowa Musical Instrument Samples](https://theremin.music.uiowa.edu/MIS.html) | Free to use "for any projects, without restrictions" | Measured body (Tambovsky) |
+
+Details of the data and how it was processed are in [research/data/SOURCES.md](research/data/SOURCES.md).
