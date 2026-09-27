@@ -4,7 +4,9 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phases 0–5 done.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md) and [docs/PHASE5.md](docs/PHASE5.md). The full UI and presets come in Phase 6.
+> **Status: Phases 0–6 implemented.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. It comes with 27 level-matched factory presets and a resizable editor. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md), [docs/PHASE5.md](docs/PHASE5.md) and [docs/PHASE6.md](docs/PHASE6.md).
+
+![The editor](docs/editor.png)
 
 ---
 
@@ -50,6 +52,7 @@ In **FL Studio**:
 
 Things to try:
 
+- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. They also appear in FL Studio's own preset menu. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Violin Synthesizer/Presets`.
 - **Play expressively:**
   - Velocity sets how hard the bow is drawn.
   - Overlapping notes glide legato; separate notes get a new bow stroke.
@@ -62,10 +65,10 @@ Things to try:
 - **Articulations:** pick one under **Articulation**, or use keyswitches. MIDI notes 24–33 (C2–A2 in FL Studio's note names) select legato, détaché, staccato, spiccato, tremolo, pizzicato, harmonics, sul ponticello, sul tasto and con sordino. Drag [docs/demo/articulations.mid](docs/demo/articulations.mid) onto the plugin's track to hear them all. Details are in [docs/PHASE5.md](docs/PHASE5.md).
 - **Change the violin:** under **Body → Violin**, choose one of four measured instruments. **Quality → Light** uses less CPU.
 - **Shape the sound:**
-  - **Bow → Position** moves the bow between the bridge (bright, glassy) and the fingerboard (soft).
-  - **Pressure** changes the grip on the string.
+  - Drag the **bow pad**: left/right moves the bow between the bridge (bright, glassy) and the fingerboard (soft), and up/down changes its pressure on the string.
   - **Mute** adds a practice-style sordino.
-- **Check save and restore:** save the project, reopen it, and the settings come back.
+- **Resize the window** from its corner; the whole editor scales.
+- **Check save and restore:** save the project, reopen it, and the settings and preset name come back.
 
 The **Standalone** app is the quickest way to hear it without a DAW: open it, pick an audio output under *Options → Audio/MIDI Settings*, and play the on-screen keyboard.
 

@@ -77,6 +77,7 @@ public:
     Articulation articulation() const { return noteArticulation; }
     double currentBowSpeed() const { return lastSpeed; }
     double currentF0() const { return lastF0; }
+    double level() const { return peakLevel; } // decaying peak of the bridge force, for meters
 
 private:
     enum class Stage
@@ -125,7 +126,7 @@ private:
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0;
     std::uint32_t random = 1;
     NoteExpression expression;
-    double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0;
+    double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0, peakLevel = 0.0, peakDecay = 0.0;
     int controlCounter = 0;
 
     // Articulation state

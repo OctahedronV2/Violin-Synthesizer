@@ -45,10 +45,42 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     keyboardState.processNextMidiBuffer (midiMessages, 0, buffer.getNumSamples(), true);
     engine.setSettings (reader.read());
     engine.process (buffer, midiMessages);
-    activeArticulation.store (static_cast<int> (engine.getViolin().currentArticulation()));
+    const auto& violin = engine.getViolin();
+    activeArticulation.store (static_cast<int> (violin.currentArticulation()));
+    for (int s = 0; s < engine::Violin::numStrings; ++s)
+    {
+        auto& state = stringStates[static_cast<std::size_t> (s)];
+        state.note.store (violin.noteOnString (s));
+        state.level.store (static_cast<float> (violin.stringLevel (s)));
+        state.bowSpeed.store (static_cast<float> (violin.stringBowSpeed (s)));
+    }
 
     // This is an instrument: consume incoming MIDI rather than echoing it.
     midiMessages.clear();
+}
+
+int ViolinSynthProcessor::getNumPrograms()
+{
+    return presets.getNumFactoryPresets();
+}
+
+int ViolinSynthProcessor::getCurrentProgram()
+{
+    const auto index = presets.getCurrentIndex();
+    return index >= 0 && index < presets.getNumFactoryPresets() ? index : 0;
+}
+
+void ViolinSynthProcessor::setCurrentProgram (int index)
+{
+    if (index >= 0 && index < presets.getNumFactoryPresets())
+        presets.load (index);
+}
+
+const juce::String ViolinSynthProcessor::getProgramName (int index)
+{
+    return index >= 0 && index < presets.getNumFactoryPresets()
+        ? presets.getPresets()[static_cast<std::size_t> (index)].name
+        : juce::String();
 }
 
 juce::AudioProcessorEditor* ViolinSynthProcessor::createEditor()
@@ -67,7 +99,10 @@ void ViolinSynthProcessor::setStateInformation (const void* data, int sizeInByte
     const auto xml = getXmlFromBinary (data, sizeInBytes);
 
     if (xml != nullptr && xml->hasTagName (parameters.state.getType()))
+    {
         parameters.replaceState (juce::ValueTree::fromXml (*xml));
+        presets.restoreFromState();
+    }
 }
 } // namespace violinsynth
 

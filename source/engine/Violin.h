@@ -49,6 +49,8 @@ public:
     // For tests and diagnostics.
     int noteOnString (int string) const { return allocator.noteOnString (string); }
     double stringF0 (int string) const { return voices[static_cast<std::size_t> (string)].currentF0(); }
+    double stringLevel (int string) const { return voices[static_cast<std::size_t> (string)].level(); }
+    double stringBowSpeed (int string) const { return voices[static_cast<std::size_t> (string)].currentBowSpeed(); }
     int bowChangeCount() const { return bowChanges; }
     std::array<bool, numStrings> openStrings() const
     {

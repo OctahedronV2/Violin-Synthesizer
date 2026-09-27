@@ -7,9 +7,13 @@ set(VIOLINSYNTH_SOURCES
     engine/StringVoice.cpp
     engine/SympatheticStrings.cpp
     engine/Violin.cpp
+    plugin/EditorComponents.cpp
+    plugin/FactoryPresets.cpp
+    plugin/LookAndFeel.cpp
     plugin/Parameters.cpp
     plugin/PluginEditor.cpp
-    plugin/PluginProcessor.cpp)
+    plugin/PluginProcessor.cpp
+    plugin/PresetManager.cpp)
 
 target_sources(ViolinSynth PRIVATE ${VIOLINSYNTH_SOURCES})
 target_include_directories(ViolinSynth PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

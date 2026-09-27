@@ -47,6 +47,7 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
 
     smoothingCoeff = onePoleCoeff (smoothingSeconds, fs);
     noiseCoeff = std::exp (-2.0 * std::numbers::pi * noiseBandwidthHz * controlInterval / fs);
+    peakDecay = onePoleCoeff (0.3, fs);
     random = 0x9e3779b9u * static_cast<std::uint32_t> (stringIndex + 1);
     reset();
 }
@@ -65,6 +66,7 @@ void StringVoice::reset()
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
     lastSpeed = 0.0;
+    peakLevel = 0.0;
     betaFloor = std::max (0.02, 1.2 * string.minBeta (midiToHz (spec->openMidiNote + 14)));
 }
 
@@ -270,6 +272,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     if (stage == Stage::open)
     {
         lastSpeed = 0.0;
+        peakLevel *= peakDecay;
         return 0.0;
     }
 
@@ -436,6 +439,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     const auto y = string.process (f0, b, context.direction * speed, force, excitation);
     lastSpeed = std::abs (speed);
     lastF0 = f0;
+    peakLevel = std::max (std::abs (y), peakLevel * peakDecay);
 
     if (stage == Stage::ringing)
     {
