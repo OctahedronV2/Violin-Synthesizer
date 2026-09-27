@@ -1,0 +1,94 @@
+{
+  "notes": 46,
+  "takes": 92,
+  "segments_found": 92,
+  "segment_pitch_error_cents_max": 1200.4638362404723,
+  "observations": 761144,
+  "residual_db": 2.0290274459966593,
+  "rejected_notes": [
+    {
+      "midi": 56,
+      "vibrato": false,
+      "median_misfit_db": 4.939604150321163
+    },
+    {
+      "midi": 57,
+      "vibrato": false,
+      "median_misfit_db": 3.697979779204232
+    },
+    {
+      "midi": 58,
+      "vibrato": false,
+      "median_misfit_db": 3.4860791639193707
+    },
+    {
+      "midi": 59,
+      "vibrato": true,
+      "median_misfit_db": 3.5179841412518247
+    },
+    {
+      "midi": 62,
+      "vibrato": true,
+      "median_misfit_db": 3.7232533358638875
+    },
+    {
+      "midi": 64,
+      "vibrato": false,
+      "median_misfit_db": 3.897408426756826
+    },
+    {
+      "midi": 64,
+      "vibrato": true,
+      "median_misfit_db": 3.308012478001956
+    },
+    {
+      "midi": 66,
+      "vibrato": false,
+      "median_misfit_db": 3.523701284210409
+    },
+    {
+      "midi": 69,
+      "vibrato": false,
+      "median_misfit_db": 3.7617898555806235
+    },
+    {
+      "midi": 82,
+      "vibrato": false,
+      "median_misfit_db": 8.709537900377832
+    }
+  ],
+  "estimate_vs_truth": {
+    "rms_db": 1.1173903851599705,
+    "max_abs_db": 4.058801135406478
+  },
+  "estimate_vs_truth_sixth_octave": {
+    "rms_db": 0.6117850669802551,
+    "max_abs_db": 1.7404409726785683
+  },
+  "fitted_modes": 29,
+  "fitted_bank_vs_truth_sixth_octave": {
+    "rms_db": 0.7104269135779538,
+    "max_abs_db": 2.615219821184244
+  },
+  "signature_modes": [
+    {
+      "name": "A0 (Helmholtz air)",
+      "true_hz": 280.8,
+      "fitted_hz": 280.7,
+      "error_pct": -0.03561253561253919
+    },
+    {
+      "name": "B1-",
+      "true_hz": 449.5,
+      "fitted_hz": 449.4,
+      "error_pct": -0.022246941045611646
+    },
+    {
+      "name": "B1+",
+      "true_hz": 572.1,
+      "fitted_hz": 571.1,
+      "error_pct": -0.17479461632581295
+    }
+  ],
+  "fir_taps": 2048
+}
