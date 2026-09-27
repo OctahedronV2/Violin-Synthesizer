@@ -11,3 +11,9 @@
 .DS_Store
 /compile_commands.json
 .cache/
+
+# Python research environment
+research/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

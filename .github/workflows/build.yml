@@ -29,6 +29,24 @@ jobs:
           clang-format-18 --version
           git ls-files '*.h' '*.cpp' | xargs clang-format-18 --dry-run --Werror
 
+  research:
+    name: Research model tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: research
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: research/requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: pytest
+        run: python -m pytest -q
+
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

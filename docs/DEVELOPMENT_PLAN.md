@@ -106,7 +106,7 @@ docs/
 - **Real-time safety:** no allocation, locks or I/O on the audio thread. Delay lines are pre-allocated for the lowest note at the highest supported sample rate. `juce::ScopedNoDenormals` wraps each block.
 - **Sample-rate independence:** every coefficient is recomputed in `prepareToPlay` and derived from physical units (Hz, seconds, m/s, N).
 - **Control-rate and audio-rate split:** gesture parameters are smoothed per sample (`juce::SmoothedValue` or one-pole filters). Expensive coefficient updates, such as the loop filter and body, run at a control rate of about 32 samples.
-- **Oversampling:** the friction nonlinearity runs at 2× (optionally 4×) via `juce::dsp::Oversampling` to reduce aliasing and improve stability at high bow force. This must be switchable and the added latency reported.
+- **Oversampling:** the string and friction junction run at an internal rate of at least 176.4 kHz (4× at 44.1/48 kHz, 2× at 88.2/96 kHz). Phase 1 found that lower rates let stick/slip timing snap to the sample grid and detune the top octave by up to 10 cents (see [PHASE1_FINDINGS.md](PHASE1_FINDINGS.md)). The body model runs at the host rate. The added latency must be reported.
 - **Headroom and safety:** a DC blocker, a soft limiter on the output, and a NaN/Inf guard that resets a voice instead of producing noise.
 
 ---
@@ -184,7 +184,7 @@ Durations assume one developer working part-time and are only indicative.
 - `.clang-format`, `.clang-tidy`, `.editorconfig`, and a README with build instructions.
 - **Done when:** CI is green on all 3 OSes and the empty plugin loads in a DAW.
 
-### Phase 1: DSP research prototype (2 weeks)
+### Phase 1: DSP research prototype (2 weeks) — done, see [PHASE1_FINDINGS.md](PHASE1_FINDINGS.md)
 - Python notebook with a waveguide bowed string and friction junction. Check that stable Helmholtz motion appears inside the Schelleng diagram's playable force range.
 - Extract or choose body mode tables from published measurements and design the modal bank.
 - Produce reference renders (WAV) and measurements for later regression tests.
