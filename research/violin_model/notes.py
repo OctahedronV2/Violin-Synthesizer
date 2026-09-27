@@ -102,3 +102,54 @@ def stroke_for_dynamic(dynamic: str) -> BowStroke:
     """Simple dynamic presets: louder = faster bow, same relative force."""
     speeds = {"p": 0.1, "mf": 0.2, "f": 0.4}
     return BowStroke(bow_speed=speeds[dynamic])
+
+
+def render_detache_phrase(midi_notes, note_s: float = 0.5, bow_speed: float = 0.3, force_fraction: float = 0.45,
+                          beta: float = 0.11, vibrato_rate_hz: float = 5.5, vibrato_depth_cents: float = 20.0,
+                          params: BowedStringParams | None = None):
+    """A détaché phrase on one string: a new bow stroke (direction change) for each note.
+
+    Returns (bridge_force, string_render, params). The string impedance is that
+    of the string playing the lowest note, so keep the notes on one string.
+    """
+    spec = string_for_note(min(midi_notes))
+    base = params or BowedStringParams()
+    params = BowedStringParams(**{**base.__dict__, "impedance": spec.impedance})
+    fs = params.fs
+    per_note = int(note_s * fs)
+    n = per_note * len(midi_notes) + int(0.3 * fs)
+    t = np.arange(n) / fs
+
+    # Pitch: steps between notes with a 15 ms finger transition, plus vibrato.
+    f0 = np.full(n, midi_to_hz(midi_notes[-1]))
+    for k, note in enumerate(midi_notes):
+        f0[k * per_note : (k + 1) * per_note] = midi_to_hz(note)
+    glide = max(1, int(0.015 * fs))
+    f0 = np.convolve(np.log(f0), np.ones(glide) / glide, mode="same")
+    f0[: glide] = f0[glide]
+    f0[-glide:] = f0[-glide - 1]
+    vib = vibrato_depth_cents * 0.5 * (np.sin(2 * np.pi * vibrato_rate_hz * t) - 1.0)
+    vib *= np.clip((t % note_s - 0.12) / 0.15, 0.0, 1.0)  # vibrato settles in after each change
+    f0 = np.exp(f0) * 2.0 ** (vib / 1200.0)
+
+    # Bow: alternating direction; speed dips through zero at each change.
+    speed = np.full(n, bow_speed)
+    change = max(1, int(0.03 * fs))
+    for k in range(len(midi_notes) + 1):
+        c = k * per_note
+        lo, hi = max(0, c - change), min(n, c + change)
+        x = (np.arange(lo, hi) - c) / change
+        speed[lo:hi] = np.minimum(speed[lo:hi], bow_speed * np.abs(x))
+    release = int(0.12 * fs)
+    end = per_note * len(midi_notes)
+    speed[end - release : end] *= 0.5 + 0.5 * np.cos(np.pi * np.arange(release) / release)
+    speed[end:] = 0.0
+    direction = np.where((np.arange(n) // per_note) % 2 == 0, 1.0, -1.0)
+    v_bow = direction * speed
+
+    b = max(beta, 1.2 * min_beta(midi_to_hz(max(midi_notes) + 1), params))
+    f_max_per_speed = 2.0 * params.impedance / (b * (params.mu_s - params.mu_d))
+    f_bow = force_fraction * f_max_per_speed * speed
+
+    render = simulate(f0, b, v_bow, f_bow, n, params)
+    return render.bridge_force, render, params

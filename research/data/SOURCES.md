@@ -1,0 +1,26 @@
+# Data sources and attribution
+
+Third-party data used by the research prototype, and the files derived from it. Anything derived from these sources and shipped with the plugin (impulse responses, mode tables) must carry the credits below in the plugin's About screen and manual.
+
+## CNSM Dataset (bridge admittances and recordings)
+
+> Pauget Ballesteros, H. (2026). *CNSM Dataset* (1.0.0) [Data set]. Zenodo. https://doi.org/10.5281/zenodo.18696786
+
+- **Licence:** [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). Commercial use and derived works are allowed with attribution.
+- **Contents used:**
+  - bridge driving-point admittance of three violins (makers Levaggi, Klimke and Stoppani), in two measurement phases;
+  - mono 48 kHz recordings of scales played by several players on the same violins.
+- **Not committed:** the raw data (654 MB). `scripts/fetch_cnsm.py` downloads it to `research/external/cnsm/`, which is git-ignored.
+- **Derived files in this repository:**
+  - `data/body_ir_levaggi_48k.wav`, `data/body_ir_klimke_48k.wav` and `data/body_ir_stoppani_48k.wav`: body impulse responses built from the admittances;
+  - `data/cnsm_radiation_correction.json`: radiation balance estimated from the recordings;
+  - `renders/bodies/*_levaggi.wav`, `*_klimke.wav` and `*_stoppani.wav`: renders through those bodies.
+
+  **Changes made:** measurements averaged per violin and phase, converted to impulse responses, band-limited, resampled to 48 kHz, and combined with a smooth radiation correction.
+
+## University of Iowa Musical Instrument Samples (planned)
+
+> Fritts, L. *University of Iowa Musical Instrument Samples*. https://theremin.music.uiowa.edu/MIS.html
+
+- **Terms:** the site states the recordings "may be downloaded and used for any projects, without restrictions".
+- **Status:** not used yet. They are intended as an anechoic reference for `scripts/estimate_body_from_recordings.py`.

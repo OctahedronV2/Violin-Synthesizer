@@ -137,7 +137,7 @@ The modal bank has:
 - the named low modes (A0 275 Hz, CBR 405 Hz, B1− 460 Hz, A1 480 Hz, B1+ 540 Hz), placed within published ranges;
 - 28 seeded higher modes from 850 Hz to 8 kHz, with a broad bridge hill near 2.5 kHz.
 
-**This is a plausible placeholder, not a measured violin.** It is noticeably sparser and more peaky above 1 kHz than real bridge admittance data. Phase 3 should replace it with measured modes or an impulse response.
+**This is a plausible placeholder, not a measured violin.** It is noticeably sparser and more peaky above 1 kHz than real bridge admittance data. Phase 3 should replace it with measured modes or an impulse response. **Update:** measured bodies from open data are now available; see [BODY_MODELLING.md](BODY_MODELLING.md).
 
 ### 2.8 Performance
 

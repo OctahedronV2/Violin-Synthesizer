@@ -15,10 +15,19 @@ pip install -r requirements.txt
 ## Run
 
 ```sh
-python -m pytest                    # model checks, a few seconds
+python -m pytest                    # model checks (~30 s)
 python scripts/run_phase1.py        # all sweeps, figures and reference renders (~20 s)
 python scripts/run_phase1.py --renders   # reference renders only
+
+# Body from open data (docs/BODY_MODELLING.md)
+python scripts/validate_body_estimation.py         # pipeline check on synthetic data (~1.5 min)
+python scripts/fetch_cnsm.py --recordings          # CNSM dataset, CC BY 4.0 (654 MB download)
+python scripts/radiation_from_cnsm.py              # radiation balance from 84 min of recordings (~6 min)
+python scripts/render_measured_bodies.py           # renders through the measured bodies
+python scripts/estimate_body_from_recordings.py <files> --name <name>   # any other recordings
 ```
+
+Third-party data and attribution: [data/SOURCES.md](data/SOURCES.md).
 
 ## Quick experiment
 
