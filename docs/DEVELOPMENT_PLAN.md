@@ -52,14 +52,14 @@ A plan for building an expressive violin synthesizer as a VST3 plugin (plus AU a
 
 ## 3. Technology stack
 
-- **JUCE 8.x**, included through CMake `FetchContent` or CPM and pinned to a release tag.
+- **JUCE 9.x** (currently 9.0.2), included through CMake `FetchContent` and pinned to a release tag.
 - **C++20** and **CMake ≥ 3.24**, using the `juce_add_plugin` formats `VST3 AU Standalone` (plus optionally `CLAP` via `clap-juce-extensions`).
 - **Tests:** Catch2 v3 for DSP units, JUCE `UnitTest` where it needs plugin context, and `pluginval` in CI.
 - **Prototyping:** Python with NumPy, SciPy and Jupyter under `/research`, for fast iteration on the friction and body models before porting to C++.
 - **CI:** GitHub Actions with a matrix of ubuntu-latest, macos-latest and windows-latest. It builds, runs unit tests, runs pluginval and uploads the build artifacts.
 - **Code quality:** `clang-format`, `clang-tidy` and, on Linux debug builds, the address and undefined-behaviour sanitizers.
 
-**Licensing to decide early:** JUCE 8 is dual-licensed under **AGPLv3** or a commercial license. Pick one before any public release, because it decides whether the source must be open. Also check the current Steinberg VST3 SDK license terms and the AU/Apple requirements.
+**Licensing to decide early:** JUCE 9 is dual-licensed under **AGPLv3** or a commercial license. Pick one before any public release, because it decides whether the source must be open. Also check the current Steinberg VST3 SDK license terms and the AU/Apple requirements.
 
 ---
 
@@ -178,7 +178,7 @@ All of these live in `AudioProcessorValueTreeState` with stable parameter IDs, s
 
 Durations assume one developer working part-time and are only indicative.
 
-### Phase 0: Project foundation (1 week)
+### Phase 0: Project foundation (1 week) — implemented, awaiting DAW check
 - CMake project that fetches JUCE and builds an empty VST3, AU and Standalone plugin.
 - GitHub Actions matrix build, Catch2 test target and pluginval step.
 - `.clang-format`, `.clang-tidy`, `.editorconfig`, and a README with build instructions.
