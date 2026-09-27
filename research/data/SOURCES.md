@@ -34,3 +34,7 @@ Third-party data used by the research prototype, and the files derived from it. 
   - `data/iowa_vs_cnsm.json`: comparison results.
 
   Credit is not required but is good practice.
+
+## Octastra reference data
+
+Data collected for the planned Octastra plugin (a rabāb measurement and body estimates from Freesound recordings) is described, with its licences and credits, in [octastra/SOURCES.md](octastra/SOURCES.md).
