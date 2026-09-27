@@ -4,7 +4,7 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phase 0 (project foundation).** The plugin builds, loads in hosts and passes validation, but it only plays a **placeholder sine tone** with an output-gain control and an on-screen keyboard. It exists to prove that MIDI in, audio out, parameters and state saving all work. The violin model arrives in Phase 2.
+> **Status: Phases 0–3 done.** The plugin plays a physically modelled bowed string (a digital waveguide with a bow–string friction model) through measured violin bodies. It plays one voice at a time, with legato, automatic string choice, vibrato and basic MIDI expression. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md) for how it works and how to play it. Double stops, MPE, presets and articulations such as pizzicato come in Phases 4–5.
 
 ---
 
@@ -41,13 +41,27 @@ If Logic or GarageBand does not list the AU straight away, run `killall -9 Audio
 
 ### 3. Check that it works
 
-Rescan plugins in your DAW, then create an instrument track with **Violin Synthesizer** (vendor **OctahedronV2**). A good smoke test:
+Rescan plugins in your DAW, then create an instrument track with **Violin Synthesizer** (vendor **OctahedronV2**).
 
-- [ ] The plugin appears as an **instrument** and loads without errors.
-- [ ] The editor opens and can be resized.
-- [ ] Playing MIDI notes (or clicking the on-screen keyboard) produces a sine tone. Pitch bend works (±2 semitones).
-- [ ] The **Output Gain** knob changes the level, and it can be automated from the DAW.
-- [ ] Saving the project, closing it and reopening it restores the gain value.
+In **FL Studio**:
+1. Open **Options → Manage plugins → Find installed plugins**.
+2. Add **Violin Synthesizer** from the Channel Rack.
+3. The plugin reports a small latency (from oversampling), which FL Studio compensates automatically.
+
+Things to try:
+
+- **Play expressively:**
+  - Velocity sets how hard the bow is drawn.
+  - Overlapping notes glide legato; separate notes get a new bow stroke.
+  - Pitch bend works.
+  - The mod wheel (CC1) sets bow pressure.
+  - The expression pedal (CC11) sets dynamics.
+- **Change the violin:** under **Body → Violin**, choose one of four measured instruments. **Quality → Light** uses less CPU.
+- **Shape the sound:**
+  - **Bow → Position** moves the bow between the bridge (bright, glassy) and the fingerboard (soft).
+  - **Pressure** changes the grip on the string.
+  - **Mute** adds a practice-style sordino.
+- **Check save and restore:** save the project, reopen it, and the settings come back.
 
 The **Standalone** app is the quickest way to hear it without a DAW: open it, pick an audio output under *Options → Audio/MIDI Settings*, and play the on-screen keyboard.
 
@@ -114,11 +128,19 @@ git ls-files '*.h' '*.cpp' | xargs clang-format -i
 ```
 CMakeLists.txt        plugin target, formats and plugin IDs
 cmake/                dependency fetching, warnings, sanitizers
-source/plugin/        processor, editor, parameters, placeholder voice
-tests/                Catch2 unit tests
+source/dsp/           bowed-string waveguide (friction junction, delays, loss filter), body modes
+source/engine/        voice, oversampling engine, body, output chain
+source/plugin/        processor, editor, parameters
+resources/bodies/     measured body impulse responses
+research/             Python prototype, body estimation, data sources (see research/README.md)
+tests/                Catch2 tests, incl. golden data from the Python reference
 docs/                 development plan
 .github/workflows/    CI: build, test, pluginval/auval, package
 ```
+
+## Credits
+
+The measured violin bodies come from the [CNSM Dataset](https://doi.org/10.5281/zenodo.18696786) (Pauget Ballesteros 2026, CC BY 4.0) and the [University of Iowa Musical Instrument Samples](https://theremin.music.uiowa.edu/MIS.html). Details are in [research/data/SOURCES.md](research/data/SOURCES.md).
 
 ## Licensing
 

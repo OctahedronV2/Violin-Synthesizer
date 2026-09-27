@@ -1,7 +1,5 @@
 #include "plugin/PluginProcessor.h"
 
-#include "plugin/Parameters.h"
-#include "plugin/PlaceholderVoice.h"
 #include "plugin/PluginEditor.h"
 
 namespace violinsynth
@@ -9,21 +7,24 @@ namespace violinsynth
 ViolinSynthProcessor::ViolinSynthProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "ViolinSynthState", params::createLayout()),
-      outputGainDb (parameters.getRawParameterValue (params::id::outputGain.getParamID()))
+      reader (parameters)
 {
-    for (int i = 0; i < numPlaceholderVoices; ++i)
-        synth.addVoice (new PlaceholderVoice());
-
-    synth.addSound (new PlaceholderSound());
+    // Loading a convolution body allocates, so body changes are applied on
+    // the message thread.
+    startTimerHz (20);
 }
 
-void ViolinSynthProcessor::prepareToPlay (double sampleRate, int)
+ViolinSynthProcessor::~ViolinSynthProcessor()
 {
-    synth.setCurrentPlaybackSampleRate (sampleRate);
-    keyboardState.reset();
+    stopTimer();
+}
 
-    outputGain.reset (sampleRate, 0.05);
-    outputGain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (outputGainDb->load()));
+void ViolinSynthProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+{
+    keyboardState.reset();
+    engine.setSettings (reader.read());
+    engine.prepare (sampleRate, samplesPerBlock);
+    setLatencySamples (engine.getLatencySamples());
 }
 
 void ViolinSynthProcessor::releaseResources()
@@ -41,12 +42,9 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 {
     juce::ScopedNoDenormals noDenormals;
 
-    buffer.clear();
     keyboardState.processNextMidiBuffer (midiMessages, 0, buffer.getNumSamples(), true);
-    synth.renderNextBlock (buffer, midiMessages, 0, buffer.getNumSamples());
-
-    outputGain.setTargetValue (juce::Decibels::decibelsToGain (outputGainDb->load()));
-    outputGain.applyGain (buffer, buffer.getNumSamples());
+    engine.setSettings (reader.read());
+    engine.process (buffer, midiMessages);
 
     // This is an instrument: consume incoming MIDI rather than echoing it.
     midiMessages.clear();

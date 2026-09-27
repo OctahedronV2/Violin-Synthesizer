@@ -2,16 +2,146 @@
 
 namespace violinsynth::params
 {
+namespace
+{
+using Range = juce::NormalisableRange<float>;
+
+enum class Format
+{
+    plain, // two decimals
+    percent,
+    seconds, // shown in ms below one second
+    hertz,
+    cents,
+    decibels,
+};
+
+juce::AudioParameterFloatAttributes attributesFor (Format format)
+{
+    juce::AudioParameterFloatAttributes a;
+
+    switch (format)
+    {
+        case Format::plain:
+            return a.withStringFromValueFunction ([] (float v, int) { return juce::String (v, 2); });
+        case Format::percent:
+            return a
+                .withStringFromValueFunction ([] (float v, int)
+                                              { return juce::String (juce::roundToInt (v * 100.0f)) + " %"; })
+                .withValueFromStringFunction ([] (const juce::String& t) { return t.getFloatValue() / 100.0f; });
+        case Format::seconds:
+            return a
+                .withStringFromValueFunction (
+                    [] (float v, int) {
+                        return v < 1.0f ? juce::String (juce::roundToInt (v * 1000.0f)) + " ms"
+                                        : juce::String (v, 2) + " s";
+                    })
+                .withValueFromStringFunction (
+                    [] (const juce::String& t)
+                    { return t.containsIgnoreCase ("ms") ? t.getFloatValue() / 1000.0f : t.getFloatValue(); });
+        case Format::hertz:
+            return a.withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " Hz"; });
+        case Format::cents:
+            return a.withStringFromValueFunction ([] (float v, int)
+                                                  { return juce::String (juce::roundToInt (v)) + " ct"; });
+        case Format::decibels:
+            return a.withStringFromValueFunction ([] (float v, int) { return juce::String (v, 1) + " dB"; });
+    }
+    return a;
+}
+
+std::unique_ptr<juce::AudioParameterFloat>
+floatParam (const juce::ParameterID& id, const juce::String& name, Range range, float defaultValue, Format format)
+{
+    return std::make_unique<juce::AudioParameterFloat> (id, name, range, defaultValue, attributesFor (format));
+}
+
+Range skewed (float min, float max, float centre, float interval = 0.0f)
+{
+    Range r { min, max, interval };
+    r.setSkewForCentre (centre);
+    return r;
+}
+
+juce::StringArray bodyNames()
+{
+    juce::StringArray names;
+    for (const auto* name : engine::Body::names)
+        names.add (name);
+    return names;
+}
+} // namespace
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    layout.add (std::make_unique<juce::AudioParameterFloat> (id::outputGain,
-                                                             "Output Gain",
-                                                             juce::NormalisableRange<float> { -60.0f, 12.0f, 0.1f },
-                                                             0.0f,
-                                                             juce::AudioParameterFloatAttributes {}.withLabel ("dB")));
+    // Bow
+    layout.add (floatParam (id::bowPosition, "Bow Position", skewed (0.03f, 0.3f, 0.11f), 0.11f, Format::plain));
+    layout.add (floatParam (id::bowPressure, "Bow Pressure", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
+    layout.add (floatParam (id::attack, "Attack", skewed (0.005f, 0.5f, 0.08f), 0.08f, Format::seconds));
+    layout.add (floatParam (id::release, "Release", skewed (0.02f, 1.0f, 0.15f), 0.15f, Format::seconds));
+
+    // Pitch
+    layout.add (floatParam (id::vibratoRate, "Vibrato Rate", Range { 3.0f, 8.0f }, 5.5f, Format::hertz));
+    layout.add (floatParam (id::vibratoDepth, "Vibrato Depth", Range { 0.0f, 60.0f }, 25.0f, Format::cents));
+    layout.add (floatParam (id::vibratoDelay, "Vibrato Delay", Range { 0.0f, 1.0f }, 0.3f, Format::seconds));
+    layout.add (floatParam (id::portamento, "Portamento", skewed (0.0f, 0.3f, 0.05f), 0.05f, Format::seconds));
+    layout.add (std::make_unique<juce::AudioParameterInt> (id::bendRange, "Pitch Bend Range", 1, 12, 2));
+
+    // Body and output
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::body, "Body", bodyNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::bodyQuality,
+                                                              "Body Quality",
+                                                              juce::StringArray { "Measured", "Light" },
+                                                              0));
+    layout.add (floatParam (id::sordino, "Sordino", Range { 0.0f, 1.0f }, 0.0f, Format::percent));
+    layout.add (floatParam (id::width, "Stereo Width", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
+    layout.add (floatParam (id::room, "Room", Range { 0.0f, 1.0f }, 0.15f, Format::percent));
+    layout.add (floatParam (id::outputGain, "Output Gain", Range { -60.0f, 12.0f, 0.1f }, 0.0f, Format::decibels));
 
     return layout;
+}
+
+Reader::Reader (juce::AudioProcessorValueTreeState& state)
+    : bowPosition (state.getRawParameterValue (id::bowPosition.getParamID())),
+      bowPressure (state.getRawParameterValue (id::bowPressure.getParamID())),
+      attack (state.getRawParameterValue (id::attack.getParamID())),
+      release (state.getRawParameterValue (id::release.getParamID())),
+      vibratoRate (state.getRawParameterValue (id::vibratoRate.getParamID())),
+      vibratoDepth (state.getRawParameterValue (id::vibratoDepth.getParamID())),
+      vibratoDelay (state.getRawParameterValue (id::vibratoDelay.getParamID())),
+      portamento (state.getRawParameterValue (id::portamento.getParamID())),
+      bendRange (state.getRawParameterValue (id::bendRange.getParamID())),
+      body (state.getRawParameterValue (id::body.getParamID())),
+      bodyQuality (state.getRawParameterValue (id::bodyQuality.getParamID())),
+      sordino (state.getRawParameterValue (id::sordino.getParamID())),
+      width (state.getRawParameterValue (id::width.getParamID())),
+      room (state.getRawParameterValue (id::room.getParamID())),
+      outputGain (state.getRawParameterValue (id::outputGain.getParamID()))
+{
+}
+
+engine::EngineSettings Reader::read() const
+{
+    engine::EngineSettings s;
+    s.voice.bowPosition = bowPosition->load();
+    s.voice.bowPressure = bowPressure->load();
+    s.voice.attackSeconds = attack->load();
+    s.voice.releaseSeconds = release->load();
+    s.voice.vibratoRateHz = vibratoRate->load();
+    s.voice.vibratoDepthCents = vibratoDepth->load();
+    s.voice.vibratoDelaySeconds = vibratoDelay->load();
+    s.voice.portamentoSeconds = portamento->load();
+    s.voice.pitchBendRangeSemitones = bendRange->load();
+
+    s.body = static_cast<int> (body->load());
+    s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;
+
+    s.output.sordino = sordino->load();
+    s.output.width = width->load();
+    s.output.room = room->load();
+    s.output.gainDb = outputGain->load();
+    return s;
 }
 } // namespace violinsynth::params

@@ -1,0 +1,155 @@
+#include "engine/ViolinEngine.h"
+
+#include <cmath>
+
+namespace violinsynth::engine
+{
+int ViolinEngine::oversamplingOrderFor (double hostSampleRate)
+{
+    int order = 0;
+    while (order < 3 && hostSampleRate * (1 << order) < minInternalRate - 1.0)
+        ++order;
+    return order;
+}
+
+void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
+{
+    hostRate = hostSampleRate;
+    maxBlock = std::max (1, maxBlockSize);
+    oversamplingOrder = oversamplingOrderFor (hostRate);
+
+    if (oversamplingOrder > 0)
+    {
+        oversampling = std::make_unique<juce::dsp::Oversampling<float>> (
+            1,
+            static_cast<size_t> (oversamplingOrder),
+            juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR,
+            true,
+            true);
+        oversampling->initProcessing (static_cast<size_t> (maxBlock));
+    }
+    else
+    {
+        oversampling.reset();
+    }
+
+    voice.prepare (getInternalSampleRate());
+    body.prepare (hostRate, maxBlock, settings.body);
+    output.prepare (hostRate, maxBlock);
+    mono.setSize (1, maxBlock);
+    reset();
+}
+
+void ViolinEngine::reset()
+{
+    voice.reset();
+    body.reset();
+    output.reset();
+    if (oversampling != nullptr)
+        oversampling->reset();
+}
+
+void ViolinEngine::setSettings (const EngineSettings& s)
+{
+    settings = s;
+    voice.setSettings (s.voice);
+    output.setSettings (s.output);
+    body.setQuality (s.bodyQuality);
+    body.setModalBody (s.body);
+    requestedBody.store (s.body);
+}
+
+void ViolinEngine::updateConvolutionBody()
+{
+    body.loadConvolutionBody (requestedBody.load());
+}
+
+int ViolinEngine::getLatencySamples() const
+{
+    const auto os = oversampling != nullptr ? oversampling->getLatencyInSamples() : 0.0f;
+    return static_cast<int> (std::lround (os)) + body.getLatencySamples();
+}
+
+void ViolinEngine::handleMidi (const juce::MidiMessage& m)
+{
+    if (m.isNoteOn())
+        voice.noteOn (m.getNoteNumber(), m.getFloatVelocity());
+    else if (m.isNoteOff())
+        voice.noteOff (m.getNoteNumber());
+    else if (m.isPitchWheel())
+        voice.pitchBend ((m.getPitchWheelValue() - 8192) / 8192.0);
+    else if (m.isController())
+        voice.controller (m.getControllerNumber(), m.getControllerValue() / 127.0);
+    else if (m.isChannelPressure())
+        voice.aftertouch (m.getChannelPressureValue() / 127.0);
+    else if (m.isAftertouch())
+        voice.aftertouch (m.getAfterTouchValue() / 127.0);
+    else if (m.isAllNotesOff() || m.isAllSoundOff())
+        voice.allNotesOff();
+}
+
+void ViolinEngine::renderString (int start, int numSamples)
+{
+    if (numSamples <= 0)
+        return;
+
+    float* hostSamples = mono.getWritePointer (0) + start;
+
+    if (oversampling == nullptr)
+    {
+        voice.render (hostSamples, numSamples);
+        return;
+    }
+
+    float* channels[] = { hostSamples };
+    juce::dsp::AudioBlock<float> hostBlock (channels, 1, static_cast<size_t> (numSamples));
+    hostBlock.clear();
+    auto internal = oversampling->processSamplesUp (hostBlock);
+    voice.render (internal.getChannelPointer (0), static_cast<int> (internal.getNumSamples()));
+    oversampling->processSamplesDown (hostBlock);
+}
+
+void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi)
+{
+    // Some hosts send blocks larger than announced in prepare(); process
+    // those in chunks rather than overrunning the internal buffers.
+    const auto numSamples = buffer.getNumSamples();
+    auto events = midi.cbegin();
+
+    for (int chunkStart = 0; chunkStart < numSamples; chunkStart += maxBlock)
+    {
+        const auto chunkLength = std::min (maxBlock, numSamples - chunkStart);
+        int position = 0;
+
+        for (; events != midi.cend() && (*events).samplePosition < chunkStart + chunkLength; ++events)
+        {
+            const auto metadata = *events;
+            const auto eventPosition = juce::jlimit (0, chunkLength, metadata.samplePosition - chunkStart);
+            renderString (position, eventPosition - position);
+            position = eventPosition;
+            handleMidi (metadata.getMessage());
+        }
+        renderString (position, chunkLength - position);
+
+        float* samples = mono.getWritePointer (0);
+        output.processPreBody (samples, chunkLength);
+        body.process (samples, chunkLength);
+
+        auto* left = buffer.getWritePointer (0, chunkStart);
+        auto* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1, chunkStart) : nullptr;
+
+        if (right != nullptr)
+        {
+            output.processPostBody (samples, left, right, chunkLength);
+        }
+        else
+        {
+            // Mono output: the scratch buffer doubles as the right channel
+            // (each sample is read before it is overwritten), then sum.
+            output.processPostBody (samples, left, samples, chunkLength);
+            for (int i = 0; i < chunkLength; ++i)
+                left[i] = 0.5f * (left[i] + samples[i]);
+        }
+    }
+}
+} // namespace violinsynth::engine

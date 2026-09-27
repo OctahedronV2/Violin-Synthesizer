@@ -1,15 +1,18 @@
 #pragma once
 
+#include "engine/ViolinEngine.h"
+#include "plugin/Parameters.h"
+
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
 
 namespace violinsynth
 {
-class ViolinSynthProcessor final : public juce::AudioProcessor
+class ViolinSynthProcessor final : public juce::AudioProcessor, private juce::Timer
 {
 public:
     ViolinSynthProcessor();
-    ~ViolinSynthProcessor() override = default;
+    ~ViolinSynthProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -25,7 +28,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 3.0; }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
@@ -42,15 +45,19 @@ public:
     // stream so the Standalone app can be tested without a MIDI controller.
     juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
 
+    // For tests and diagnostics.
+    engine::ViolinEngine& getEngine() { return engine; }
+
+    // Message thread: applies pending body changes (also run by a timer).
+    void applyBodyChange() { engine.updateConvolutionBody(); }
+
 private:
-    static constexpr int numPlaceholderVoices = 8;
+    void timerCallback() override { applyBodyChange(); }
 
     juce::AudioProcessorValueTreeState parameters;
-    std::atomic<float>* outputGainDb = nullptr;
-
+    params::Reader reader;
     juce::MidiKeyboardState keyboardState;
-    juce::Synthesiser synth;
-    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Multiplicative> outputGain;
+    engine::ViolinEngine engine;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ViolinSynthProcessor)
 };

@@ -178,7 +178,7 @@ All of these live in `AudioProcessorValueTreeState` with stable parameter IDs, s
 
 Durations assume one developer working part-time and are only indicative.
 
-### Phase 0: Project foundation (1 week) — implemented, awaiting DAW check
+### Phase 0: Project foundation (1 week) — done
 - CMake project that fetches JUCE and builds an empty VST3, AU and Standalone plugin.
 - GitHub Actions matrix build, Catch2 test target and pluginval step.
 - `.clang-format`, `.clang-tidy`, `.editorconfig`, and a README with build instructions.
@@ -190,13 +190,13 @@ Durations assume one developer working part-time and are only indicative.
 - Produce reference renders (WAV) and measurements for later regression tests.
 - **Done when:** a convincing sustained bowed tone and pizzicato are rendered offline, and the parameter ranges are documented.
 
-### Phase 2: Core C++ DSP, single string (3 weeks)
+### Phase 2: Core C++ DSP, single string (3 weeks) — done together with Phase 3, see [PHASES_2_3.md](PHASES_2_3.md)
 - `FractionalDelay`, `LoopFilter`, `FrictionJunction`, `Waveguide` and `StringVoice`.
 - Tuning compensation for the loop filter's phase delay.
 - Unit tests: pitch accuracy within ±2 cents (autocorrelation or YIN) over the full range and at 44.1, 48, 96 and 192 kHz. Stability: no NaN and bounded output under random parameter sweeps.
 - **Done when:** the Standalone plays one monophonic bowed string from MIDI with correct pitch.
 
-### Phase 3: Body, output chain and oversampling (2 weeks)
+### Phase 3: Body, output chain and oversampling (2 weeks) — done, see [PHASES_2_3.md](PHASES_2_3.md) and [BODY_MODELLING.md](BODY_MODELLING.md)
 - `BodyResonator` modal bank with a preset table, plus a convolution option.
 - Sordino, DC blocker, limiter and stereo widening.
 - 2× oversampling around the string and bow section, with latency reporting.

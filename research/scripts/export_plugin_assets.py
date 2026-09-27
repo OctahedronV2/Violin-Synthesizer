@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 import sys
 from pathlib import Path
 
@@ -33,6 +32,8 @@ from violin_model.waveguide import _simulate  # noqa: E402
 
 FS = 48000.0
 DIRECT_GAIN = 0.02  # direct path of the modal bank, as used by fit_modes
+LEVEL_BAND = (250.0, 5000.0)  # Hz, band used to loudness-match the bodies
+LEVEL_DB = -20.0  # mean gain of every body over LEVEL_BAND
 
 # Plugin body list: (id used in C++, display name, impulse response in research/data, credit)
 BODIES = [
@@ -60,11 +61,17 @@ def export_bodies():
     for body_id, name, filename, credit in BODIES:
         ir, fs = sf.read(RESEARCH / "data" / filename)
         assert fs == FS, filename
-        shutil.copyfile(RESEARCH / "data" / filename, target / f"{body_id}.wav")
 
-        # Fit a modal bank to the impulse response's magnitude on a log grid.
+        # Loudness-match the bodies: mean magnitude over LEVEL_BAND = LEVEL_DB.
         spectrum = np.fft.rfft(ir, 1 << 16)
         f = np.fft.rfftfreq(1 << 16, 1 / FS)
+        band = (f >= LEVEL_BAND[0]) & (f <= LEVEL_BAND[1])
+        mean_db = np.mean(20 * np.log10(np.abs(spectrum[band]) + 1e-12))
+        ir = ir * 10 ** ((LEVEL_DB - mean_db) / 20)
+        spectrum = np.fft.rfft(ir, 1 << 16)
+        sf.write(target / f"{body_id}.wav", ir.astype(np.float32), int(FS), subtype="FLOAT")
+
+        # Fit a modal bank to the impulse response's magnitude on a log grid.
         grid = 180.0 * 2 ** (np.arange(0, int(48 * math.log2(10000 / 180)) + 1) / 48)
         target_db = np.interp(grid, f, 20 * np.log10(np.abs(spectrum) + 1e-12))
         # The Iowa estimate is smooth (regularised), so it needs more, gentler resonators.
@@ -75,8 +82,12 @@ def export_bodies():
         w, h = fitted.frequency_response(FS, n=1 << 15)
         fit_db = np.interp(grid, w, 20 * np.log10(np.abs(h) + 1e-12))
         err = compare_responses(grid, _smooth_log(grid, fit_db, 1 / 6), _smooth_log(grid, target_db, 1 / 6))
-        print(f"{name}: {len(modes)} modes, fit error {err['rms_db']:.2f} dB RMS (1/6 oct)")
-        header_modes.append((body_id, name, credit, modes, fitted.direct_gain))
+        # Output gain that gives the modal bank the same loudness as the IR.
+        fit_band = (w >= LEVEL_BAND[0]) & (w <= LEVEL_BAND[1])
+        modal_db = np.mean(20 * np.log10(np.abs(h[fit_band]) + 1e-12))
+        modal_gain = 10 ** ((LEVEL_DB - modal_db) / 20)
+        print(f"{name}: {len(modes)} modes, fit error {err['rms_db']:.2f} dB RMS (1/6 oct), gain {modal_gain:.3f}")
+        header_modes.append((body_id, name, credit, modes, fitted.direct_gain, modal_gain))
     write_modes_header(header_modes)
 
 
@@ -99,9 +110,10 @@ def write_modes_header(bodies):
         "};",
         "",
     ]
-    for body_id, name, credit, modes, direct in bodies:
+    for body_id, name, credit, modes, direct, gain in bodies:
         lines.append(f"// {name} - {credit}")
         lines.append(f"inline constexpr float {body_id}DirectGain = {direct:.6f}f;")
+        lines.append(f"inline constexpr float {body_id}OutputGain = {gain:.6f}f; // loudness match to the IR")
         lines.append(f"inline constexpr std::array<Mode, {len(modes)}> {body_id}Modes {{ {{")
         for m in modes:
             lines.append(f"    {{ {m.freq:.1f}f, {m.q:.2f}f, {m.gain:.5f}f }},")
