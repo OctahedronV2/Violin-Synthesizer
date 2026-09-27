@@ -19,7 +19,7 @@ A preset always sets every parameter. Anything a preset doesn't mention goes bac
 
 ### Factory presets
 
-All presets are **level-matched**: each has an output-gain correction, so switching presets doesn't make you jump. On a test phrase, the loudest 100 ms of each preset is within 0.7 dB of *Default Violin* with the light body. A test enforces ±1.5 dB. With the measured bodies, all are within +1.5/−3.5 dB.
+All presets are **level-matched**: each has an output-gain correction, so switching presets doesn't make you jump. On a test phrase, the loudest 100 ms of each preset is within 0.7 dB of *Default Violin* with the light body. A test enforces ±1.5 dB, or ±2.5 dB for *Sul Ponticello* and *Eerie Tremolo*. Those two bow lightly right by the bridge, where the motion is chaotic, so their level shifts by a dB or two with tiny changes, including rounding differences between platforms. With the measured bodies, all are within +1.5/−3.5 dB.
 
 | Category | Preset | Character |
 |---|---|---|

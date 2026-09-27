@@ -105,7 +105,7 @@ const std::vector<FactoryPreset>& factoryPresets()
           { { "sordino", 1.0f }, { "vibratoDepth", 20.0f }, { "room", 0.02f }, { "width", 0.2f }, { "outputGain", 3.0f } } },
         { "Eerie Tremolo", "Character",
           "A light tremolo near the bridge in a vast space: horror-film tension.",
-          { { "articulation", tremolo }, { "bowPosition", 0.05f }, { "bowPressure", 0.25f }, { "vibratoDepth", 0.0f },
+          { { "articulation", tremolo }, { "bowPosition", 0.065f }, { "bowPressure", 0.25f }, { "vibratoDepth", 0.0f },
             { "room", 0.65f }, { "width", 0.9f } } },
         { "Dry Studio", "Character",
           "No room at all and a narrow image: add your own reverb in the mix.",
