@@ -213,7 +213,7 @@ Durations assume one developer working part-time and are only indicative.
 - Tests for articulation transitions: no clicks and no stuck notes.
 - **Done when:** each articulation is audible and demonstrable in a demo MIDI file.
 
-### Phase 6: UI and presets (3 weeks)
+### Phase 6: UI and presets (3 weeks) — implemented, see [PHASE6.md](PHASE6.md); UX review and multi-DAW checks pending
 - Editor: bow XY pad (force × position), velocity meter, vibrato controls, string display showing which string plays which note, body selector and FX section.
 - Resizable vector UI with a custom `LookAndFeel`; accessibility labels.
 - Preset browser and 20–30 factory presets (Solo Romantic, Baroque, Folk Fiddle, Sordino, Pizz, etc.).

@@ -2,10 +2,12 @@
 #include "plugin/Parameters.h"
 #include "plugin/PluginProcessor.h"
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
 #include <cmath>
+#include <functional>
 
 using violinsynth::ViolinSynthProcessor;
 
@@ -158,11 +160,76 @@ TEST_CASE ("Editor can be created and destroyed", "[editor]")
     CHECK (editor->getHeight() > 0);
 }
 
+TEST_CASE ("Editor scales in proportion", "[editor]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    ViolinSynthProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditorAndMakeActive() };
+    REQUIRE (editor->isResizable());
+
+    auto* constrainer = editor->getConstrainer();
+    REQUIRE (constrainer != nullptr);
+    CHECK (constrainer->getFixedAspectRatio() > 1.5);
+
+    editor->setSize (1650, 1050);
+    juce::Component* content = nullptr; // the scaled layout (the other child is the resize corner)
+    for (auto* child : editor->getChildren())
+        if (content == nullptr || child->getWidth() > content->getWidth())
+            content = child;
+    REQUIRE (content != nullptr);
+    CHECK (content->getTransform().mat00 == Catch::Approx (1.5f));
+    CHECK (content->getScreenBounds().getWidth() == Catch::Approx (1650).margin (2));
+}
+
+TEST_CASE ("Every editor control has an accessible title", "[editor]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    ViolinSynthProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditorAndMakeActive() };
+
+    int controls = 0;
+    std::function<void (juce::Component&)> visit = [&] (juce::Component& c)
+    {
+        const auto isControl = dynamic_cast<juce::Slider*> (&c) != nullptr
+            || dynamic_cast<juce::ComboBox*> (&c) != nullptr || dynamic_cast<juce::Button*> (&c) != nullptr;
+        if (isControl && c.isVisible())
+        {
+            ++controls;
+            const auto title = c.getTitle().isNotEmpty()
+                ? c.getTitle()
+                : (dynamic_cast<juce::Button*> (&c) != nullptr ? dynamic_cast<juce::Button*> (&c)->getButtonText()
+                                                               : juce::String());
+            CAPTURE (c.getName(), typeid (c).name());
+            CHECK (title.isNotEmpty());
+        }
+        for (auto* child : c.getChildren())
+            visit (*child);
+    };
+    visit (*editor);
+    CHECK (controls > 30);
+}
+
 // Not run by default: `ViolinSynthTests "[.screenshot]"` writes editor.png to the working directory.
 TEST_CASE ("Editor screenshot", "[.screenshot]")
 {
     juce::ScopedJuceInitialiser_GUI juce;
     ViolinSynthProcessor processor;
+
+    // Play a double stop so the string display has something to show.
+    processor.setRateAndBufferSizeDetails (48000.0, 512);
+    processor.prepareToPlay (48000.0, 512);
+    juce::AudioBuffer<float> buffer (2, 512);
+    for (int i = 0; i < 40; ++i)
+    {
+        juce::MidiBuffer midi;
+        if (i == 0)
+        {
+            midi.addEvent (juce::MidiMessage::noteOn (1, 64, 0.8f), 0);
+            midi.addEvent (juce::MidiMessage::noteOn (1, 72, 0.8f), 0);
+        }
+        processor.processBlock (buffer, midi);
+    }
+
     std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditorAndMakeActive() };
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
     juce::FileOutputStream stream (juce::File::getCurrentWorkingDirectory().getChildFile ("editor.png"));
@@ -340,4 +407,75 @@ TEST_CASE ("Write and render the articulation demo", "[.demo]")
     auto writer = wav.createWriterFor (stream, options);
     REQUIRE (writer != nullptr);
     writer->writeFromAudioSampleBuffer (output, 0, total);
+}
+
+// Not run by default: `ViolinSynthTests "[.presettour]"` renders the same
+// short phrase with every factory preset, one after another, to
+// preset_tour.wav (and the start times to preset_tour.txt) in the working directory.
+TEST_CASE ("Render a tour of the factory presets", "[.presettour]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    const auto fs = 48000.0;
+    const int block = 256;
+    const std::vector<std::tuple<double, double, int, float>> phrase {
+        { 0.0, 0.55, 62, 0.75f }, { 0.5, 1.05, 66, 0.75f }, { 1.0, 1.55, 69, 0.75f },
+        { 1.5, 2.45, 74, 0.8f },  { 2.4, 3.5, 69, 0.8f },   { 2.4, 3.5, 78, 0.8f },
+    };
+    const auto segment = static_cast<int> (4.6 * fs);
+
+    ViolinSynthProcessor probe;
+    const auto count = probe.getPresetManager().getNumFactoryPresets();
+    juce::AudioBuffer<float> output (2, segment * count);
+    juce::String index;
+
+    for (int program = 0; program < count; ++program)
+    {
+        ViolinSynthProcessor processor;
+        processor.getPresetManager().load (program);
+        processor.setRateAndBufferSizeDetails (fs, block);
+        processor.prepareToPlay (fs, block);
+        processor.applyBodyChange();
+
+        juce::AudioBuffer<float> buffer (2, block);
+        juce::MidiBuffer none;
+        for (int i = 0; i < 100; ++i) // let the convolution body load
+        {
+            processor.processBlock (buffer, none);
+            juce::Thread::sleep (5);
+        }
+
+        for (int start = 0; start < segment; start += block)
+        {
+            const auto len = std::min (block, segment - start);
+            buffer.setSize (2, len, false, false, true);
+            juce::MidiBuffer midi;
+            for (const auto& [on, off, number, velocity] : phrase)
+            {
+                const auto onSample = static_cast<int> (on * fs), offSample = static_cast<int> (off * fs);
+                if (onSample >= start && onSample < start + len)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, number, velocity), onSample - start);
+                if (offSample >= start && offSample < start + len)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, number), offSample - start);
+            }
+            processor.processBlock (buffer, midi);
+            for (int ch = 0; ch < 2; ++ch)
+                output.copyFrom (ch, program * segment + start, buffer, ch, 0, len);
+        }
+
+        const auto seconds = program * segment / static_cast<int> (fs);
+        index << juce::String (seconds / 60) << ":" << juce::String (seconds % 60).paddedLeft ('0', 2) << "  "
+              << processor.getPresetManager().getCurrentName() << "\n";
+    }
+
+    const auto directory = juce::File::getCurrentWorkingDirectory();
+    directory.getChildFile ("preset_tour.txt").replaceWithText (index);
+    const auto wavFile = directory.getChildFile ("preset_tour.wav");
+    wavFile.deleteFile();
+    auto stream = std::unique_ptr<juce::OutputStream> (wavFile.createOutputStream());
+    juce::WavAudioFormat wav;
+    const auto options
+        = juce::AudioFormatWriterOptions {}.withSampleRate (fs).withNumChannels (2).withBitsPerSample (16);
+    auto writer = wav.createWriterFor (stream, options);
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (output, 0, output.getNumSamples());
 }

@@ -45,7 +45,15 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     keyboardState.processNextMidiBuffer (midiMessages, 0, buffer.getNumSamples(), true);
     engine.setSettings (reader.read());
     engine.process (buffer, midiMessages);
-    activeArticulation.store (static_cast<int> (engine.getViolin().currentArticulation()));
+    const auto& violin = engine.getViolin();
+    activeArticulation.store (static_cast<int> (violin.currentArticulation()));
+    for (int s = 0; s < engine::Violin::numStrings; ++s)
+    {
+        auto& state = stringStates[static_cast<std::size_t> (s)];
+        state.note.store (violin.noteOnString (s));
+        state.level.store (static_cast<float> (violin.stringLevel (s)));
+        state.bowSpeed.store (static_cast<float> (violin.stringBowSpeed (s)));
+    }
 
     // This is an instrument: consume incoming MIDI rather than echoing it.
     midiMessages.clear();
@@ -67,7 +75,10 @@ void ViolinSynthProcessor::setStateInformation (const void* data, int sizeInByte
     const auto xml = getXmlFromBinary (data, sizeInBytes);
 
     if (xml != nullptr && xml->hasTagName (parameters.state.getType()))
+    {
         parameters.replaceState (juce::ValueTree::fromXml (*xml));
+        presets.restoreFromState();
+    }
 }
 } // namespace violinsynth
 

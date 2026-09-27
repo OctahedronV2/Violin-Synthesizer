@@ -2,6 +2,7 @@
 
 #include "engine/ViolinEngine.h"
 #include "plugin/Parameters.h"
+#include "plugin/PresetManager.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -30,6 +31,9 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 3.0; }
 
+    // Presets live in the editor's preset browser, not in host programs: a
+    // host program change would rewrite every parameter behind the host's
+    // back (and some hosts select program 0 when loading a project).
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override { }
@@ -40,6 +44,7 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState& getParameters() { return parameters; }
+    PresetManager& getPresetManager() { return presets; }
 
     // Notes played on the editor's on-screen keyboard, merged into the MIDI
     // stream so the Standalone app can be tested without a MIDI controller.
@@ -54,6 +59,15 @@ public:
         return static_cast<engine::Articulation> (activeArticulation.load());
     }
 
+    // What each string is doing, for the editor's string display (updated every block).
+    struct StringState
+    {
+        std::atomic<int> note { -1 }; // MIDI note held on the string, or -1
+        std::atomic<float> level { 0.0f }; // decaying peak of the string's output
+        std::atomic<float> bowSpeed { 0.0f }; // m/s
+    };
+    const StringState& getStringState (int string) const { return stringStates[static_cast<std::size_t> (string)]; }
+
     // Message thread: applies pending body changes (also run by a timer).
     void applyBodyChange() { engine.updateConvolutionBody(); }
 
@@ -62,9 +76,11 @@ private:
 
     juce::AudioProcessorValueTreeState parameters;
     params::Reader reader;
+    PresetManager presets { parameters };
     juce::MidiKeyboardState keyboardState;
     engine::ViolinEngine engine;
     std::atomic<int> activeArticulation { 0 };
+    std::array<StringState, engine::Violin::numStrings> stringStates;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ViolinSynthProcessor)
 };
