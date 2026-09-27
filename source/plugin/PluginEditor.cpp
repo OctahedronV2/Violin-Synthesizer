@@ -7,8 +7,8 @@ namespace violinsynth
 {
 namespace
 {
-constexpr int defaultWidth = 960;
-constexpr int defaultHeight = 360;
+constexpr int defaultWidth = 900;
+constexpr int defaultHeight = 540;
 constexpr int headerHeight = 64;
 constexpr int keyboardHeight = 80;
 constexpr int creditsHeight = 18;
@@ -36,30 +36,36 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     setLookAndFeel (&lookAndFeel);
 
     using namespace params;
-    sections.push_back ({ "Bow",
-                          { &addKnob (id::bowPosition, "Position"),
-                            &addKnob (id::bowPressure, "Pressure"),
-                            &addKnob (id::attack, "Attack"),
-                            &addKnob (id::release, "Release") },
-                          {},
-                          {} });
-    sections.push_back ({ "Pitch",
-                          { &addKnob (id::vibratoRate, "Vib Rate"),
-                            &addKnob (id::vibratoDepth, "Vib Depth"),
-                            &addKnob (id::vibratoDelay, "Vib Delay"),
-                            &addKnob (id::portamento, "Glide"),
-                            &addKnob (id::bendRange, "Bend") },
-                          {},
-                          {} });
-    sections.push_back ({ "Body",
-                          { &addKnob (id::sordino, "Mute") },
-                          { &addChoice (id::body, "Violin"), &addChoice (id::bodyQuality, "Quality") },
-                          {} });
-    sections.push_back (
-        { "Output",
-          { &addKnob (id::width, "Width"), &addKnob (id::room, "Room"), &addKnob (id::outputGain, "Gain") },
-          {},
-          {} });
+    const auto makeSection = [] (const juce::String& title, int row)
+    {
+        Section section;
+        section.title = title;
+        section.row = row;
+        return section;
+    };
+    auto bow = makeSection ("Bow", 0);
+    bow.knobs = { &addKnob (id::bowPosition, "Position"),
+                  &addKnob (id::bowPressure, "Pressure"),
+                  &addKnob (id::attack, "Attack"),
+                  &addKnob (id::release, "Release") };
+    auto pitch = makeSection ("Pitch", 0);
+    pitch.knobs = { &addKnob (id::vibratoRate, "Vib Rate"),
+                    &addKnob (id::vibratoDepth, "Vib Depth"),
+                    &addKnob (id::vibratoDelay, "Vib Delay"),
+                    &addKnob (id::portamento, "Glide"),
+                    &addKnob (id::bendRange, "Bend") };
+    auto play = makeSection ("Play", 1);
+    play.choices = { &addChoice (id::playMode, "Mode") };
+    play.toggles = { &addToggle (id::autoBowChange, "Auto bow change"), &addToggle (id::mpe, "MPE") };
+    play.knobs = { &addKnob (id::resonance, "Resonance"),
+                   &addKnob (id::humanise, "Humanise"),
+                   &addKnob (id::mpeBendRange, "MPE Bend") };
+    auto body = makeSection ("Body", 1);
+    body.choices = { &addChoice (id::body, "Violin"), &addChoice (id::bodyQuality, "Quality") };
+    body.knobs = { &addKnob (id::sordino, "Mute") };
+    auto output = makeSection ("Output", 1);
+    output.knobs = { &addKnob (id::width, "Width"), &addKnob (id::room, "Room"), &addKnob (id::outputGain, "Gain") };
+    sections = { bow, pitch, play, body, output };
 
     credits.setText ("Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and University of "
                      "Iowa Musical Instrument Samples",
@@ -74,7 +80,7 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     addAndMakeVisible (keyboard);
 
     setResizable (true, true);
-    setResizeLimits (800, 330, 1800, 900);
+    setResizeLimits (760, 480, 1800, 1100);
     setSize (defaultWidth, defaultHeight);
 }
 
@@ -117,6 +123,21 @@ ViolinSynthEditor::Choice& ViolinSynthEditor::addChoice (const juce::ParameterID
     return *choices.back();
 }
 
+ViolinSynthEditor::Toggle& ViolinSynthEditor::addToggle (const juce::ParameterID& id, const juce::String& labelText)
+{
+    auto toggle = std::make_unique<Toggle>();
+    toggle->button.setButtonText (labelText);
+    toggle->button.setColour (juce::ToggleButton::textColourId, text);
+    toggle->button.setColour (juce::ToggleButton::tickColourId, accent);
+    toggle->attachment
+        = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.getParameters(),
+                                                                                  id.getParamID(),
+                                                                                  toggle->button);
+    addAndMakeVisible (toggle->button);
+    toggles.push_back (std::move (toggle));
+    return *toggles.back();
+}
+
 void ViolinSynthEditor::paint (juce::Graphics& g)
 {
     g.fillAll (background);
@@ -153,44 +174,59 @@ void ViolinSynthEditor::resized()
     bounds.removeFromTop (headerHeight);
     bounds = bounds.reduced (12, 6);
 
-    // Section widths proportional to their number of controls.
-    int units = 0;
-    for (const auto& s : sections)
-        units += static_cast<int> (s.knobs.size()) + (s.choices.empty() ? 0 : 2);
+    constexpr int gap = 10;
+    const auto rowHeight = (bounds.getHeight() - gap) / 2;
 
-    const auto gap = 10;
-    const auto unitWidth = (bounds.getWidth() - gap * (static_cast<int> (sections.size()) - 1)) / std::max (1, units);
-
-    for (auto& s : sections)
+    for (int row = 0; row < 2; ++row)
     {
-        const auto sectionUnits = static_cast<int> (s.knobs.size()) + (s.choices.empty() ? 0 : 2);
-        s.bounds = bounds.removeFromLeft (unitWidth * sectionUnits);
-        bounds.removeFromLeft (gap);
+        auto rowBounds = bounds.removeFromTop (rowHeight);
+        bounds.removeFromTop (gap);
 
-        auto inner = s.bounds.reduced (8, 6);
-        inner.removeFromTop (22);
-
-        if (! s.choices.empty())
-        {
-            // The section's side margins come out of the choice column, so the
-            // knobs next to it are as wide as everywhere else.
-            auto column = inner.removeFromLeft (unitWidth * 2 - 16).reduced (4, 0);
-            for (auto* c : s.choices)
+        // Section widths proportional to their number of controls.
+        int units = 0, count = 0;
+        for (const auto& s : sections)
+            if (s.row == row)
             {
-                c->label.setBounds (column.removeFromTop (18));
-                c->box.setBounds (column.removeFromTop (26));
-                column.removeFromTop (10);
+                units += s.units();
+                ++count;
             }
-        }
+        const auto unitWidth = (rowBounds.getWidth() - gap * (count - 1)) / std::max (1, units);
 
-        const auto knobWidth = s.knobs.empty() ? 0 : inner.getWidth() / static_cast<int> (s.knobs.size());
-        const auto knobHeight = std::min (inner.getHeight(), knobWidth + 40);
-        auto row = inner.withSizeKeepingCentre (inner.getWidth(), knobHeight);
-        for (auto* k : s.knobs)
+        for (auto& s : sections)
         {
-            auto area = row.removeFromLeft (knobWidth);
-            k->label.setBounds (area.removeFromTop (18));
-            k->slider.setBounds (area.reduced (2, 0));
+            if (s.row != row)
+                continue;
+
+            s.bounds = rowBounds.removeFromLeft (unitWidth * s.units());
+            rowBounds.removeFromLeft (gap);
+
+            auto inner = s.bounds.reduced (8, 6);
+            inner.removeFromTop (22);
+
+            if (! s.choices.empty() || ! s.toggles.empty())
+            {
+                // The section's side margins come out of this column, so the
+                // knobs next to it are as wide as everywhere else.
+                auto column = inner.removeFromLeft (unitWidth * 2 - 16).reduced (4, 0);
+                for (auto* c : s.choices)
+                {
+                    c->label.setBounds (column.removeFromTop (18));
+                    c->box.setBounds (column.removeFromTop (26));
+                    column.removeFromTop (8);
+                }
+                for (auto* t : s.toggles)
+                    t->button.setBounds (column.removeFromTop (26));
+            }
+
+            const auto knobWidth = s.knobs.empty() ? 0 : inner.getWidth() / static_cast<int> (s.knobs.size());
+            const auto knobHeight = std::min (inner.getHeight(), knobWidth + 40);
+            auto knobRow = inner.withSizeKeepingCentre (inner.getWidth(), knobHeight);
+            for (auto* k : s.knobs)
+            {
+                auto area = knobRow.removeFromLeft (knobWidth);
+                k->label.setBounds (area.removeFromTop (18));
+                k->slider.setBounds (area.reduced (2, 0));
+            }
         }
     }
 }

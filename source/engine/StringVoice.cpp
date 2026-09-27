@@ -13,7 +13,6 @@ constexpr double smoothingSeconds = 0.02;
 constexpr double legatoDynamicsSeconds = 0.15; // dynamics change smoothly across a slur
 constexpr double legatoEntrySeconds = 0.025; // bow arriving on a new string mid-stroke
 constexpr double vibratoOnsetSeconds = 0.25;
-constexpr double openStringBeta = 0.05; // where sympathetic drive enters (near the bridge)
 constexpr double silenceThreshold = 1.0e-5;
 constexpr double noiseBandwidthHz = 0.7; // humanisation drift
 
@@ -150,8 +149,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         updateControlRate (settings);
     }
 
-    // An open string with nothing to resonate with costs nothing.
-    if (stage == Stage::open && silentSeconds > silenceSeconds && std::abs (context.sympatheticDrive) < 1.0e-9)
+    // Open strings are handled by SympatheticStrings at the host rate.
+    if (stage == Stage::open)
     {
         lastSpeed = 0.0;
         return 0.0;
@@ -172,15 +171,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
 
     const auto& friction = string.getParams().friction;
-    double f0, speed = 0.0, force = 0.0, drive = 0.0, b;
+    double f0, speed = 0.0, force = 0.0, b;
 
-    if (stage == Stage::open)
-    {
-        f0 = midiToHz (spec->openMidiNote);
-        b = openStringBeta;
-        drive = context.sympatheticDrive;
-    }
-    else
     {
         // Pitch: glide, bends (global and per note) and humanised vibrato.
         logF0 = targetLogF0 + glideCoeff * (logF0 - targetLogF0);
@@ -220,20 +212,16 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             const auto fMax = 2.0 * friction.impedance * speed / (beta * (friction.muS - friction.muD));
             force = fMax * (spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * pressure);
         }
-        else
-        {
-            drive = context.sympatheticDrive; // a ringing string also resonates
-        }
     }
 
-    const auto y = string.process (f0, b, context.direction * speed, force, drive);
+    const auto y = string.process (f0, b, context.direction * speed, force);
     lastSpeed = speed;
     lastF0 = f0;
 
-    if (stage == Stage::ringing || stage == Stage::open)
+    if (stage == Stage::ringing)
     {
         silentSeconds = std::abs (y) < silenceThreshold ? silentSeconds + dt : 0.0;
-        if (stage == Stage::ringing && silentSeconds > silenceSeconds)
+        if (silentSeconds > silenceSeconds)
         {
             // Finger lifted: the string becomes an undamped open string again.
             string.reset();

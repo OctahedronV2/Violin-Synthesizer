@@ -2,6 +2,7 @@
 
 #include "engine/Body.h"
 #include "engine/OutputChain.h"
+#include "engine/SympatheticStrings.h"
 #include "engine/Violin.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -21,7 +22,8 @@ struct EngineSettings
 
 // The complete instrument: MIDI in, stereo audio out.
 //
-//   violin (four bowed strings at >= 176.4 kHz) -> decimate -> DC block, sordino
+//   violin (four bowed strings at >= 176.4 kHz) -> decimate -> + open-string resonance
+//   -> DC block, sordino
 //   -> body -> stereo width, room, gain, limiter
 //
 // The string runs at the host rate times a power of two chosen so the
@@ -62,6 +64,7 @@ private:
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
 
     Violin violin;
+    SympatheticStrings sympathetic;
     Body body;
     OutputChain output;
     EngineSettings settings;

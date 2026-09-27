@@ -4,7 +4,7 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phases 0–3 done.** The plugin plays a physically modelled bowed string (a digital waveguide with a bow–string friction model) through measured violin bodies. It plays one voice at a time, with legato, automatic string choice, vibrato and basic MIDI expression. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md) for how it works and how to play it. Double stops, MPE, presets and articulations such as pizzicato come in Phases 4–5.
+> **Status: Phases 0–4 done.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato and MPE. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md) and [docs/PHASE4.md](docs/PHASE4.md). Articulations such as pizzicato come in Phase 5, and presets in Phase 6.
 
 ---
 
@@ -53,9 +53,12 @@ Things to try:
 - **Play expressively:**
   - Velocity sets how hard the bow is drawn.
   - Overlapping notes glide legato; separate notes get a new bow stroke.
+  - Chords play as double stops, up to all four strings.
   - Pitch bend works.
   - The mod wheel (CC1) sets bow pressure.
   - The expression pedal (CC11) sets dynamics.
+  - CC74 moves the bow between the fingerboard and the bridge.
+- **MPE controllers:** turn on **Play → MPE** for per-note bend, pressure (vibrato) and slide (bow position).
 - **Change the violin:** under **Body → Violin**, choose one of four measured instruments. **Quality → Light** uses less CPU.
 - **Shape the sound:**
   - **Bow → Position** moves the bow between the bridge (bright, glassy) and the fingerboard (soft).

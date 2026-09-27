@@ -5,6 +5,7 @@ set(VIOLINSYNTH_SOURCES
     engine/OutputChain.cpp
     engine/ViolinEngine.cpp
     engine/StringVoice.cpp
+    engine/SympatheticStrings.cpp
     engine/Violin.cpp
     plugin/Parameters.cpp
     plugin/PluginEditor.cpp

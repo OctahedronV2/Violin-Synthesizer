@@ -200,7 +200,17 @@ TEST_CASE ("Render demo phrases through the plugin", "[.render]")
         t += lengths[i];
     }
 
+    // Double stops (chords) under a melody, with sympathetic resonance.
+    std::vector<std::tuple<double, double, int, float>> doubleStops {
+        { 0.0, 1.6, 62, 0.7f },  { 0.0, 1.6, 69, 0.7f }, // D4 + A4
+        { 1.6, 3.2, 64, 0.75f }, { 1.6, 3.2, 71, 0.75f }, // E4 + B4
+        { 3.2, 4.8, 66, 0.8f },  { 3.2, 4.8, 74, 0.8f }, // F#4 + D5
+        { 4.8, 7.5, 55, 0.9f },  { 4.8, 7.5, 62, 0.9f },
+        { 4.8, 7.5, 71, 0.9f },  { 4.8, 7.5, 79, 0.9f }, // G major chord
+    };
+
     const std::vector<Phrase> phrases {
+        { "cpp_double_stops_levaggi", 0, doubleStops },
         { "cpp_A_major_detache_levaggi", 0, scale },
         { "cpp_A_major_detache_klimke", 1, scale },
         { "cpp_legato_melody_levaggi", 0, legato },

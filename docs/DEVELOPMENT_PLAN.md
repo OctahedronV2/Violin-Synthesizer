@@ -202,7 +202,7 @@ Durations assume one developer working part-time and are only indicative.
 - 2× oversampling around the string and bow section, with latency reporting.
 - **Done when:** A/B comparison against reference recordings is judged "violin-like", and the CPU budget is measured.
 
-### Phase 4: Four strings, allocation and expression (3 weeks)
+### Phase 4: Four strings, allocation and expression (3 weeks) — done, see [PHASE4.md](PHASE4.md)
 - `StringAllocator`, legato and portamento, double stops, sympathetic resonance.
 - `ExpressionMapper` with MIDI CC, aftertouch, pitch bend and MPE (`juce::MPEInstrument`).
 - Vibrato engine with humanisation, and the automatic bow envelope for keyboard-only playing.

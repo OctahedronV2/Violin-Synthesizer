@@ -30,8 +30,6 @@ void Violin::reset()
     globalPressure = 0.0;
     globalTimbre = -1.0;
     channelExpression.fill ({});
-    previousBridgeForce = 0.0;
-    previousStringForce.fill (0.0);
 }
 
 void Violin::setSettings (const PerformanceSettings& s)
@@ -175,7 +173,6 @@ void Violin::handleMidi (const juce::MidiMessage& m)
 void Violin::render (float* out, int numSamples)
 {
     const auto dt = 1.0 / fs;
-    const auto coupling = std::clamp (settings.voice.resonance, 0.0, 1.0) * maxSympatheticCoupling;
 
     StringContext context;
     context.globalBendSemitones = globalBend;
@@ -202,16 +199,11 @@ void Violin::render (float* out, int numSamples)
         }
         context.direction = direction;
 
-        // Each undamped string is driven by the bridge motion caused by the
-        // other strings (one sample late, which keeps the coupling explicit).
         double sum = 0.0, fastest = 0.0;
-        for (std::size_t s = 0; s < voices.size(); ++s)
+        for (auto& v : voices)
         {
-            context.sympatheticDrive = coupling * (previousBridgeForce - previousStringForce[s]);
-            const auto y = voices[s].processSample (settings.voice, context);
-            previousStringForce[s] = y;
-            sum += y;
-            fastest = std::max (fastest, voices[s].currentBowSpeed());
+            sum += v.processSample (settings.voice, context);
+            fastest = std::max (fastest, v.currentBowSpeed());
         }
 
         bowUsed += fastest * dt;
@@ -222,7 +214,6 @@ void Violin::render (float* out, int numSamples)
             ++bowChanges;
         }
 
-        previousBridgeForce = sum;
         out[i] = static_cast<float> (sum);
     }
 }

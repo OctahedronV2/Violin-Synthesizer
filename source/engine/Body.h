@@ -28,9 +28,10 @@ public:
         "University of Iowa Musical Instrument Samples",
     };
 
-    // Level calibration: an mf A4 (velocity 0.8) plays at about -18 dBFS RMS
-    // on every body. Measured with ViolinSynthTests "[.diagnostics]".
-    static constexpr float targetRmsDb = -18.0f;
+    // Level calibration: an mf A4 (velocity 0.8) plays at about -21 dBFS RMS
+    // on every body, leaving headroom for loud four-string chords. Measured
+    // with ViolinSynthTests "[.diagnostics]" (single string, before Phase 4 resonance).
+    static constexpr float targetRmsDb = -21.0f;
     static constexpr std::array<float, numBodies> measuredConvolutionRmsDb { -10.8f, -5.8f, -7.0f, -12.4f };
     static constexpr std::array<float, numBodies> measuredModalRmsDb { -10.5f, -6.4f, -7.9f, -11.4f };
 

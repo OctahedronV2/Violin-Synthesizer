@@ -34,7 +34,6 @@ public:
     static constexpr int numStrings = StringAllocator::numStrings;
     static constexpr double bowLengthMetres = 0.62; // usable bow hair
     static constexpr double bowChangeSeconds = 0.08;
-    static constexpr double maxSympatheticCoupling = 0.05; // m/s of drive per N of bridge force
 
     void prepare (double internalSampleRate);
     void reset();
@@ -47,6 +46,13 @@ public:
     int noteOnString (int string) const { return allocator.noteOnString (string); }
     double stringF0 (int string) const { return voices[static_cast<std::size_t> (string)].currentF0(); }
     int bowChangeCount() const { return bowChanges; }
+    std::array<bool, numStrings> openStrings() const
+    {
+        std::array<bool, numStrings> open {};
+        for (std::size_t s = 0; s < open.size(); ++s)
+            open[s] = voices[s].isOpen();
+        return open;
+    }
     double bowDirection() const { return direction; }
 
 private:
@@ -73,8 +79,5 @@ private:
     double globalPressure = 0.0;
     double globalTimbre = -1.0;
     std::array<NoteExpression, 17> channelExpression {}; // MPE, by MIDI channel 1..16
-
-    double previousBridgeForce = 0.0;
-    std::array<double, numStrings> previousStringForce {};
 };
 } // namespace violinsynth::engine

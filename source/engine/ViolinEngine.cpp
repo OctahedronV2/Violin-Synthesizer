@@ -34,6 +34,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
     }
 
     violin.prepare (getInternalSampleRate());
+    sympathetic.prepare (hostRate);
     body.prepare (hostRate, maxBlock, settings.body);
     output.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
@@ -43,6 +44,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
 void ViolinEngine::reset()
 {
     violin.reset();
+    sympathetic.reset();
     body.reset();
     output.reset();
     if (oversampling != nullptr)
@@ -114,6 +116,7 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         renderString (position, chunkLength - position);
 
         float* samples = mono.getWritePointer (0);
+        sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
         output.processPreBody (samples, chunkLength);
         body.process (samples, chunkLength);
 

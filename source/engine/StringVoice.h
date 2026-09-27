@@ -32,7 +32,6 @@ struct StringContext
     double globalBendSemitones = 0.0;
     double dynamicsOverride = -1.0; // CC11/CC2 value, or < 0 to use note velocity
     double pressureOverride = -1.0; // CC1 value, or < 0 to use the Bow Pressure setting
-    double sympatheticDrive = 0.0; // velocity injected into undamped strings (m/s)
 };
 
 // Per-note expression (MPE, or channel-wide controllers when MPE is off).
@@ -46,8 +45,8 @@ struct NoteExpression
 // One of the four violin strings, rendered at the internal rate.
 //
 // A string is either bowed (attack/sustain/release), ringing after the bow
-// has left it, or open and undamped, where it only resonates
-// sympathetically with the other strings.
+// has left it, or open. Open strings are silent here; their sympathetic
+// resonance is modelled at the host rate by SympatheticStrings.
 class StringVoice
 {
 public:
@@ -69,6 +68,7 @@ public:
 
     bool isBowed() const { return stage == Stage::attack || stage == Stage::sustain || stage == Stage::release; }
     bool isSilent() const { return stage == Stage::open && silentSeconds > silenceSeconds; }
+    bool isOpen() const { return stage == Stage::open; }
     int note() const { return currentNote; }
     double currentBowSpeed() const { return lastSpeed; }
     double currentF0() const { return lastF0; }
