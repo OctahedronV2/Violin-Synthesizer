@@ -43,12 +43,12 @@ From Callgrind (instruction counts, both body types):
 1. **The control maths costs more than the physics.** Pitch, vibrato and bow speed change slowly, but they are recomputed 192,000 times a second. This is the biggest single saving, and it scales with every note and every Octastra player.
 2. **Idle is half a note.** With no notes playing, the engine still runs the convolution on silence (40% of the idle cost), the sympathetic strings on silence (17%), the 192 kHz string loop and the oversampler. `BowedString::minBeta` is recalculated for each open string on every block, which is 40 `atan2` calls each time (7.5% of idle). In an orchestral template with 60 tracks loaded and most of them silent, idle cost is what fills the CPU meter.
 3. **The upsampler does nothing useful.** `ViolinEngine::renderString` clears a host block and upsamples it only to get an internal-rate buffer, which the violin then overwrites. Only the downsampler is needed.
-4. **The measured body is slow on Linux and Windows.** JUCE only uses a fast FFT on macOS (Accelerate) or with IPP or FFTW enabled. Everywhere else it uses its fallback FFT. The per-block overhead is also why a 32-sample buffer costs 45% more than a 128-sample one.
+4. **The measured body is slow on Windows and Linux.** JUCE only uses a fast FFT on macOS (Accelerate) or with IPP or FFTW enabled. Everywhere else it uses its fallback FFT. Windows is the main platform, so this matters most there. The per-block overhead is also why a 32-sample buffer costs 45% more than a 128-sample one.
 5. **Vibrato keeps recomputing the loop filter.** A pitch change of more than 0.17 cents recalculates the loop coefficients and the harmonic phase delay (40 `atan2` calls). Under vibrato this happens often.
 
 ## Targets
 
-Targets are measured with the benchmark suite below on two machines: the **CI runner** (Linux, for regression tracking) and **Jake's machine** (the absolute numbers that matter). Percentages are of one core at 48 kHz with a 128-sample buffer, default settings.
+Targets are measured with the benchmark suite below on two machines: the **CI runner** (Linux, for regression tracking) and **Jake's Windows 11 PC** (the absolute numbers that matter). The benchmark prints the CPU model it ran on, so the reference CPU is recorded the first time it runs there. Percentages are of one core at 48 kHz with a 128-sample buffer, default settings.
 
 | # | Target | Today (VM) | Goal |
 |---|---|---|---|
@@ -58,7 +58,7 @@ Targets are measured with the benchmark suite below on two machines: the **CI ru
 | T4 | Worst block, four notes, 32-sample buffer | not measured | ≤ 30% of the block's duration, including the p99.9 block |
 | T5 | 32-sample buffer overhead versus 128 | +45% | ≤ +15% |
 | T6 | 96 kHz versus 48 kHz | +45% | ≤ +25% |
-| T7 | 16 violin engines playing, summed (the Octastra section stand-in) | not measured | ≤ 20% on Jake's machine, and a measured per-player cost to set the Octastra CPU target |
+| T7 | 16 violin engines playing, summed (the Octastra section stand-in) | not measured | ≤ 20% on Jake's PC, and a measured per-player cost to set the Octastra CPU target |
 | T8 | Real-time safety | not checked | No allocation, lock or system call on the audio thread, checked in CI |
 | T9 | Sound | — | Unchanged within the tolerances below |
 
@@ -100,7 +100,7 @@ Nothing is optimised until this exists, so every later step can show its gain.
 
 **The sound check:** a test that renders the reference phrases and applies the tolerances above. The reference WAVs are rendered once from `main` and committed. The existing golden tests stay as they are.
 
-**On Jake's machine:** the same executable, run by hand, prints a table to paste into the PR. This gives the absolute numbers.
+**On Jake's Windows 11 PC:** the same executable, run by hand, prints the CPU model and a table to paste into the PR. This gives the absolute numbers. The Windows CI job also prints wall-clock numbers, as a rough check between runs on Jake's PC.
 
 ## 7.1 Remove wasted work (low risk, sound unchanged)
 
@@ -177,13 +177,13 @@ If SIMD passes, the violin itself gets it for chords, and it becomes the core of
 
 ### By hand, in real hosts
 
-A checklist, `docs/DAW_TESTS.md` (written in 7.6), with one row per host and format. Jake runs it in the hosts he has; the rest are best effort.
+A checklist, `docs/DAW_TESTS.md` (written in 7.6), with one row per host and format. Windows 11 is the main platform, and FL Studio, Reaper and Ableton Live must pass there. Jake runs those; the rest are best effort.
 
 | Host | OS | Formats | Priority |
 |---|---|---|---|
-| FL Studio | Windows / macOS | VST3 | Must (Jake's host) |
-| Reaper | all three | VST3, AU | Must (free to evaluate, runs everywhere) |
-| Ableton Live | Windows / macOS | VST3, AU | Should |
+| FL Studio | Windows 11 | VST3 | Must |
+| Reaper | Windows 11 | VST3 | Must |
+| Ableton Live | Windows 11 | VST3 | Must |
 | Bitwig Studio | all three | VST3 | Should (MPE) |
 | Logic Pro | macOS | AU | Should (MPE, AU-only) |
 | Cubase | Windows / macOS | VST3 | Should (VST3 reference host) |
@@ -192,7 +192,8 @@ A checklist, `docs/DAW_TESTS.md` (written in 7.6), with one row per host and for
 
 Checks in each host:
 
-- Load the plugin, play, and open, close and resize the editor (including HiDPI scaling).
+- Load the plugin, play, and open, close and resize the editor, including at Windows display scaling of 125%, 150% and 200%.
+- With both an ASIO driver and WASAPI, at buffer sizes from 32 to 1024. Ableton and Reaper can change the buffer size while playing.
 - Record automation and play it back. Switch presets while playing.
 - Save the project, close and reopen it: the sound, the preset name and the edits come back.
 - Change the sample rate and the buffer size with the project open.
@@ -217,14 +218,13 @@ Each step is its own PR, with the benchmark table before and after in its descri
 
 ## Done when
 
-- T1–T8 are met on Jake's machine, and T1–T6 are tracked in CI.
+- T1–T8 are met on Jake's Windows 11 PC, and T1–T6 are tracked in CI.
 - The sound check passes on every reference phrase, and a listening check confirms it.
 - pluginval, auval and the VST3 validator pass on all platforms, and RealtimeSanitizer reports nothing.
-- The DAW checklist passes in FL Studio and Reaper, with no crashes in any host tried.
+- The DAW checklist passes in FL Studio, Reaper and Ableton Live on Windows 11, with no crashes in any host tried.
 - Each Octastra experiment has a measured result and a decision in this document.
 
 ## Open questions for Jake
 
-1. **Your machine:** which CPU and OS do you use, and which DAWs besides FL Studio? This sets the reference machine for T1–T7 and the "must" hosts.
-2. **Tolerances:** are the "sounds the same" tolerances above acceptable? The alternative is bit-exact output, which rules out the control-rate work (7.2), the largest saving.
-3. **FFT library:** PFFFT (small, BSD) is recommended over FFTW (large, GPL) for the measured body.
+1. **Tolerances:** are the "sounds the same" tolerances above acceptable? The alternative is bit-exact output, which rules out the control-rate work (7.2), the largest saving.
+2. **FFT library:** PFFFT (small, BSD) is recommended over FFTW (large, GPL) for the measured body.
