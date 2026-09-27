@@ -132,7 +132,7 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 
 ## 7.3 A faster measured body
 
-- **Replace JUCE's fallback FFT** with a uniformly partitioned convolution on PFFFT (BSD licence, SSE and NEON, a single C file). It gives the same speed on all three platforms. FFTW (GPL, compatible with this project's AGPL) is the alternative, but it is a large dependency to build in CI.
+- **Replace JUCE's fallback FFT** with a partitioned convolution on PFFFT (BSD licence, SSE and NEON, a single C file). It gives the same speed on all three platforms. FFTW was considered and rejected as a large dependency to build in CI.
 - **Non-uniform partitions:** a short first partition for low latency and longer ones for the rest of the impulse response. This removes most of the small-buffer penalty (T5). It also allows reporting **zero latency** for the body, down from JUCE's block-sized latency.
 - **Trim the impulse responses:** the measured bodies are 200 ms (the Iowa body 43 ms). Most body modes have decayed well before 200 ms. Trimming to the shortest length that passes the sound check cuts the cost further.
 - **Resample the IRs once** at `prepare` for the host rate, as now, but off the audio thread and without reallocating when only the body changes.
@@ -224,7 +224,10 @@ Each step is its own PR, with the benchmark table before and after in its descri
 - The DAW checklist passes in FL Studio, Reaper and Ableton Live on Windows 11, with no crashes in any host tried.
 - Each Octastra experiment has a measured result and a decision in this document.
 
-## Open questions for Jake
+## Decisions
 
-1. **Tolerances:** are the "sounds the same" tolerances above acceptable? The alternative is bit-exact output, which rules out the control-rate work (7.2), the largest saving.
-2. **FFT library:** PFFFT (small, BSD) is recommended over FFTW (large, GPL) for the measured body.
+Jake, 2026-09-27:
+
+- **Reference machine:** Jake's Windows 11 PC. FL Studio, Reaper and Ableton Live must pass there.
+- **Tolerances:** the "sounds the same" tolerances above are accepted, so the control-rate work (7.2) goes ahead. Output is not required to be bit-exact.
+- **FFT library:** PFFFT for the measured body (7.3).
