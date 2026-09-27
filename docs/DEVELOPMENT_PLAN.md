@@ -208,7 +208,7 @@ Durations assume one developer working part-time and are only indicative.
 - Vibrato engine with humanisation, and the automatic bow envelope for keyboard-only playing.
 - **Done when:** melodic phrases can be played expressively with a keyboard alone, and also with an MPE controller (Seaboard/Linnstrument/Osmose).
 
-### Phase 5: Articulations (2–3 weeks)
+### Phase 5: Articulations (2–3 weeks) — done, see [PHASE5.md](PHASE5.md)
 - Keyswitches and the articulation state machine, covering every item in §7.
 - Tests for articulation transitions: no clicks and no stuck notes.
 - **Done when:** each articulation is audible and demonstrable in a demo MIDI file.

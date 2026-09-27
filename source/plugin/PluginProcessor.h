@@ -48,6 +48,12 @@ public:
     // For tests and diagnostics.
     engine::ViolinEngine& getEngine() { return engine; }
 
+    // The articulation playing now (the parameter or the last keyswitch), for the editor.
+    engine::Articulation getActiveArticulation() const
+    {
+        return static_cast<engine::Articulation> (activeArticulation.load());
+    }
+
     // Message thread: applies pending body changes (also run by a timer).
     void applyBodyChange() { engine.updateConvolutionBody(); }
 
@@ -58,6 +64,7 @@ private:
     params::Reader reader;
     juce::MidiKeyboardState keyboardState;
     engine::ViolinEngine engine;
+    std::atomic<int> activeArticulation { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ViolinSynthProcessor)
 };

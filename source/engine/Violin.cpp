@@ -36,6 +36,19 @@ void Violin::setSettings (const PerformanceSettings& s)
 {
     settings = s;
     allocator.setMode (s.playMode);
+
+    // A change of the parameter takes over from the last keyswitch.
+    if (s.articulation != parameterArticulation)
+    {
+        parameterArticulation = s.articulation;
+        setArticulation (s.articulation);
+    }
+}
+
+void Violin::setArticulation (Articulation a)
+{
+    articulation = a;
+    allocator.setSlurs (slurs (a));
 }
 
 NoteExpression Violin::expressionFor (int channel) const
@@ -64,12 +77,12 @@ void Violin::apply (const StringActions& actions)
                 lastStrokeTime = time;
                 voice.midiChannel = a.channel;
                 voice.setExpression (expressionFor (a.channel));
-                voice.start (a.note, a.velocity);
+                voice.start (a.note, a.velocity, articulation);
                 break;
             case StringAction::Type::legato:
                 voice.midiChannel = a.channel;
                 voice.setExpression (expressionFor (a.channel));
-                voice.legato (a.note, a.velocity);
+                voice.legato (a.note, a.velocity, articulation);
                 break;
             case StringAction::Type::release:
                 voice.release();
@@ -94,6 +107,13 @@ void Violin::handleMidi (const juce::MidiMessage& m)
         for (auto& v : voices)
             v.setExpression (expressionFor (v.midiChannel));
     };
+
+    if ((m.isNoteOn() || m.isNoteOff()) && isKeyswitch (m.getNoteNumber()))
+    {
+        if (m.isNoteOn())
+            setArticulation (static_cast<Articulation> (m.getNoteNumber() - firstKeyswitch));
+        return;
+    }
 
     if (m.isNoteOn())
     {
@@ -203,7 +223,8 @@ void Violin::render (float* out, int numSamples)
         for (auto& v : voices)
         {
             sum += v.processSample (settings.voice, context);
-            fastest = std::max (fastest, v.currentBowSpeed());
+            if (v.drawsBow())
+                fastest = std::max (fastest, v.currentBowSpeed());
         }
 
         bowUsed += fastest * dt;

@@ -10,7 +10,7 @@ namespace violinsynth
 {
 class ViolinSynthProcessor;
 
-class ViolinSynthEditor final : public juce::AudioProcessorEditor
+class ViolinSynthEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit ViolinSynthEditor (ViolinSynthProcessor&);
@@ -47,6 +47,7 @@ private:
         std::vector<Knob*> knobs;
         std::vector<Choice*> choices;
         std::vector<Toggle*> toggles;
+        std::vector<juce::Component*> extras; // placed below the choices and toggles
         juce::Rectangle<int> bounds;
 
         int units() const { return static_cast<int> (knobs.size()) + (choices.empty() && toggles.empty() ? 0 : 2); }
@@ -55,6 +56,7 @@ private:
     Knob& addKnob (const juce::ParameterID& id, const juce::String& text);
     Choice& addChoice (const juce::ParameterID& id, const juce::String& text);
     Toggle& addToggle (const juce::ParameterID& id, const juce::String& text);
+    void timerCallback() override;
 
     ViolinSynthProcessor& processor;
     juce::LookAndFeel_V4 lookAndFeel;
@@ -62,6 +64,8 @@ private:
     std::vector<std::unique_ptr<Choice>> choices;
     std::vector<std::unique_ptr<Toggle>> toggles;
     std::vector<Section> sections;
+    juce::Label articulationStatus, keyswitchHint;
+    int shownArticulation = -1;
     juce::Label credits;
     juce::MidiKeyboardComponent keyboard;
 

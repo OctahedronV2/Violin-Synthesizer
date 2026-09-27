@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dsp/BowedString.h"
+#include "engine/Articulation.h"
 #include "engine/StringData.h"
 
 #include <cstdint>
@@ -44,9 +45,10 @@ struct NoteExpression
 
 // One of the four violin strings, rendered at the internal rate.
 //
-// A string is either bowed (attack/sustain/release), ringing after the bow
-// has left it, or open. Open strings are silent here; their sympathetic
-// resonance is modelled at the host rate by SympatheticStrings.
+// A string is either bowed (attack/sustain/release), plucked, ringing after
+// the bow has left it, or open. Open strings are silent here; their
+// sympathetic resonance is modelled at the host rate by SympatheticStrings.
+// Each note keeps the articulation it started with (docs/PHASE5.md).
 class StringVoice
 {
 public:
@@ -57,8 +59,8 @@ public:
     void reset();
 
     // Actions from the allocator.
-    void start (int note, float velocity); // new bow stroke
-    void legato (int note, float velocity); // glide, or enter mid-bow from another string
+    void start (int note, float velocity, Articulation a = Articulation::legato); // new stroke or pluck
+    void legato (int note, float velocity, Articulation a = Articulation::legato); // glide, or enter mid-bow
     void release();
 
     void setExpression (const NoteExpression& e) { expression = e; }
@@ -67,9 +69,12 @@ public:
     double processSample (const VoiceSettings& settings, const StringContext& context);
 
     bool isBowed() const { return stage == Stage::attack || stage == Stage::sustain || stage == Stage::release; }
+    // Whether the note uses up bow hair (long strokes; not tremolo or short strokes).
+    bool drawsBow() const;
     bool isSilent() const { return stage == Stage::open && silentSeconds > silenceSeconds; }
     bool isOpen() const { return stage == Stage::open; }
     int note() const { return currentNote; }
+    Articulation articulation() const { return noteArticulation; }
     double currentBowSpeed() const { return lastSpeed; }
     double currentF0() const { return lastF0; }
 
@@ -80,7 +85,19 @@ private:
         attack,
         sustain,
         release,
+        plucked, // pizzicato, finger down
         ringing, // bow off, fingered note decaying
+    };
+
+    // Loss settings of the string for the current technique.
+    enum class Damping
+    {
+        bowed,
+        harmonic, // light finger on a node: upper partials fade fast
+        soft, // sul tasto: stands in for the wide, soft bow contact over the fingerboard
+        plucked, // pizzicato: free vibration, soft finger
+        shortRing, // after a spiccato bounce
+        damped, // finger lifted after pizzicato, or bow stopped after staccato
     };
 
     static constexpr double silenceSeconds = 0.25;
@@ -89,8 +106,12 @@ private:
     double envelopeShape() const;
     double nextNoise();
     void setTarget (int note, bool glide);
+    void setDamping (Damping d);
+    void setArticulation (Articulation a);
 
     dsp::BowedString string;
+    dsp::StringParams bowedParams;
+    Damping damping = Damping::bowed;
     double fs = 192000.0;
     const StringSpec* spec = &strings[0];
 
@@ -106,5 +127,12 @@ private:
     NoteExpression expression;
     double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0;
     int controlCounter = 0;
+
+    // Articulation state
+    Articulation noteArticulation = Articulation::legato;
+    double strokeSeconds = 0.0; // since the stroke or pluck started
+    double stopAt = 0.0; // staccato: when the bow starts to stop
+    double tremoloPhase = 0.0, tremoloRate = 13.0, tremoloSign = 1.0;
+    double pluckPosition = 0.0, pluckLength = 1.0, pluckAmplitude = 0.0;
 };
 } // namespace violinsynth::engine

@@ -31,6 +31,7 @@ inline const juce::ParameterID humanise { "humanise", 1 };
 inline const juce::ParameterID autoBowChange { "autoBowChange", 1 };
 inline const juce::ParameterID mpe { "mpe", 1 };
 inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
+inline const juce::ParameterID articulation { "articulation", 1 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -64,5 +65,6 @@ private:
     std::atomic<float>* autoBowChange;
     std::atomic<float>* mpe;
     std::atomic<float>* mpeBendRange;
+    std::atomic<float>* articulation;
 };
 } // namespace violinsynth::params

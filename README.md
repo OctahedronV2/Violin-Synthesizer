@@ -4,7 +4,7 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phases 0–4 done.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato and MPE. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md) and [docs/PHASE4.md](docs/PHASE4.md). Articulations such as pizzicato come in Phase 5, and presets in Phase 6.
+> **Status: Phases 0–5 done.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md) and [docs/PHASE5.md](docs/PHASE5.md). The full UI and presets come in Phase 6.
 
 ---
 
@@ -59,6 +59,7 @@ Things to try:
   - The expression pedal (CC11) sets dynamics.
   - CC74 moves the bow between the fingerboard and the bridge.
 - **MPE controllers:** turn on **Play → MPE** for per-note bend, pressure (vibrato) and slide (bow position).
+- **Articulations:** pick one under **Articulation**, or use keyswitches. MIDI notes 24–33 (C2–A2 in FL Studio's note names) select legato, détaché, staccato, spiccato, tremolo, pizzicato, harmonics, sul ponticello, sul tasto and con sordino. Drag [docs/demo/articulations.mid](docs/demo/articulations.mid) onto the plugin's track to hear them all. Details are in [docs/PHASE5.md](docs/PHASE5.md).
 - **Change the violin:** under **Body → Violin**, choose one of four measured instruments. **Quality → Light** uses less CPU.
 - **Shape the sound:**
   - **Bow → Position** moves the bow between the bridge (bright, glassy) and the fingerboard (soft).
@@ -137,7 +138,7 @@ source/plugin/        processor, editor, parameters
 resources/bodies/     measured body impulse responses
 research/             Python prototype, body estimation, data sources (see research/README.md)
 tests/                Catch2 tests, incl. golden data from the Python reference
-docs/                 development plan
+docs/                 development plan, phase notes, demo MIDI file
 .github/workflows/    CI: build, test, pluginval/auval, package
 ```
 

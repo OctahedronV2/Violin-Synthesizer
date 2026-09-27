@@ -54,6 +54,18 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
                     &addKnob (id::vibratoDelay, "Vib Delay"),
                     &addKnob (id::portamento, "Glide"),
                     &addKnob (id::bendRange, "Bend") };
+    auto articulation = makeSection ("Articulation", 0);
+    articulation.choices = { &addChoice (id::articulation, "Default") };
+    articulation.extras = { &articulationStatus, &keyswitchHint };
+    articulationStatus.setColour (juce::Label::textColourId, text);
+    articulationStatus.setFont (juce::FontOptions { 14.0f, juce::Font::bold });
+    keyswitchHint.setText ("Keyswitches C1-A1", juce::dontSendNotification);
+    keyswitchHint.setTooltip ("MIDI notes 24-33 (C2-A2 in FL Studio) select the articulation");
+    keyswitchHint.setFont (juce::FontOptions { 11.0f });
+    keyswitchHint.setMinimumHorizontalScale (0.7f);
+    addAndMakeVisible (articulationStatus);
+    addAndMakeVisible (keyswitchHint);
+
     auto play = makeSection ("Play", 1);
     play.choices = { &addChoice (id::playMode, "Mode") };
     play.toggles = { &addToggle (id::autoBowChange, "Auto bow change"), &addToggle (id::mpe, "MPE") };
@@ -65,7 +77,7 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     body.knobs = { &addKnob (id::sordino, "Mute") };
     auto output = makeSection ("Output", 1);
     output.knobs = { &addKnob (id::width, "Width"), &addKnob (id::room, "Room"), &addKnob (id::outputGain, "Gain") };
-    sections = { bow, pitch, play, body, output };
+    sections = { bow, pitch, articulation, play, body, output };
 
     credits.setText ("Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and University of "
                      "Iowa Musical Instrument Samples",
@@ -82,11 +94,26 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     setResizable (true, true);
     setResizeLimits (760, 480, 1800, 1100);
     setSize (defaultWidth, defaultHeight);
+
+    timerCallback();
+    startTimerHz (10);
 }
 
 ViolinSynthEditor::~ViolinSynthEditor()
 {
     setLookAndFeel (nullptr);
+}
+
+void ViolinSynthEditor::timerCallback()
+{
+    const auto active = static_cast<int> (processor.getActiveArticulation());
+    if (active != shownArticulation)
+    {
+        shownArticulation = active;
+        articulationStatus.setText (juce::String ("Playing: ")
+                                        + engine::articulationNames[static_cast<std::size_t> (active)],
+                                    juce::dontSendNotification);
+    }
 }
 
 ViolinSynthEditor::Knob& ViolinSynthEditor::addKnob (const juce::ParameterID& id, const juce::String& labelText)
@@ -216,6 +243,8 @@ void ViolinSynthEditor::resized()
                 }
                 for (auto* t : s.toggles)
                     t->button.setBounds (column.removeFromTop (26));
+                for (auto* e : s.extras)
+                    e->setBounds (column.removeFromTop (22));
             }
 
             const auto knobWidth = s.knobs.empty() ? 0 : inner.getWidth() / static_cast<int> (s.knobs.size());

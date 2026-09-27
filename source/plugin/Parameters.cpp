@@ -70,6 +70,14 @@ juce::StringArray bodyNames()
         names.add (name);
     return names;
 }
+
+juce::StringArray articulationNames()
+{
+    juce::StringArray names;
+    for (const auto* name : engine::articulationNames)
+        names.add (name);
+    return names;
+}
 } // namespace
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
@@ -111,6 +119,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterBool> (id::mpe, "MPE", false));
     layout.add (std::make_unique<juce::AudioParameterInt> (id::mpeBendRange, "MPE Bend Range", 1, 96, 48));
 
+    // Articulations (Phase 5); keyswitches override this until it changes.
+    layout.add (
+        std::make_unique<juce::AudioParameterChoice> (id::articulation, "Articulation", articulationNames(), 0));
+
     return layout;
 }
 
@@ -135,7 +147,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       humanise (state.getRawParameterValue (id::humanise.getParamID())),
       autoBowChange (state.getRawParameterValue (id::autoBowChange.getParamID())),
       mpe (state.getRawParameterValue (id::mpe.getParamID())),
-      mpeBendRange (state.getRawParameterValue (id::mpeBendRange.getParamID()))
+      mpeBendRange (state.getRawParameterValue (id::mpeBendRange.getParamID())),
+      articulation (state.getRawParameterValue (id::articulation.getParamID()))
 {
 }
 
@@ -158,6 +171,8 @@ engine::EngineSettings Reader::read() const
     s.performance.playMode = static_cast<engine::PlayMode> (juce::jlimit (0, 2, static_cast<int> (playMode->load())));
     s.performance.mpe = mpe->load() > 0.5f;
     s.performance.mpeBendRangeSemitones = mpeBendRange->load();
+    s.performance.articulation = static_cast<engine::Articulation> (
+        juce::jlimit (0, engine::numArticulations - 1, static_cast<int> (articulation->load())));
 
     s.body = static_cast<int> (body->load());
     s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;

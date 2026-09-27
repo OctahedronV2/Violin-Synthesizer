@@ -45,6 +45,7 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     keyboardState.processNextMidiBuffer (midiMessages, 0, buffer.getNumSamples(), true);
     engine.setSettings (reader.read());
     engine.process (buffer, midiMessages);
+    activeArticulation.store (static_cast<int> (engine.getViolin().currentArticulation()));
 
     // This is an instrument: consume incoming MIDI rather than echoing it.
     midiMessages.clear();

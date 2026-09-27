@@ -1,3 +1,4 @@
+#include "ArticulationDemo.h"
 #include "plugin/Parameters.h"
 #include "plugin/PluginProcessor.h"
 
@@ -269,4 +270,74 @@ TEST_CASE ("Render demo phrases through the plugin", "[.render]")
         REQUIRE (writer != nullptr);
         writer->writeFromAudioSampleBuffer (output, 0, total);
     }
+}
+
+// Not run by default: `ViolinSynthTests "[.demo]"` writes the articulation
+// demo as articulations.mid (committed as docs/demo/articulations.mid) and its
+// rendering through the plugin as articulations.wav, in the working directory.
+TEST_CASE ("Write and render the articulation demo", "[.demo]")
+{
+    juce::ScopedJuceInitialiser_GUI juce;
+    const auto fs = 48000.0;
+    const int block = 256;
+    const auto directory = juce::File::getCurrentWorkingDirectory();
+
+    const auto midiFile = directory.getChildFile ("articulations.mid");
+    midiFile.deleteFile();
+    {
+        juce::FileOutputStream stream (midiFile);
+        REQUIRE (violinsynth::test::articulationDemoFile().writeTo (stream));
+    }
+
+    // Render what was written, as a host would play it.
+    juce::MidiFile file;
+    {
+        juce::FileInputStream stream (midiFile);
+        REQUIRE (file.readFrom (stream));
+    }
+    file.convertTimestampTicksToSeconds();
+    const auto& track = *file.getTrack (0);
+
+    ViolinSynthProcessor processor;
+    processor.setRateAndBufferSizeDetails (fs, block);
+    processor.prepareToPlay (fs, block);
+    juce::AudioBuffer<float> buffer (2, block);
+    juce::MidiBuffer none;
+    for (int i = 0; i < 100; ++i) // let the convolution body load
+    {
+        processor.processBlock (buffer, none);
+        juce::Thread::sleep (5);
+    }
+
+    const auto total = static_cast<int> ((track.getEndTime() + 2.0) * fs);
+    juce::AudioBuffer<float> output (2, total);
+    int next = 0;
+    for (int start = 0; start < total; start += block)
+    {
+        const auto len = std::min (block, total - start);
+        buffer.setSize (2, len, false, false, true);
+        juce::MidiBuffer midi;
+        for (; next < track.getNumEvents(); ++next)
+        {
+            const auto& m = track.getEventPointer (next)->message;
+            const auto position = static_cast<int> (m.getTimeStamp() * fs);
+            if (position >= start + len)
+                break;
+            if (! m.isMetaEvent())
+                midi.addEvent (m, std::max (0, position - start));
+        }
+        processor.processBlock (buffer, midi);
+        for (int ch = 0; ch < 2; ++ch)
+            output.copyFrom (ch, start, buffer, ch, 0, len);
+    }
+
+    const auto wavFile = directory.getChildFile ("articulations.wav");
+    wavFile.deleteFile();
+    auto stream = std::unique_ptr<juce::OutputStream> (wavFile.createOutputStream());
+    juce::WavAudioFormat wav;
+    const auto options
+        = juce::AudioFormatWriterOptions {}.withSampleRate (fs).withNumChannels (2).withBitsPerSample (16);
+    auto writer = wav.createWriterFor (stream, options);
+    REQUIRE (writer != nullptr);
+    writer->writeFromAudioSampleBuffer (output, 0, total);
 }

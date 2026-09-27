@@ -15,6 +15,7 @@ struct PerformanceSettings
     PlayMode playMode = PlayMode::automatic;
     bool mpe = false;
     double mpeBendRangeSemitones = 48.0;
+    Articulation articulation = Articulation::legato; // the Articulation parameter
 };
 
 // The four strings, the bow and the player: MIDI in, bridge force out, at
@@ -28,6 +29,9 @@ struct PerformanceSettings
 //   aftertouch       extra vibrato depth (per note with MPE)
 //   pitch bend       +/- bend range; with MPE, member channels bend their own note
 //                    and the master channel (1) bends everything
+//   notes 24-33      keyswitches selecting the articulation (docs/PHASE5.md); a
+//                    keyswitch holds until the next one or a change of the
+//                    Articulation parameter
 class Violin
 {
 public:
@@ -54,9 +58,11 @@ public:
         return open;
     }
     double bowDirection() const { return direction; }
+    Articulation currentArticulation() const { return articulation; }
 
 private:
     void apply (const StringActions& actions);
+    void setArticulation (Articulation a);
     NoteExpression expressionFor (int channel) const;
 
     std::array<StringVoice, numStrings> voices;
@@ -64,6 +70,8 @@ private:
     PerformanceSettings settings;
     double fs = 192000.0;
     double time = 0.0; // seconds since prepare, for chord detection
+    Articulation articulation = Articulation::legato; // active: keyswitch or parameter
+    Articulation parameterArticulation = Articulation::legato;
 
     // The bow
     double direction = 1.0;

@@ -115,9 +115,15 @@ StringActions StringAllocator::noteOn (int note, int channel, float velocity, do
     const bool slur = melody >= 0 && (mode == PlayMode::monoLegato || (mode == PlayMode::automatic && ! withinChord));
 
     if (slur)
+    {
         legatoTo (newIndex, melody, actions);
+        if (! slursEnabled)
+            actions.items[static_cast<std::size_t> (actions.count - 1)].type = StringAction::Type::start; // re-stroke
+    }
     else
+    {
         startChordNote (newIndex, timeSeconds, actions);
+    }
 
     return actions;
 }
@@ -274,7 +280,7 @@ StringActions StringAllocator::noteOff (int note, int channel)
     // In a legato line, releasing the newest note returns to the most recent
     // held note that is not sounding (as in a trill).
     int fallback = -1;
-    if (mode != PlayMode::poly && wasMelody)
+    if (mode != PlayMode::poly && slursEnabled && wasMelody)
         for (int i = 0; i < heldCount; ++i)
             if (i != index && held[static_cast<std::size_t> (i)].string < 0
                 && (fallback < 0

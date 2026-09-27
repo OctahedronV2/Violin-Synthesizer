@@ -69,6 +69,7 @@ private:
     OutputChain output;
     EngineSettings settings;
     std::atomic<int> requestedBody { 0 };
+    float sordino = 0.0f; // smoothed: the Sordino setting or the con sordino articulation
 
     juce::AudioBuffer<float> mono;
 };

@@ -65,6 +65,10 @@ public:
     void reset();
     void setMode (PlayMode m) { mode = m; }
     void setChordWindow (double seconds) { chordWindow = seconds; }
+    // With slurs off (détaché, staccato, pizzicato ...), a note that would
+    // slur gets a new stroke instead, and releasing a note never returns to
+    // an older held one.
+    void setSlurs (bool enabled) { slursEnabled = enabled; }
 
     StringActions noteOn (int note, int channel, float velocity, double timeSeconds);
     StringActions noteOff (int note, int channel);
@@ -97,6 +101,7 @@ private:
     void legatoTo (int newIndex, int fromIndex, StringActions& actions);
 
     PlayMode mode = PlayMode::automatic;
+    bool slursEnabled = true;
     double chordWindow = 0.04;
     double lastNoteOnTime = -1.0e9;
     std::array<Held, maxHeld> held {};

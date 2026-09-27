@@ -2,6 +2,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     PluginProcessorTests.cpp
     EngineTests.cpp
     Phase4Tests.cpp
+    Phase5Tests.cpp
     StringAllocatorTests.cpp
     StringDspTests.cpp)
 

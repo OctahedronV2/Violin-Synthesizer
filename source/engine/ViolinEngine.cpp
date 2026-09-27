@@ -1,5 +1,6 @@
 #include "engine/ViolinEngine.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace violinsynth::engine
@@ -47,6 +48,7 @@ void ViolinEngine::reset()
     sympathetic.reset();
     body.reset();
     output.reset();
+    sordino = settings.output.sordino;
     if (oversampling != nullptr)
         oversampling->reset();
 }
@@ -114,6 +116,15 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             violin.handleMidi (metadata.getMessage());
         }
         renderString (position, chunkLength - position);
+
+        // Con sordino: put the mute on over about 150 ms.
+        const auto sordinoTarget
+            = violin.currentArticulation() == Articulation::conSordino ? 1.0f : settings.output.sordino;
+        const auto step = static_cast<float> (chunkLength / (0.15 * hostRate));
+        sordino = sordinoTarget + std::clamp (sordino - sordinoTarget, -step, step);
+        auto outputSettings = settings.output;
+        outputSettings.sordino = sordino;
+        output.setSettings (outputSettings);
 
         float* samples = mono.getWritePointer (0);
         sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
