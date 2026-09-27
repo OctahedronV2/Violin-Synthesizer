@@ -4,6 +4,8 @@
 #include "plugin/Parameters.h"
 #include "plugin/PluginProcessor.h"
 
+#include <functional>
+
 namespace violinsynth
 {
 namespace
@@ -14,6 +16,16 @@ constexpr int titleHeight = 28;
 constexpr int headerHeight = 64;
 constexpr int keyboardHeight = 88;
 constexpr int creditsHeight = 18;
+
+// Bottom-row panels are built from two bands of equal height. Knobs sit in
+// fixed-width cells so they are the same size in every panel, and each panel
+// leaves room for another knob per row and another line of options.
+constexpr int knobCellWidth = 84;
+constexpr int bandGap = 6;
+constexpr int choiceWidth = 130;
+constexpr int toggleColumnWidth = 140;
+constexpr int optionGap = 14;
+constexpr int optionHeight = 46; // a choice's label and box, or two stacked toggles
 } // namespace
 
 //==============================================================================
@@ -185,28 +197,27 @@ public:
                     buttonHeight);
         }
 
-        // Bottom row: pitch, play, body and output, sized by their number of controls.
+        // Bottom row: pitch, play, body and output. Each panel has an upper and a
+        // lower band. Pitch puts vibrato above glide and bend; Play and Body put
+        // their options (drop-downs and switches) above their knobs, so all
+        // knob rows line up across the editor.
         {
-            constexpr int pitchUnits = 5, playUnits = 5, bodyUnits = 6;
-            const auto unit = (bottom.getWidth() - 2 * gap) / (pitchUnits + playUnits + bodyUnits);
-
-            auto pitch = addPanel ("Pitch", bottom.removeFromLeft (unit * pitchUnits));
+            auto pitch = addPanel ("Pitch", bottom.removeFromLeft (3 * knobCellWidth + 24));
             bottom.removeFromLeft (gap);
-            auto play = addPanel ("Play", bottom.removeFromLeft (unit * playUnits));
+            auto play = addPanel ("Play", bottom.removeFromLeft ((bottom.getWidth() - gap) / 2));
             bottom.removeFromLeft (gap);
             auto body = addPanel ("Body & Output", bottom);
 
-            layoutKnobRow (pitchKnobs, pitch);
+            const auto bandHeight = (pitch.getHeight() - bandGap) / 2;
 
-            auto playColumn = play.removeFromLeft (unit * 2 - 16).reduced (2, 0);
-            layoutChoices (playChoices, playColumn);
-            for (auto* t : playToggles)
-                t->button.setBounds (playColumn.removeFromTop (28));
-            layoutKnobRow (playKnobs, play);
+            layoutKnobRow ({ pitchKnobs.begin(), pitchKnobs.begin() + 3 }, pitch.removeFromTop (bandHeight));
+            layoutKnobRow ({ pitchKnobs.begin() + 3, pitchKnobs.end() }, pitch.removeFromBottom (bandHeight));
 
-            auto bodyColumn = body.removeFromLeft (unit * 2 - 16).reduced (2, 0);
-            layoutChoices (bodyChoices, bodyColumn);
-            layoutKnobRow (bodyKnobs, body);
+            layoutOptions (playChoices, playToggles, play.removeFromTop (bandHeight));
+            layoutKnobRow (playKnobs, play.removeFromBottom (bandHeight));
+
+            layoutOptions (bodyChoices, {}, body.removeFromTop (bandHeight));
+            layoutKnobRow (bodyKnobs, body.removeFromBottom (bandHeight));
         }
     }
 
@@ -309,13 +320,12 @@ private:
         k.slider.setBounds (area.reduced (2, 0));
     }
 
+    // A centred row of fixed-width knob cells.
     static void layoutKnobRow (const std::vector<Knob*>& row, juce::Rectangle<int> area)
     {
-        if (row.empty())
-            return;
-        const auto width = area.getWidth() / static_cast<int> (row.size());
-        const auto height = juce::jmin (area.getHeight(), width + 44);
-        auto strip = area.withSizeKeepingCentre (area.getWidth(), height);
+        const auto count = static_cast<int> (row.size());
+        const auto width = juce::jmin (knobCellWidth, count > 0 ? area.getWidth() / count : 0);
+        auto strip = area.withSizeKeepingCentre (width * count, area.getHeight());
         for (auto* k : row)
             layoutKnob (*k, strip.removeFromLeft (width));
     }
@@ -332,13 +342,58 @@ private:
         }
     }
 
-    static void layoutChoices (const std::vector<Choice*>& list, juce::Rectangle<int>& column)
+    // Drop-downs side by side, then the switches stacked in pairs, centred in
+    // the area. Items that do not fit on one line wrap onto the next.
+    static void layoutOptions (const std::vector<Choice*>& choiceList,
+                               const std::vector<Toggle*>& toggleList,
+                               juce::Rectangle<int> area)
     {
-        for (auto* c : list)
+        std::vector<std::pair<int, std::function<void (juce::Rectangle<int>)>>> items;
+        for (auto* c : choiceList)
+            items.emplace_back (choiceWidth,
+                                [c] (juce::Rectangle<int> r)
+                                {
+                                    c->label.setBounds (r.removeFromTop (18));
+                                    c->box.setBounds (r.removeFromTop (28));
+                                });
+        for (std::size_t i = 0; i < toggleList.size(); i += 2)
+            items.emplace_back (toggleColumnWidth,
+                                [&toggleList, i] (juce::Rectangle<int> r)
+                                {
+                                    const auto rowHeight = r.getHeight() / 2;
+                                    for (auto t = i; t < juce::jmin (i + 2, toggleList.size()); ++t)
+                                        toggleList[t]->button.setBounds (r.removeFromTop (rowHeight));
+                                });
+
+        std::vector<std::vector<std::size_t>> lines (1);
+        int lineWidth = 0;
+        for (std::size_t i = 0; i < items.size(); ++i)
         {
-            c->label.setBounds (column.removeFromTop (18));
-            c->box.setBounds (column.removeFromTop (28));
-            column.removeFromTop (8);
+            auto needed = items[i].first + (lines.back().empty() ? 0 : optionGap);
+            if (! lines.back().empty() && lineWidth + needed > area.getWidth())
+            {
+                lines.emplace_back();
+                lineWidth = 0;
+                needed = items[i].first;
+            }
+            lines.back().push_back (i);
+            lineWidth += needed;
+        }
+
+        const auto numLines = static_cast<int> (lines.size());
+        auto block = area.withSizeKeepingCentre (area.getWidth(), numLines * optionHeight + (numLines - 1) * 8);
+        for (const auto& line : lines)
+        {
+            int width = -optionGap;
+            for (auto i : line)
+                width += items[i].first + optionGap;
+            auto row = block.removeFromTop (optionHeight).withSizeKeepingCentre (width, optionHeight);
+            block.removeFromTop (8);
+            for (auto i : line)
+            {
+                items[i].second (row.removeFromLeft (items[i].first));
+                row.removeFromLeft (optionGap);
+            }
         }
     }
 
