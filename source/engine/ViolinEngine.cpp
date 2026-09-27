@@ -33,7 +33,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
         oversampling.reset();
     }
 
-    voice.prepare (getInternalSampleRate());
+    violin.prepare (getInternalSampleRate());
     body.prepare (hostRate, maxBlock, settings.body);
     output.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
@@ -42,7 +42,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
 
 void ViolinEngine::reset()
 {
-    voice.reset();
+    violin.reset();
     body.reset();
     output.reset();
     if (oversampling != nullptr)
@@ -52,7 +52,7 @@ void ViolinEngine::reset()
 void ViolinEngine::setSettings (const EngineSettings& s)
 {
     settings = s;
-    voice.setSettings (s.voice);
+    violin.setSettings (s.performance);
     output.setSettings (s.output);
     body.setQuality (s.bodyQuality);
     body.setModalBody (s.body);
@@ -70,24 +70,6 @@ int ViolinEngine::getLatencySamples() const
     return static_cast<int> (std::lround (os)) + body.getLatencySamples();
 }
 
-void ViolinEngine::handleMidi (const juce::MidiMessage& m)
-{
-    if (m.isNoteOn())
-        voice.noteOn (m.getNoteNumber(), m.getFloatVelocity());
-    else if (m.isNoteOff())
-        voice.noteOff (m.getNoteNumber());
-    else if (m.isPitchWheel())
-        voice.pitchBend ((m.getPitchWheelValue() - 8192) / 8192.0);
-    else if (m.isController())
-        voice.controller (m.getControllerNumber(), m.getControllerValue() / 127.0);
-    else if (m.isChannelPressure())
-        voice.aftertouch (m.getChannelPressureValue() / 127.0);
-    else if (m.isAftertouch())
-        voice.aftertouch (m.getAfterTouchValue() / 127.0);
-    else if (m.isAllNotesOff() || m.isAllSoundOff())
-        voice.allNotesOff();
-}
-
 void ViolinEngine::renderString (int start, int numSamples)
 {
     if (numSamples <= 0)
@@ -97,7 +79,7 @@ void ViolinEngine::renderString (int start, int numSamples)
 
     if (oversampling == nullptr)
     {
-        voice.render (hostSamples, numSamples);
+        violin.render (hostSamples, numSamples);
         return;
     }
 
@@ -105,7 +87,7 @@ void ViolinEngine::renderString (int start, int numSamples)
     juce::dsp::AudioBlock<float> hostBlock (channels, 1, static_cast<size_t> (numSamples));
     hostBlock.clear();
     auto internal = oversampling->processSamplesUp (hostBlock);
-    voice.render (internal.getChannelPointer (0), static_cast<int> (internal.getNumSamples()));
+    violin.render (internal.getChannelPointer (0), static_cast<int> (internal.getNumSamples()));
     oversampling->processSamplesDown (hostBlock);
 }
 
@@ -127,7 +109,7 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             const auto eventPosition = juce::jlimit (0, chunkLength, metadata.samplePosition - chunkStart);
             renderString (position, eventPosition - position);
             position = eventPosition;
-            handleMidi (metadata.getMessage());
+            violin.handleMidi (metadata.getMessage());
         }
         renderString (position, chunkLength - position);
 

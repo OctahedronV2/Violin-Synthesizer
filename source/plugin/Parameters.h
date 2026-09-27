@@ -25,6 +25,12 @@ inline const juce::ParameterID sordino { "sordino", 1 };
 inline const juce::ParameterID width { "width", 1 };
 inline const juce::ParameterID room { "room", 1 };
 inline const juce::ParameterID outputGain { "outputGain", 1 };
+inline const juce::ParameterID playMode { "playMode", 1 };
+inline const juce::ParameterID resonance { "resonance", 1 };
+inline const juce::ParameterID humanise { "humanise", 1 };
+inline const juce::ParameterID autoBowChange { "autoBowChange", 1 };
+inline const juce::ParameterID mpe { "mpe", 1 };
+inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -52,5 +58,11 @@ private:
     std::atomic<float>* width;
     std::atomic<float>* room;
     std::atomic<float>* outputGain;
+    std::atomic<float>* playMode;
+    std::atomic<float>* resonance;
+    std::atomic<float>* humanise;
+    std::atomic<float>* autoBowChange;
+    std::atomic<float>* mpe;
+    std::atomic<float>* mpeBendRange;
 };
 } // namespace violinsynth::params

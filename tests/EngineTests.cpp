@@ -60,7 +60,8 @@ Rendered render (engine::ViolinEngine& e,
 engine::EngineSettings quietSettings (engine::Body::Quality quality = engine::Body::Quality::modal)
 {
     engine::EngineSettings s;
-    s.voice.vibratoDepthCents = 0.0;
+    s.performance.voice.vibratoDepthCents = 0.0;
+    s.performance.voice.humanise = 0.0;
     s.output.room = 0.0f;
     s.output.width = 0.0f;
     s.bodyQuality = quality;
@@ -168,7 +169,7 @@ TEST_CASE ("Engine glides to a new note when playing legato", "[engine]")
                                           static_cast<std::size_t> (0.6 * fs));
     const auto b4 = test::midiToHz (71);
     CHECK (std::abs (test::cents (test::estimateF0 (second, fs, b4), b4)) < 2.0);
-    CHECK (e.getVoice().currentNote() == 71);
+    CHECK (e.getViolin().noteOnString (2) == 71); // A string
 }
 
 TEST_CASE ("Every body and quality produces finite, bounded sound", "[engine][body]")
@@ -219,8 +220,8 @@ TEST_CASE ("Engine survives random MIDI and settings changes", "[engine]")
             midi.addEvent (juce::MidiMessage::controllerEvent (1, rng.nextBool() ? 1 : 11, rng.nextInt (128)), 0);
 
         auto s = quietSettings();
-        s.voice.bowPosition = 0.03 + 0.27 * rng.nextDouble();
-        s.voice.bowPressure = rng.nextDouble();
+        s.performance.voice.bowPosition = 0.03 + 0.27 * rng.nextDouble();
+        s.performance.voice.bowPressure = rng.nextDouble();
         s.output.sordino = rng.nextFloat();
         s.body = rng.nextInt (4);
         e.setSettings (s);

@@ -100,6 +100,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::room, "Room", Range { 0.0f, 1.0f }, 0.15f, Format::percent));
     layout.add (floatParam (id::outputGain, "Output Gain", Range { -60.0f, 12.0f, 0.1f }, 0.0f, Format::decibels));
 
+    // Playing (Phase 4)
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::playMode,
+                                                              "Play Mode",
+                                                              juce::StringArray { "Auto", "Mono legato", "Poly" },
+                                                              0));
+    layout.add (floatParam (id::resonance, "Resonance", Range { 0.0f, 1.0f }, 0.3f, Format::percent));
+    layout.add (floatParam (id::humanise, "Humanise", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
+    layout.add (std::make_unique<juce::AudioParameterBool> (id::autoBowChange, "Auto Bow Change", true));
+    layout.add (std::make_unique<juce::AudioParameterBool> (id::mpe, "MPE", false));
+    layout.add (std::make_unique<juce::AudioParameterInt> (id::mpeBendRange, "MPE Bend Range", 1, 96, 48));
+
     return layout;
 }
 
@@ -118,22 +129,35 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       sordino (state.getRawParameterValue (id::sordino.getParamID())),
       width (state.getRawParameterValue (id::width.getParamID())),
       room (state.getRawParameterValue (id::room.getParamID())),
-      outputGain (state.getRawParameterValue (id::outputGain.getParamID()))
+      outputGain (state.getRawParameterValue (id::outputGain.getParamID())),
+      playMode (state.getRawParameterValue (id::playMode.getParamID())),
+      resonance (state.getRawParameterValue (id::resonance.getParamID())),
+      humanise (state.getRawParameterValue (id::humanise.getParamID())),
+      autoBowChange (state.getRawParameterValue (id::autoBowChange.getParamID())),
+      mpe (state.getRawParameterValue (id::mpe.getParamID())),
+      mpeBendRange (state.getRawParameterValue (id::mpeBendRange.getParamID()))
 {
 }
 
 engine::EngineSettings Reader::read() const
 {
     engine::EngineSettings s;
-    s.voice.bowPosition = bowPosition->load();
-    s.voice.bowPressure = bowPressure->load();
-    s.voice.attackSeconds = attack->load();
-    s.voice.releaseSeconds = release->load();
-    s.voice.vibratoRateHz = vibratoRate->load();
-    s.voice.vibratoDepthCents = vibratoDepth->load();
-    s.voice.vibratoDelaySeconds = vibratoDelay->load();
-    s.voice.portamentoSeconds = portamento->load();
-    s.voice.pitchBendRangeSemitones = bendRange->load();
+    s.performance.voice.bowPosition = bowPosition->load();
+    s.performance.voice.bowPressure = bowPressure->load();
+    s.performance.voice.attackSeconds = attack->load();
+    s.performance.voice.releaseSeconds = release->load();
+    s.performance.voice.vibratoRateHz = vibratoRate->load();
+    s.performance.voice.vibratoDepthCents = vibratoDepth->load();
+    s.performance.voice.vibratoDelaySeconds = vibratoDelay->load();
+    s.performance.voice.portamentoSeconds = portamento->load();
+    s.performance.voice.pitchBendRangeSemitones = bendRange->load();
+
+    s.performance.voice.resonance = resonance->load();
+    s.performance.voice.humanise = humanise->load();
+    s.performance.voice.autoBowChange = autoBowChange->load() > 0.5f;
+    s.performance.playMode = static_cast<engine::PlayMode> (juce::jlimit (0, 2, static_cast<int> (playMode->load())));
+    s.performance.mpe = mpe->load() > 0.5f;
+    s.performance.mpeBendRangeSemitones = mpeBendRange->load();
 
     s.body = static_cast<int> (body->load());
     s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;

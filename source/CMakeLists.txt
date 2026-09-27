@@ -1,9 +1,11 @@
 set(VIOLINSYNTH_SOURCES
     dsp/BowedString.cpp
     engine/Body.cpp
+    engine/StringAllocator.cpp
     engine/OutputChain.cpp
     engine/ViolinEngine.cpp
-    engine/ViolinVoice.cpp
+    engine/StringVoice.cpp
+    engine/Violin.cpp
     plugin/Parameters.cpp
     plugin/PluginEditor.cpp
     plugin/PluginProcessor.cpp)

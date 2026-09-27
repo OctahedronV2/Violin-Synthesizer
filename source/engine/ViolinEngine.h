@@ -2,7 +2,7 @@
 
 #include "engine/Body.h"
 #include "engine/OutputChain.h"
-#include "engine/ViolinVoice.h"
+#include "engine/Violin.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_dsp/juce_dsp.h>
@@ -13,7 +13,7 @@ namespace violinsynth::engine
 {
 struct EngineSettings
 {
-    VoiceSettings voice;
+    PerformanceSettings performance;
     OutputSettings output;
     int body = 0;
     Body::Quality bodyQuality = Body::Quality::convolution;
@@ -21,7 +21,7 @@ struct EngineSettings
 
 // The complete instrument: MIDI in, stereo audio out.
 //
-//   voice (bowed string at >= 176.4 kHz) -> decimate -> DC block, sordino
+//   violin (four bowed strings at >= 176.4 kHz) -> decimate -> DC block, sordino
 //   -> body -> stereo width, room, gain, limiter
 //
 // The string runs at the host rate times a power of two chosen so the
@@ -49,20 +49,19 @@ public:
     double getInternalSampleRate() const { return hostRate * getOversamplingFactor(); }
     int getLatencySamples() const;
 
-    ViolinVoice& getVoice() { return voice; }
+    Violin& getViolin() { return violin; }
 
     static int oversamplingOrderFor (double hostSampleRate);
 
 private:
     void renderString (int start, int numSamples);
-    void handleMidi (const juce::MidiMessage& message);
 
     double hostRate = 48000.0;
     int maxBlock = 512;
     int oversamplingOrder = 2;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
 
-    ViolinVoice voice;
+    Violin violin;
     Body body;
     OutputChain output;
     EngineSettings settings;

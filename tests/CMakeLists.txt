@@ -1,6 +1,7 @@
 set(VIOLINSYNTH_TEST_SOURCES
     PluginProcessorTests.cpp
     EngineTests.cpp
+    StringAllocatorTests.cpp
     StringDspTests.cpp)
 
 add_executable(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})
