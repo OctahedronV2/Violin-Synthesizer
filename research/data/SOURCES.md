@@ -18,9 +18,17 @@ Third-party data used by the research prototype, and the files derived from it. 
 
   **Changes made:** measurements averaged per violin and phase, converted to impulse responses, band-limited, resampled to 48 kHz, and combined with a smooth radiation correction.
 
-## University of Iowa Musical Instrument Samples (planned)
+## University of Iowa Musical Instrument Samples
 
-> Fritts, L. *University of Iowa Musical Instrument Samples*. https://theremin.music.uiowa.edu/MIS.html
+> Fritts, L. *University of Iowa Musical Instrument Samples*, Violin (2012). University of Iowa Electronic Music Studios. https://theremin.music.uiowa.edu/MIS.html
 
 - **Terms:** the site states the recordings "may be downloaded and used for any projects, without restrictions".
-- **Status:** not used yet. They are intended as an anechoic reference for `scripts/estimate_body_from_recordings.py`.
+- **Recording:** Nicolai Tambovsky violin (1998), played by Leonid Iogansen. Anechoic chamber, Earthworks QTC40 microphone at 5 feet.
+- **Contents used:** 36 arco chromatic runs (mono, 16-bit/44.1 kHz) at pp, mf and ff on all four strings.
+- **Not committed:** the recordings. `scripts/fetch_iowa.py` downloads them (110 MB) to `research/external/iowa/`, which is git-ignored.
+- **Derived files in this repository:**
+  - `data/body_iowa_violin.json`: estimated body response and fitted modes;
+  - `data/body_iowa_violin_48k.wav`: minimum-phase body filter;
+  - `data/iowa_vs_cnsm.json`: comparison results.
+
+  Credit is not required but is good practice.

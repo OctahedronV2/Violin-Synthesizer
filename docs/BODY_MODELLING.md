@@ -69,12 +69,37 @@ The correction assumes the recorded string source is an ideal 1/n spectrum. Our 
 
 Next to the measured bodies, the Phase 1 placeholder is clearly too bright above 3 kHz and too sparse and peaky in the middle range.
 
-## 3. Next steps
+## 3. Independent check against the anechoic Iowa violin
+
+The radiation balance above comes from recordings made in a room. To check that it describes violins rather than that room, the same pipeline was run on the University of Iowa MIS violin (2012):
+- a different instrument: a Nicolai Tambovsky violin from 1998;
+- a different player;
+- an anechoic chamber, with an Earthworks QTC40 measurement microphone at 5 feet.
+
+The input was 36 arco chromatic runs at pp, mf and ff: 315 notes, of which 16 were rejected (`scripts/fetch_iowa.py`, then `scripts/estimate_body_from_recordings.py`). `scripts/compare_iowa_cnsm.py` compares the results:
+
+| 1/3-octave balance, 250 Hz – 8 kHz | RMS difference |
+|---|---|
+| CNSM violins' recordings against each other | 1.2 – 1.7 dB |
+| Iowa against the CNSM recordings | 2.3 – 3.1 dB |
+| Iowa against the CNSM body filters (Y × R) | **2.8 – 3.5 dB** |
+| Iowa against \|Y\| alone | 6.4 – 7.7 dB |
+| Iowa against the Phase 1 synthetic body | 6.9 dB |
+| Iowa against \|jωY\| | 15 – 16 dB |
+
+![Iowa vs CNSM](../research/figures/iowa_vs_cnsm.png)
+
+A different violin, player and microphone, with no room at all, gives nearly the same broad balance. The radiation correction is therefore a property of violins, not of the CNSM room. The body filters match the anechoic violin about twice as well as the admittance alone, and the rejected jω approximation is off by 15 dB.
+
+The main difference is above about 5 kHz, where the Iowa violin rolls off faster: about 5 dB more at 10 kHz. That is consistent with room reflections adding some high-frequency energy to the CNSM recordings. It leaves a small, optional high-frequency trim for Phase 3 to decide by ear.
+
+The Iowa estimate also yields a fourth body filter, which has no licence restrictions: `data/body_iowa_violin_48k.wav` (minimum phase) and `data/body_iowa_violin.json` (fitted modes).
+
+## 4. Next steps
 
 1. **Listening check** of `research/renders/bodies/`.
 2. **Plugin body (Phase 3):**
    - Ship the measured impulse responses, `research/data/body_ir_*_48k.wav`, via `juce::dsp::Convolution` as the high-quality body.
    - Offer a fitted modal bank as the low-CPU option.
    - Credit the CNSM dataset in the About screen.
-3. **Iowa MIS cross-check:** run `scripts/estimate_body_from_recordings.py` on the anechoic Iowa violin samples. This gives a room-free radiation balance to compare with the CNSM recordings.
-4. **Overpressure reference:** the recordings could provide real examples of heavy bowing, to compare with the model's noise-like overpressure behaviour (see Phase 1 findings, §3.1).
+3. **Overpressure reference:** the recordings could provide real examples of heavy bowing, to compare with the model's noise-like overpressure behaviour (see Phase 1 findings, §3.1).

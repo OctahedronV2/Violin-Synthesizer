@@ -1,0 +1,30 @@
+{
+  "band_hz": [
+    250.0,
+    8000.0
+  ],
+  "smoothing_octaves": 0.3333333333333333,
+  "iowa_notes": 299,
+  "cnsm_recordings_vs_each_other_db": {
+    "Levaggi-Klimke": 1.2309325197146732,
+    "Levaggi-Stoppani": 1.4548767145844559,
+    "Klimke-Stoppani": 1.745822218555609
+  },
+  "iowa_vs_cnsm_recordings_db": {
+    "Levaggi": 2.3395791007846714,
+    "Klimke": 3.1358284588432825,
+    "Stoppani": 2.4897038819483592
+  },
+  "iowa_vs_filters_db": {
+    "Levaggi filter (Y \u00d7 R)": 2.797464119058732,
+    "Levaggi |Y| alone": 6.436732494480566,
+    "Levaggi |j\u03c9Y|": 14.79194196694793,
+    "Klimke filter (Y \u00d7 R)": 3.5021375281015286,
+    "Klimke |Y| alone": 7.6634991918046955,
+    "Klimke |j\u03c9Y|": 16.080774015704957,
+    "Stoppani filter (Y \u00d7 R)": 3.0199998746569783,
+    "Stoppani |Y| alone": 7.501617233701846,
+    "Stoppani |j\u03c9Y|": 15.844282452399472,
+    "Phase 1 synthetic body": 6.946092285511226
+  }
+}
