@@ -103,9 +103,19 @@ private:
 
     static constexpr double silenceSeconds = 0.25;
 
-    void updateControlRate (const VoiceSettings& settings);
+    // Pitch changes slowly, so it is computed every controlInterval samples
+    // and interpolated in between (docs/PHASE7.md, 7.2); the bow position and
+    // force targets are updated at the same rate. Envelopes and smoothing stay
+    // per sample, so a steady note renders exactly as before.
+    void updateControlRate (const VoiceSettings& settings, const StringContext& context);
+    void jumpControl (const VoiceSettings& settings, const StringContext& context);
+    void advanceControl (const VoiceSettings& settings, int samples);
+    void updateTargets (const VoiceSettings& settings, const StringContext& context);
+    double controlF0 (const VoiceSettings& settings, const StringContext& context) const;
+    void rampPitchTo (double f0, int samples);
     double envelopeShape() const;
     double nextNoise();
+    void updateNoise();
     void setTarget (int note, bool glide);
     void setDamping (Damping d);
     void setArticulation (Articulation a);
@@ -118,12 +128,18 @@ private:
 
     Stage stage = Stage::open;
     int currentNote = -1;
-    double logF0 = 0.0, targetLogF0 = 0.0, glideCoeff = 0.0;
+    double logF0 = 0.0, targetLogF0 = 0.0;
     double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
-    double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0;
+    double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0, noiseScale = 1.0;
+    double minF0 = 0.0;
+
+    // Control-rate state
+    double betaTarget = 0.11, fractionTarget = 0.48, speedScale = 1.0;
+    double f0Now = 440.0, f0End = 440.0, f0Ratio = 1.0;
+    bool controlJump = true; // a note event: start the next interval from the new values
     std::uint32_t random = 1;
     NoteExpression expression;
     double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0, peakLevel = 0.0, peakDecay = 0.0;
@@ -133,6 +149,7 @@ private:
     Articulation noteArticulation = Articulation::legato;
     double strokeSeconds = 0.0; // since the stroke or pluck started
     double stopAt = 0.0; // staccato: when the bow starts to stop
+    double biteLevel = 0.0, biteDecay = 0.0; // staccato onset force
     double tremoloPhase = 0.0, tremoloRate = 13.0, tremoloSign = 1.0;
     double pluckPosition = 0.0, pluckLength = 1.0, pluckAmplitude = 0.0;
 };

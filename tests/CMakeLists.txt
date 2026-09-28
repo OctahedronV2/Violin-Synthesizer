@@ -4,6 +4,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     Phase4Tests.cpp
     Phase5Tests.cpp
     BowNoiseTests.cpp
+    ControlRateTests.cpp
     PresetTests.cpp
     StringAllocatorTests.cpp
     StringDspTests.cpp)

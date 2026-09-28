@@ -8,7 +8,13 @@ namespace violinsynth::engine
 {
 namespace
 {
-constexpr int controlInterval = 32;
+// Pitch (glide, bends, vibrato) and the bow position and force targets are
+// computed every controlInterval internal samples (5.8 kHz at 192 kHz); pitch
+// is interpolated in between. It is also the step of the humanising noise,
+// which has always run every 33 samples with its filter set for 32; both are
+// kept so humanised vibrato and tremolo jitter are unchanged.
+constexpr int controlInterval = 33;
+constexpr int noiseFilterStep = 32;
 constexpr double smoothingSeconds = 0.02;
 constexpr double legatoDynamicsSeconds = 0.15; // dynamics change smoothly across a slur
 constexpr double legatoEntrySeconds = 0.025; // bow arriving on a new string mid-stroke
@@ -46,7 +52,11 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     string.setParams (bowedParams);
 
     smoothingCoeff = onePoleCoeff (smoothingSeconds, fs);
-    noiseCoeff = std::exp (-2.0 * std::numbers::pi * noiseBandwidthHz * controlInterval / fs);
+    noiseCoeff = std::exp (-2.0 * std::numbers::pi * noiseBandwidthHz * noiseFilterStep / fs);
+    // Scales the drifting noise to unit variance.
+    noiseScale = 1.0 / (0.577 * std::sqrt ((1.0 - noiseCoeff) / (1.0 + noiseCoeff)));
+    biteDecay = onePoleCoeff (staccatoBiteSeconds, fs);
+    minF0 = midiToHz (spec->openMidiNote - 1.0);
     peakDecay = onePoleCoeff (0.3, fs);
     random = 0x9e3779b9u * static_cast<std::uint32_t> (stringIndex + 1);
     reset();
@@ -68,6 +78,7 @@ void StringVoice::reset()
     forceFraction = 0.48;
     lastSpeed = 0.0;
     peakLevel = 0.0;
+    controlJump = true;
     betaFloor = std::max (0.02, 1.2 * string.minBeta (midiToHz (spec->openMidiNote + 14)));
 }
 
@@ -80,6 +91,7 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
+    controlJump = true; // start the new pitch or glide from the next sample
     silentSeconds = 0.0;
 }
 
@@ -146,6 +158,7 @@ void StringVoice::start (int note, float velocity, Articulation a)
         case Articulation::staccato:
             attackSeconds = staccatoAttack;
             stopAt = staccatoStroke;
+            biteLevel = staccatoBite;
             break;
         case Articulation::spiccato:
             attackSeconds = 0.002; // the bow is already moving when it lands
@@ -247,16 +260,129 @@ double StringVoice::nextNoise()
     return static_cast<double> (random >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
 }
 
-void StringVoice::updateControlRate (const VoiceSettings& settings)
+void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
 {
-    glideCoeff = onePoleCoeff (settings.portamentoSeconds / 3.0, fs);
+    // Glide and vibrato, stepped over the whole interval.
+    const auto seconds = samples / fs;
+    logF0 = targetLogF0 + onePoleCoeff (settings.portamentoSeconds / 3.0, fs / samples) * (logF0 - targetLogF0);
+    secondsSinceNoteChange += seconds;
+    const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
+    vibratoPhase += settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * seconds;
+    vibratoPhase -= std::floor (vibratoPhase);
+}
 
+void StringVoice::updateNoise()
+{
     // Slowly drifting noise for humanised vibrato, normalised to unit variance.
-    const auto scale = 1.0 / (0.577 * std::sqrt ((1.0 - noiseCoeff) / (1.0 + noiseCoeff)));
     rateNoise = noiseCoeff * rateNoise + (1.0 - noiseCoeff) * nextNoise();
     depthNoise = noiseCoeff * depthNoise + (1.0 - noiseCoeff) * nextNoise();
-    rateNoise = std::clamp (rateNoise, -1.0 / scale * 2.5, 1.0 / scale * 2.5);
-    depthNoise = std::clamp (depthNoise, -1.0 / scale * 2.5, 1.0 / scale * 2.5);
+    rateNoise = std::clamp (rateNoise, -1.0 / noiseScale * 2.5, 1.0 / noiseScale * 2.5);
+    depthNoise = std::clamp (depthNoise, -1.0 / noiseScale * 2.5, 1.0 / noiseScale * 2.5);
+}
+
+double StringVoice::controlF0 (const VoiceSettings& settings, const StringContext& context) const
+{
+    // Pitch: glide, bends (global and per note) and humanised vibrato.
+    const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
+    const auto onset
+        = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
+    const auto depth = (onset * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
+                        + 30.0 * expression.pressure);
+    const auto vibratoCents = 0.5 * std::max (depth, 0.0) * std::sin (2.0 * std::numbers::pi * vibratoPhase);
+    const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones);
+    return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
+}
+
+void StringVoice::updateTargets (const VoiceSettings& settings, const StringContext& context)
+{
+    // Bow position: the setting, or the per-note timbre (tasto 0 .. ponticello 1),
+    // unless the articulation fixes it.
+    betaTarget = settings.bowPosition;
+    if (expression.timbre >= 0.0)
+        betaTarget = 0.22 * std::pow (0.04 / 0.22, std::clamp (expression.timbre, 0.0, 1.0));
+    switch (noteArticulation)
+    {
+        case Articulation::sulPonticello:
+            betaTarget = 0.07;
+            break;
+        case Articulation::sulTasto:
+            betaTarget = 0.15; // further out, the model turns subharmonic (docs/PHASE1_FINDINGS.md)
+            break;
+        case Articulation::harmonics:
+            betaTarget = 0.13;
+            break;
+        case Articulation::pizzicato:
+            betaTarget = pluckBeta;
+            break;
+        default:
+            break;
+    }
+    betaTarget = std::clamp (betaTarget, betaFloor, 0.3);
+
+    // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
+    // (or CC1) across the string's clean window, unless the articulation
+    // fixes it. Articulations set the fraction itself, so they sound the
+    // same on every string.
+    const auto setting = context.pressureOverride >= 0.0 ? context.pressureOverride : settings.bowPressure;
+    fractionTarget = spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * setting;
+    speedScale = 1.0;
+    switch (noteArticulation)
+    {
+        case Articulation::sulPonticello:
+            // Light bow near the bridge: weak fundamental, strong upper partials.
+            fractionTarget = std::min (fractionTarget, 0.21);
+            break;
+        case Articulation::sulTasto:
+            // Over the fingerboard: slower, firmer bow for a steady, soft tone.
+            fractionTarget = std::max (fractionTarget, 0.48);
+            speedScale = 0.85;
+            break;
+        case Articulation::harmonics:
+            fractionTarget = std::min (fractionTarget, 0.25);
+            speedScale = 0.9;
+            break;
+        default:
+            break;
+    }
+}
+
+void StringVoice::updateControlRate (const VoiceSettings& settings, const StringContext& context)
+{
+    controlCounter = controlInterval - 1;
+    if (stage == Stage::open)
+    {
+        controlJump = false;
+        updateNoise();
+        return;
+    }
+
+    updateTargets (settings, context);
+    f0Now = controlJump ? controlF0 (settings, context) : f0End;
+    controlJump = false;
+    advanceControl (settings, controlInterval);
+    updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
+    rampPitchTo (controlF0 (settings, context), controlInterval);
+}
+
+void StringVoice::jumpControl (const VoiceSettings& settings, const StringContext& context)
+{
+    // A note event between control updates: start from the new values now
+    // and reach the next update on time.
+    controlJump = false;
+    if (stage == Stage::open)
+        return;
+    updateTargets (settings, context);
+    f0Now = controlF0 (settings, context);
+    const auto remaining = controlCounter + 1;
+    advanceControl (settings, remaining);
+    rampPitchTo (controlF0 (settings, context), remaining);
+}
+
+void StringVoice::rampPitchTo (double f0, int samples)
+{
+    // Geometric steps: linear in log frequency.
+    f0End = f0;
+    f0Ratio = f0End == f0Now ? 1.0 : std::exp (std::log (f0End / f0Now) / samples);
 }
 
 double StringVoice::processSample (const VoiceSettings& settings, const StringContext& context)
@@ -264,10 +390,9 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     const auto dt = 1.0 / fs;
 
     if (controlCounter-- <= 0)
-    {
-        controlCounter = controlInterval;
-        updateControlRate (settings);
-    }
+        updateControlRate (settings, context);
+    else if (controlJump)
+        jumpControl (settings, context);
 
     // Open strings are handled by SympatheticStrings at the host rate.
     if (stage == Stage::open)
@@ -295,160 +420,98 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
 
     const auto& friction = string.getParams().friction;
-    double f0, speed = 0.0, force = 0.0, excitation = 0.0, b;
+    double speed = 0.0, force = 0.0, excitation = 0.0;
 
+    const auto f0 = f0Now;
+    f0Now *= f0Ratio;
+    beta = betaTarget + smoothingCoeff * (beta - betaTarget);
+    const auto b = beta;
+
+    strokeSeconds += dt;
+
+    if (stage == Stage::plucked && pluckPosition < pluckLength)
     {
-        // Pitch: glide, bends (global and per note) and humanised vibrato.
-        logF0 = targetLogF0 + glideCoeff * (logF0 - targetLogF0);
-        secondsSinceNoteChange += dt;
-        const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-        const auto scale = 1.0 / (0.577 * std::sqrt ((1.0 - noiseCoeff) / (1.0 + noiseCoeff)));
-        vibratoPhase += settings.vibratoRateHz * (1.0 + 0.08 * humanise * scale * rateNoise) * dt;
-        vibratoPhase -= std::floor (vibratoPhase);
-        const auto onset
-            = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
-        const auto depth = (onset * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * scale * depthNoise)
-                            + 30.0 * expression.pressure);
-        const auto vibratoCents = 0.5 * std::max (depth, 0.0) * std::sin (2.0 * std::numbers::pi * vibratoPhase);
-        const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones);
-        f0 = std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0),
-                       midiToHz (spec->openMidiNote - 1.0));
+        // Raised-cosine velocity pulse at the plucking point.
+        excitation = pluckAmplitude * 0.5 * (1.0 - std::cos (2.0 * std::numbers::pi * pluckPosition / pluckLength));
+        pluckPosition += 1.0;
+    }
 
-        // Bow position: the setting, or the per-note timbre (tasto 0 .. ponticello 1),
-        // unless the articulation fixes it.
-        auto betaTarget = settings.bowPosition;
-        if (expression.timbre >= 0.0)
-            betaTarget = 0.22 * std::pow (0.04 / 0.22, std::clamp (expression.timbre, 0.0, 1.0));
+    if (isBowed())
+    {
+        const auto target = context.dynamicsOverride >= 0.0 ? context.dynamicsOverride : dynamicsTarget;
+        dynamics = target + dynamicsCoeff * (dynamics - target);
+
+        // A short stroke lands with its weight already set; smoothing from the
+        // previous note would give it that note's weight for its first 20 ms.
+        const bool shortStroke
+            = noteArticulation == Articulation::staccato || noteArticulation == Articulation::spiccato;
+        if (shortStroke && strokeSeconds <= dt)
+            forceFraction = fractionTarget;
+        forceFraction = fractionTarget + smoothingCoeff * (forceFraction - fractionTarget);
+
+        // Speed from dynamics; force follows speed within the string's playable window.
+        const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics)) * speedScale
+            * context.bowChangeGain;
+        auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
+        auto forceGain = 1.0;
+        speed = forceSpeed;
+
         switch (noteArticulation)
         {
-            case Articulation::sulPonticello:
-                betaTarget = 0.07;
+            case Articulation::staccato:
+            {
+                // Bitten onset, then the bow stops on the string. The weight eases
+                // with the speed: at full weight on a slowing bow the string crunches.
+                biteLevel *= biteDecay;
+                forceGain = 1.0 + biteLevel;
+                const auto stopping = (strokeSeconds - stopAt) / staccatoStop;
+                const auto slowing
+                    = stopping <= 0.0 ? 1.0 : 0.5 + 0.5 * std::cos (std::numbers::pi * std::min (stopping, 1.0));
+                speed *= slowing;
+                forceSpeed *= slowing;
+                if (stopping >= 1.0)
+                {
+                    setDamping (Damping::damped);
+                    stage = Stage::ringing;
+                    speed = forceSpeed = 0.0;
+                }
                 break;
-            case Articulation::sulTasto:
-                betaTarget = 0.15; // further out, the model turns subharmonic (docs/PHASE1_FINDINGS.md)
+            }
+            case Articulation::spiccato:
+            {
+                // The bow moves throughout; the force is a half-sine bounce.
+                speed = forceSpeed = nominal;
+                const auto contact = strokeSeconds / stopAt;
+                forceGain = contact < 1.0 ? std::sin (std::numbers::pi * contact) : 0.0;
+                if (contact >= 1.0)
+                {
+                    setDamping (Damping::shortRing);
+                    stage = Stage::ringing;
+                    speed = forceSpeed = 0.0;
+                }
                 break;
-            case Articulation::harmonics:
-                betaTarget = 0.13;
+            }
+            case Articulation::tremolo:
+            {
+                // Rapid reversals: speed falls to zero at each turn, the bow stays on.
+                tremoloPhase += tremoloRate * dt;
+                if (tremoloPhase >= 1.0)
+                {
+                    tremoloPhase -= 1.0;
+                    tremoloSign = -tremoloSign;
+                    tremoloRate = tremoloRateHz * (1.0 + tremoloJitter * nextNoise());
+                }
+                const auto shape = std::sqrt (std::sin (std::numbers::pi * tremoloPhase));
+                speed = forceSpeed * shape * tremoloSign;
+                forceSpeed *= 0.5 + 0.5 * shape;
                 break;
-            case Articulation::pizzicato:
-                betaTarget = pluckBeta;
-                break;
+            }
             default:
                 break;
         }
-        betaTarget = std::clamp (betaTarget, betaFloor, 0.3);
-        beta = betaTarget + smoothingCoeff * (beta - betaTarget);
-        b = beta;
 
-        strokeSeconds += dt;
-
-        if (stage == Stage::plucked && pluckPosition < pluckLength)
-        {
-            // Raised-cosine velocity pulse at the plucking point.
-            excitation = pluckAmplitude * 0.5 * (1.0 - std::cos (2.0 * std::numbers::pi * pluckPosition / pluckLength));
-            pluckPosition += 1.0;
-        }
-
-        if (isBowed())
-        {
-            const auto target = context.dynamicsOverride >= 0.0 ? context.dynamicsOverride : dynamicsTarget;
-            dynamics = target + dynamicsCoeff * (dynamics - target);
-            // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
-            // (or CC1) across the string's clean window, unless the articulation
-            // fixes it. Articulations set the fraction itself, so they sound the
-            // same on every string.
-            const auto setting = context.pressureOverride >= 0.0 ? context.pressureOverride : settings.bowPressure;
-            auto fractionTarget = spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * setting;
-            auto speedScale = 1.0;
-            switch (noteArticulation)
-            {
-                case Articulation::sulPonticello:
-                    // Light bow near the bridge: weak fundamental, strong upper partials.
-                    fractionTarget = std::min (fractionTarget, 0.21);
-                    break;
-                case Articulation::sulTasto:
-                    // Over the fingerboard: slower, firmer bow for a steady, soft tone.
-                    fractionTarget = std::max (fractionTarget, 0.48);
-                    speedScale = 0.85;
-                    break;
-                case Articulation::harmonics:
-                    fractionTarget = std::min (fractionTarget, 0.25);
-                    speedScale = 0.9;
-                    break;
-                default:
-                    break;
-            }
-            // A short stroke lands with its weight already set; smoothing from the
-            // previous note would give it that note's weight for its first 20 ms.
-            const bool shortStroke
-                = noteArticulation == Articulation::staccato || noteArticulation == Articulation::spiccato;
-            if (shortStroke && strokeSeconds <= dt)
-                forceFraction = fractionTarget;
-            forceFraction = fractionTarget + smoothingCoeff * (forceFraction - fractionTarget);
-
-            // Speed from dynamics; force follows speed within the string's playable window.
-            const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * std::pow (dynamics, 1.5)) * speedScale
-                * context.bowChangeGain;
-            auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
-            auto forceGain = 1.0;
-            speed = forceSpeed;
-
-            switch (noteArticulation)
-            {
-                case Articulation::staccato:
-                {
-                    // Bitten onset, then the bow stops on the string. The weight eases
-                    // with the speed: at full weight on a slowing bow the string crunches.
-                    forceGain = 1.0 + staccatoBite * std::exp (-strokeSeconds / staccatoBiteSeconds);
-                    const auto stopping = (strokeSeconds - stopAt) / staccatoStop;
-                    const auto slowing
-                        = stopping <= 0.0 ? 1.0 : 0.5 + 0.5 * std::cos (std::numbers::pi * std::min (stopping, 1.0));
-                    speed *= slowing;
-                    forceSpeed *= slowing;
-                    if (stopping >= 1.0)
-                    {
-                        setDamping (Damping::damped);
-                        stage = Stage::ringing;
-                        speed = forceSpeed = 0.0;
-                    }
-                    break;
-                }
-                case Articulation::spiccato:
-                {
-                    // The bow moves throughout; the force is a half-sine bounce.
-                    speed = forceSpeed = nominal;
-                    const auto contact = strokeSeconds / stopAt;
-                    forceGain = contact < 1.0 ? std::sin (std::numbers::pi * contact) : 0.0;
-                    if (contact >= 1.0)
-                    {
-                        setDamping (Damping::shortRing);
-                        stage = Stage::ringing;
-                        speed = forceSpeed = 0.0;
-                    }
-                    break;
-                }
-                case Articulation::tremolo:
-                {
-                    // Rapid reversals: speed falls to zero at each turn, the bow stays on.
-                    tremoloPhase += tremoloRate * dt;
-                    if (tremoloPhase >= 1.0)
-                    {
-                        tremoloPhase -= 1.0;
-                        tremoloSign = -tremoloSign;
-                        tremoloRate = tremoloRateHz * (1.0 + tremoloJitter * nextNoise());
-                    }
-                    const auto shape = std::sqrt (std::sin (std::numbers::pi * tremoloPhase));
-                    speed = forceSpeed * shape * tremoloSign;
-                    forceSpeed *= 0.5 + 0.5 * shape;
-                    break;
-                }
-                default:
-                    break;
-            }
-
-            const auto fMax = 2.0 * friction.impedance * forceSpeed / (beta * (friction.muS - friction.muD));
-            force = forceGain * fMax * forceFraction;
-        }
+        const auto fMax = 2.0 * friction.impedance * forceSpeed / (beta * (friction.muS - friction.muD));
+        force = forceGain * fMax * forceFraction;
     }
 
     const auto y = string.process (f0, b, context.direction * speed, force, excitation);

@@ -130,6 +130,35 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 
 **Sequencing:** this touches `StringVoice.cpp`, which the legato-stutter and bow-noise work is changing now. 7.2 starts after that work is merged, and its fixes join the reference renders first.
 
+### 7.2 result
+
+Done in `StringVoice.cpp` and `BowedString.cpp`. What changed from the plan:
+
+- **Only pitch is interpolated.** Glide, bends and vibrato (`exp`, `pow` and `sin`) run every 33 internal samples and the pitch is stepped geometrically in between. The bow position and force *targets* are also updated at that rate, but the one-pole smoothing of bow position, force and dynamics stays per sample, because it is a single multiply-add. `pow (dynamics, 1.5)` became `d * sqrt (d)`. With no vibrato, bend or glide, a note renders **bit-exactly** as before.
+- **33 samples, not 32:** the humanising noise has always stepped every 33 samples, so keeping that step leaves humanised vibrato and tremolo jitter unchanged.
+- **Note events** (a new note or a slur) start from the new pitch on the next sample and ramp to the next control update, so glides and vibrato resets are not delayed.
+- **Loop-filter phase delay:** tabulated per string every 5 cents, filled the first time each pitch is played and cleared when the loss settings change. It no longer costs 40 `atan2` calls each time the pitch moves under vibrato.
+- `sin` is kept at control rate instead of a rotating phasor: at 5.8 kHz it no longer shows in the profile.
+
+**CPU** (cloud VM, 2.1 GHz Xeon, 48 kHz, 128-sample buffer, measured body, best of 3 runs, two runs each):
+
+| Case | `main` | 7.2 |
+|---|---|---|
+| Idle | 2.0% | 2.0% |
+| One note with vibrato | 3.7–3.9% | 2.5% |
+| Four-note chord | 9.5–9.9% | 4.0–4.2% |
+| Legato phrase with slides | 4.4% | 2.6–2.8% |
+| Pitch-bend sweep | 3.7–4.0% | 2.5% |
+| Articulation demo | 4.5–4.7% | 2.7% |
+
+Above idle, a note now costs about 0.5% instead of 1.9%, roughly 75% less, which beats the 30–40% expected. The string voice alone renders 2.4–2.9× faster.
+
+**Sound:**
+
+- Pitch against `main`, over every note from G3 to E6 with vibrato, a slur and a bend: within 0.1 cent while sustained and 0.07 cent through a glide. Steps (a pitch-bend jump) ramp over one control period (0.17 ms) instead of jumping. `ControlRateTests.cpp` checks vibrato and glide against the per-sample curves.
+- The bow-noise scratch meter (`[.bownoisereport]`) reads exactly the same as on `main`.
+- **Single renders can't be compared within 0.5 dB.** Under vibrato the bowed string is chaotic: nudging `main`'s pitch by 0.05 cent (a quarter of the 0.2-cent tolerance) moves single third-octave bands by up to 5 dB and preset levels in `PresetTests` by up to 3 dB. 7.2 stays inside that spread. Averaged over the G3–E6 set, levels match within 0.14 dB per note. So the 7.0 sound check has to compare averages over many notes, or phrases without vibrato, as the scratch meter already does. The Practice Mute preset's level tolerance was widened to 2.5 dB for this reason, like Eerie Tremolo and Sul Ponticello.
+
 ## 7.3 A faster measured body
 
 - **Replace JUCE's fallback FFT** with a partitioned convolution on PFFFT (BSD licence, SSE and NEON, a single C file). It gives the same speed on all three platforms. FFTW was considered and rejected as a large dependency to build in CI.
