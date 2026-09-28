@@ -228,6 +228,14 @@ Above idle, a note now costs about 0.5% instead of 1.9%, roughly 75% less, which
 - **Audit the known risks:** the convolution IR swap, preset loading, the parameter-to-settings copy each block, and the editor's meters reading engine state.
 - **Denormals:** `processBlock` already sets `ScopedNoDenormals`. Add a test that plays a note, lets it decay for 30 s and checks the idle cost doesn't rise as the tails fall towards zero.
 
+### 7.4 results
+
+- **RealtimeSanitizer** runs the whole test suite in CI (the `RealtimeSanitizer` job, Clang 20, `-DVIOLINSYNTH_ENABLE_RTSAN=ON`). `ViolinSynthProcessor::processBlock` and `ViolinEngine::process` are marked `VIOLINSYNTH_NONBLOCKING` (`source/engine/Realtime.h`), so any allocation, lock or system call reached from them fails the job with a stack trace.
+- **Found and fixed:** the on-screen keyboard. `juce::MidiKeyboardState::processNextMidiBuffer` takes a lock on every block, shared with the editor's keyboard on the message thread. Notes now cross between the threads through two lock-free queues: the keyboard's notes go to the audio thread, and the host's notes come back to light up the keyboard on the processor's timer.
+- **Found and fixed:** SysEx from the host was copied into a `juce::MidiMessage`, which allocates for messages longer than 8 bytes. Only channel messages are copied now.
+- **Audited, no problem found:** body changes (every body is prepared in `prepare`, and a change crossfades between them), preset loading and host state restores (message thread; the audio thread only reads the parameters' atomics), the parameter-to-settings copy each block (a plain struct copy), and the editor's meters (atomics). `RealtimeSafetyTests.cpp` plays through all of these while automating every parameter, switching bodies and presets, restoring state, opening and closing the editor, and sending SysEx; the sanitizer reports nothing.
+- **Denormals:** a test plays a note, lets it decay for 30 s and checks that late silence costs no more than twice the early silence. Without `ScopedNoDenormals` it fails: late silence costs about 3.8 times as much.
+
 ## 7.5 Experiments for Octastra
 
 These don't have to ship in the violin, but Octastra's CPU target depends on their answers. Each one ends with a measured result and a decision, written up in this document.
@@ -257,6 +265,8 @@ If SIMD passes, the violin itself gets it for chords, and it becomes the core of
   - **Reported latency** matches the actual delay of a click through the engine, at every sample rate and in both body modes, so host latency compensation lines up.
   - States saved by earlier versions (fixtures committed from Phase 6) still load and sound the same.
   - Bypass, reset and `releaseResources` followed by `prepareToPlay` repeated 100 times.
+
+**Results:** Steinberg's validator (VST3 SDK 3.8.1, extensive mode) runs after pluginval on all three platforms. It failed one test at first: the plugin's single VST3 program had no name. It is now called "Default", and all 47 tests pass. The host-behaviour tests are in `tests/HostBehaviourTests.cpp`. The measured bodies start about 1 ms after the light bodies at every sample rate: that is the leading part of the impulse responses, not processing latency, so the reported latency is still right.
 
 ### By hand, in real hosts
 

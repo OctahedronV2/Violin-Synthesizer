@@ -9,7 +9,9 @@
 
 namespace violinsynth
 {
-class ViolinSynthProcessor final : public juce::AudioProcessor, private juce::Timer
+class ViolinSynthProcessor final : public juce::AudioProcessor,
+                                   private juce::Timer,
+                                   private juce::MidiKeyboardState::Listener
 {
 public:
     ViolinSynthProcessor();
@@ -19,7 +21,9 @@ public:
     void releaseResources() override;
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
 
-    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    // Audio thread: checked for allocations, locks and system calls in the
+    // RealtimeSanitizer build (source/engine/Realtime.h).
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) VIOLINSYNTH_NONBLOCKING override;
     using AudioProcessor::processBlock;
 
     juce::AudioProcessorEditor* createEditor() override;
@@ -37,7 +41,8 @@ public:
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override { }
-    const juce::String getProgramName (int) override { return {}; }
+    // VST3 hosts list the one program by name; an empty name fails Steinberg's validator.
+    const juce::String getProgramName (int) override { return "Default"; }
     void changeProgramName (int, const juce::String&) override { }
 
     void getStateInformation (juce::MemoryBlock& destData) override;
@@ -48,6 +53,9 @@ public:
 
     // Notes played on the editor's on-screen keyboard, merged into the MIDI
     // stream so the Standalone app can be tested without a MIDI controller.
+    // Message thread only: MidiKeyboardState takes a lock, so the audio thread
+    // never touches it. Notes cross between the threads through lock-free
+    // queues, and notes from the host light up the keyboard a timer tick later.
     juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
 
     // For tests and diagnostics.
@@ -71,13 +79,49 @@ public:
     // Message thread: applies pending body changes (also run by a timer).
     void applyBodyChange() { engine.updateConvolutionBody(); }
 
+    // Message thread: shows the host's notes on the keyboard state. Also run by the timer.
+    void updateKeyboardState();
+
 private:
-    void timerCallback() override { applyBodyChange(); }
+    // A note on or off crossing between the audio and message threads.
+    struct KeyEvent
+    {
+        int channel = 1;
+        int note = -1; // -1: all notes off on the channel
+        float velocity = 0.0f; // 0: note off
+    };
+
+    // Single-producer, single-consumer queue that never blocks or allocates.
+    class KeyEventQueue
+    {
+    public:
+        bool push (const KeyEvent& e);
+        template <typename Fn>
+        void popAll (Fn&& fn);
+
+    private:
+        static constexpr int capacity = 256;
+        juce::AbstractFifo fifo { capacity };
+        std::array<KeyEvent, capacity> events;
+    };
+
+    void timerCallback() override
+    {
+        applyBodyChange();
+        updateKeyboardState();
+    }
+
+    void handleNoteOn (juce::MidiKeyboardState*, int channel, int note, float velocity) override;
+    void handleNoteOff (juce::MidiKeyboardState*, int channel, int note, float velocity) override;
 
     juce::AudioProcessorValueTreeState parameters;
     params::Reader reader;
     PresetManager presets { parameters };
     juce::MidiKeyboardState keyboardState;
+    KeyEventQueue keysToAudio; // on-screen keyboard -> audio thread
+    KeyEventQueue keysToDisplay; // host notes -> keyboard state
+    bool showingHostNotes = false; // message thread: set while the host's notes update keyboardState
+    juce::MidiBuffer mergedMidi; // host MIDI plus on-screen notes, preallocated
     engine::ViolinEngine engine;
     std::atomic<int> activeArticulation { 0 };
     std::array<StringState, engine::Violin::numStrings> stringStates;

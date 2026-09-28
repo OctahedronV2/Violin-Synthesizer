@@ -115,7 +115,9 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             const auto eventPosition = juce::jlimit (0, chunkLength, metadata.samplePosition - chunkStart);
             renderString (position, eventPosition - position);
             position = eventPosition;
-            violin.handleMidi (metadata.getMessage());
+            // Only channel messages matter here; copying SysEx into a MidiMessage would allocate.
+            if (metadata.numBytes <= 3)
+                violin.handleMidi (metadata.getMessage());
         }
         renderString (position, chunkLength - position);
 
