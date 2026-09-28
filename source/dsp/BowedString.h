@@ -14,9 +14,21 @@ enum class Tuning
     fundamental, // free vibration, e.g. pizzicato
 };
 
+// Torsional (twisting) waves. The bow drags the string's surface, which both
+// moves the string sideways and twists it; the twist travels much faster than
+// the transverse wave and dies away much sooner, which steadies the stick-slip
+// at the bow (docs/CLEAN_BOWING.md). speedRatio 0 turns it off.
+struct TorsionParams
+{
+    double speedRatio = 0.0; // torsional / transverse wave speed
+    double impedanceRatio = 3.0; // torsional / transverse impedance, at the string's surface
+    double q = 45.0; // quality factor of the torsional modes
+};
+
 struct StringParams
 {
     FrictionParams friction;
+    TorsionParams torsion;
     LossSpec loss;
     Tuning tuning = Tuning::harmonic;
 };
@@ -44,6 +56,12 @@ public:
 
     double stringVelocity() const { return lastVelocity; }
     bool isSticking() const { return sticking; }
+    // Samples between the last two slip onsets (the string letting go of the
+    // bow), and whether this sample started a slip. Helmholtz motion lets go
+    // once per period.
+    bool slipStarted() const { return slipOnset; }
+    double slipInterval() const { return lastSlipInterval; }
+    double samplesSinceSlip() const { return sinceSlip; }
 
     // Smallest beta the delay lines support at f0 (at least 2 samples bow-to-bridge).
     double minBeta (double f0) const;
@@ -58,6 +76,7 @@ private:
     double fs = 192000.0;
     FractionalDelay bridgeLine;
     FractionalDelay nutLine;
+    FractionalDelay torsionBridgeLine, torsionNutLine;
     LoopFilter loopFilter;
 
     // Harmonic phase delay on a log-frequency grid, filled as pitches are
@@ -70,5 +89,8 @@ private:
     double tau = 0.0;
     bool sticking = false;
     double lastVelocity = 0.0;
+    bool slipOnset = false;
+    double sinceSlip = 0.0, lastSlipInterval = 0.0;
+    double torsionReflection = -1.0, contactImpedance = 0.0, transverseShare = 1.0;
 };
 } // namespace violinsynth::dsp

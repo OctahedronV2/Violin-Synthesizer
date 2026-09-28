@@ -66,6 +66,12 @@ public:
     double stringF0 (int string) const { return voices[static_cast<std::size_t> (string)].currentF0(); }
     double stringLevel (int string) const { return voices[static_cast<std::size_t> (string)].level(); }
     double stringBowSpeed (int string) const { return voices[static_cast<std::size_t> (string)].currentBowSpeed(); }
+    double stringScratch (int string) const { return voices[static_cast<std::size_t> (string)].scratch(); }
+    double stringSlipsPerPeriod (int string) const
+    {
+        return voices[static_cast<std::size_t> (string)].slipsPerPeriod();
+    }
+    bool stringBowed (int string) const { return voices[static_cast<std::size_t> (string)].isBowed(); }
     int bowChangeCount() const { return bowChanges; }
     std::array<bool, numStrings> openStrings() const
     {

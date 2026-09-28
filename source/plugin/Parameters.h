@@ -34,6 +34,7 @@ inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
 inline const juce::ParameterID articulation { "articulation", 1 };
 inline const juce::ParameterID velocityRange { "velocityRange", 2 };
 inline const juce::ParameterID octave { "octave", 2 };
+inline const juce::ParameterID imperfection { "imperfection", 3 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -73,5 +74,6 @@ private:
     std::atomic<float>* articulation;
     std::atomic<float>* velocityRange;
     std::atomic<float>* octave;
+    std::atomic<float>* imperfection;
 };
 } // namespace violinsynth::params

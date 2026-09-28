@@ -54,6 +54,18 @@ public:
         return h0 * s0 + h1 * s1 + h2 * s2 + h3 * s3;
     }
 
+    // Linear interpolation: cheaper, for waves whose exact delay matters little.
+    double readLinear (double delay) const
+    {
+        assert (delay >= 1.0 && delay + 2.0 < static_cast<double> (buffer.size()));
+
+        const auto n = static_cast<std::size_t> (delay);
+        const auto frac = delay - static_cast<double> (n);
+        const auto s0 = buffer[(writePos - n) & mask];
+        const auto s1 = buffer[(writePos - n - 1) & mask];
+        return s0 + frac * (s1 - s0);
+    }
+
     // Writes the next sample; call once per step, after the reads of that step.
     void write (double value)
     {

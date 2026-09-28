@@ -175,7 +175,7 @@ namespace
 // Loudness (dB) of a short phrase played with the processor's current
 // settings: the loudest 100 ms RMS, so short and plucked notes count as
 // loud as sustained ones.
-double phraseLevelDb (ViolinSynthProcessor& processor)
+double phraseLevelDb (ViolinSynthProcessor& processor, float velocity)
 {
     constexpr double fs = 48000.0;
     constexpr int block = 256;
@@ -200,7 +200,7 @@ double phraseLevelDb (ViolinSynthProcessor& processor)
         {
             const auto a = static_cast<int> (on * fs), b = static_cast<int> (off * fs);
             if (a >= start && a < start + block)
-                midi.addEvent (juce::MidiMessage::noteOn (1, note, 0.75f), a - start);
+                midi.addEvent (juce::MidiMessage::noteOn (1, note, velocity), a - start);
             if (b >= start && b < start + block)
                 midi.addEvent (juce::MidiMessage::noteOff (1, note), b - start);
         }
@@ -225,6 +225,16 @@ double phraseLevelDb (ViolinSynthProcessor& processor)
         loudest = std::max (loudest, sum / static_cast<double> (window));
     }
     return 10.0 * std::log10 (loudest + 1.0e-20);
+}
+
+// The bowed string is chaotic: one render's loudest moment moves by a dB or
+// two with tiny changes. Averaging over five velocities around mf steadies it.
+double phraseLevelDb (ViolinSynthProcessor& processor)
+{
+    double sum = 0.0;
+    for (auto velocity : { 0.65f, 0.7f, 0.75f, 0.8f, 0.85f })
+        sum += phraseLevelDb (processor, velocity);
+    return sum / 5.0;
 }
 } // namespace
 

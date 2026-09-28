@@ -1,9 +1,11 @@
 #include "EngineTestUtilities.h"
+#include "dsp/BowController.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 // Bow noise ("scratch"): see docs/BOW_NOISE.md.
@@ -304,4 +306,119 @@ TEST_CASE ("Bow noise across the pressure range", "[.bownoisereport]")
                 }
                 std::printf ("\n");
             }
+}
+
+// Clean bowing (docs/CLEAN_BOWING.md): the player listens to the string and
+// adjusts the bow weight, so the default plays like a professional.
+namespace
+{
+struct ScaleStats
+{
+    int notes = 0;
+    int loud = 0; // notes with a 50 ms stretch louder than -10 dB of scratch
+    int scratchy = 0; // ... louder than -20 dB
+    int helmholtz = 0; // notes whose string ends in clean Helmholtz motion
+};
+
+// Major scales of separate notes, a new stroke each, as in a typed or
+// quantised line. Each note is judged after its first 100 ms.
+ScaleStats scaleStats (double imperfection, const std::vector<int>& roots)
+{
+    constexpr double length = 1.2;
+    ScaleStats stats;
+    for (auto root : roots)
+        for (auto velocity : { 0.5f, 0.8f })
+        {
+            auto s = noiseSettings (Articulation::legato);
+            s.performance.voice.imperfection = imperfection;
+            engine::ViolinEngine e;
+            e.setSettings (s);
+            e.prepare (fs, block);
+
+            std::vector<int> notes;
+            std::vector<Event> events;
+            for (auto step : { 0, 2, 4, 5, 7, 9, 11, 12 })
+            {
+                const auto t = 0.05 + length * static_cast<double> (notes.size());
+                notes.push_back (root + step);
+                events.push_back ({ t, on (root + step, 1, velocity) });
+                events.push_back ({ t + length, off (root + step) });
+            }
+
+            // Helmholtz motion over the last 300 ms of each note: one slip per
+            // period and no scratch, as the player hears it.
+            std::vector<bool> clean (notes.size(), true);
+            const auto x = run (e,
+                                0.05 + length * static_cast<double> (notes.size()) + 0.3,
+                                events,
+                                [&] (double t)
+                                {
+                                    const auto i = static_cast<std::size_t> ((t - 0.05) / length);
+                                    const auto into = t - 0.05 - length * static_cast<double> (i);
+                                    if (i >= notes.size() || into < length - 0.3)
+                                        return;
+                                    const auto& violin = e.getViolin();
+                                    for (int string = 0; string < 4; ++string)
+                                        if (violin.noteOnString (string) == notes[i])
+                                        {
+                                            const auto slips = violin.stringSlipsPerPeriod (string);
+                                            if (slips < 0.8 || slips > 1.2
+                                                || violin.stringScratch (string) > dsp::BowController::scratchThreshold)
+                                                clean[i] = false;
+                                        }
+                                });
+
+            for (std::size_t i = 0; i < notes.size(); ++i)
+            {
+                const auto t = 0.05 + length * static_cast<double> (i);
+                double worst = -100.0;
+                for (auto u = t + 0.1; u < t + length - 0.1; u += 0.05)
+                    worst = std::max (worst, noiseDb (x, u, u + 0.05, engine::midiToHz (notes[i])));
+                ++stats.notes;
+                stats.loud += worst > -10.0 ? 1 : 0;
+                stats.scratchy += worst > -20.0 ? 1 : 0;
+                stats.helmholtz += clean[i] ? 1 : 0;
+            }
+        }
+    return stats;
+}
+} // namespace
+
+TEST_CASE ("The player keeps scales free of scratch", "[bownoise][cleanbowing]")
+{
+    const std::vector<int> roots { 55, 60, 65, 69 };
+    const auto clean = scaleStats (0.0, roots);
+    const auto unassisted = scaleStats (1.0, roots);
+    INFO ("of " << clean.notes << " notes: loud " << clean.loud << " (unassisted " << unassisted.loud << "), scratchy "
+                << clean.scratchy << " (" << unassisted.scratchy << "), in Helmholtz motion " << clean.helmholtz << " ("
+                << unassisted.helmholtz << ")");
+    REQUIRE (unassisted.loud >= 2); // the unassisted model does scratch on these notes
+    // The model is chaotic, so one note in 64 may still flare up (and which
+    // one moves between platforms); the player removes most of them.
+    CHECK (clean.loud * 3 <= unassisted.loud);
+    CHECK (clean.scratchy < unassisted.scratchy);
+    // With the string's twist both settle on most notes; which few do not is
+    // chaotic, so this only checks the player does not make it worse.
+    CHECK (clean.helmholtz + 3 >= unassisted.helmholtz);
+}
+
+TEST_CASE ("Imperfection at 100% leaves the bow weight alone", "[bownoise][cleanbowing]")
+{
+    // A string that scratches: the player would ease off, but at skill 0
+    // (Imperfection 100%) the weight stays exactly 1.
+    dsp::BowController player;
+    player.prepare (fs * 4.0, 180.0);
+    player.setPeriod (200.0);
+    std::uint32_t random = 1;
+    for (int i = 0; i < 20000; ++i)
+    {
+        random = random * 1664525u + 1013904223u;
+        player.listen (static_cast<double> (random >> 8) / static_cast<double> (1u << 24) - 0.5, i % 200 == 0);
+        if (i % 33 == 0)
+            player.adjust (33.0 / (fs * 4.0), 0.0);
+    }
+    CHECK (player.scratch() > dsp::BowController::scratchThreshold);
+    CHECK (player.weight() == 1.0);
+    player.adjust (33.0 / (fs * 4.0), 1.0);
+    CHECK (player.weight() < 1.0);
 }
