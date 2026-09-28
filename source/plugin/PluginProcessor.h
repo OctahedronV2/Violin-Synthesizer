@@ -76,6 +76,9 @@ public:
     };
     const StringState& getStringState (int string) const { return stringStates[static_cast<std::size_t> (string)]; }
 
+    // The Instrument setting (violin or bowed guitar), for the editor.
+    engine::Instrument getInstrument() const { return reader.instrumentChoice(); }
+
     // Message thread: applies pending body changes (also run by a timer).
     void applyBodyChange() { engine.updateConvolutionBody(); }
 
@@ -127,7 +130,7 @@ private:
     juce::MidiBuffer mergedMidi; // host MIDI plus on-screen notes, preallocated
     engine::ViolinEngine engine;
     std::atomic<int> activeArticulation { 0 };
-    std::array<StringState, engine::Violin::numStrings> stringStates;
+    std::array<StringState, engine::Violin::maxStrings> stringStates;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ViolinSynthProcessor)
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dsp/LoopFilter.h"
+
 #include <array>
 #include <cmath>
 
@@ -35,6 +37,156 @@ inline constexpr std::array<StringSpec, 4> strings { {
     { "A", 69, 0.197, 0.09, 0.87, 0.87 },
     { "E", 76, 0.180, 0.11, 0.36, 0.36 },
 } };
+
+// The six strings of an electric guitar in standard tuning (a light 10-46
+// set on a 628 mm scale, as on a Les Paul). Impedance is tension over wave
+// speed, Z = T / (2 L f0), from the maker's published tensions
+// (docs/BOWED_GUITAR.md). Steel strings lose little energy, and below these
+// windows they keep slipping several times a period: a steady but thin,
+// whistling tone instead of the sawtooth. The heavy strings need the most
+// weight. Each window starts where the string settles into Helmholtz motion
+// and ends before it scratches (ViolinSynthTests "[.guitarstrings]").
+inline constexpr std::array<StringSpec, 6> guitarStrings { {
+    { "E", 40, 0.73, 0.50, 0.80, 0.65 },
+    { "A", 45, 0.61, 0.45, 0.80, 0.65 },
+    { "D", 50, 0.43, 0.45, 0.80, 0.65 },
+    { "G", 55, 0.29, 0.35, 0.75, 0.60 },
+    { "B", 59, 0.214, 0.30, 0.70, 0.55 },
+    { "e", 64, 0.169, 0.20, 0.65, 0.50 },
+} };
+
+// The same tuning on a steel-string acoustic (a light 12-53 phosphor bronze
+// set on a 650 mm scale, as on a Yamaha dreadnought). The strings are heavier
+// than the electric's, so their impedance is higher.
+inline constexpr std::array<StringSpec, 6> acousticGuitarStrings { {
+    { "E", 40, 0.95, 0.56, 0.85, 0.66 },
+    { "A", 45, 0.91, 0.55, 0.85, 0.70 },
+    { "D", 50, 0.73, 0.58, 0.90, 0.75 },
+    { "G", 55, 0.55, 0.55, 0.85, 0.70 },
+    { "B", 59, 0.32, 0.45, 0.80, 0.60 },
+    { "e", 64, 0.24, 0.38, 0.75, 0.52 },
+} };
+
+inline constexpr int maxStrings = 6;
+
+enum class Instrument
+{
+    violin,
+    bowedGuitar, // electric
+    bowedAcousticGuitar,
+};
+
+inline constexpr int numInstruments = 3;
+// Every one is bowed, so the names leave that out.
+inline constexpr std::array<const char*, numInstruments> instrumentNames { "Violin",
+                                                                           "Electric guitar",
+                                                                           "Acoustic guitar" };
+
+// Everything about an instrument that the strings and the player need
+// (the start of the InstrumentSpec planned for Octastra, docs/OCTASTRA_DESIGN.md).
+struct InstrumentSpec
+{
+    const StringSpec* strings;
+    int numStrings;
+    int lowestNote, highestNote; // playable range; notes outside it are silent
+    double scaleLength; // m, open string
+    double pluckDistance; // m from the bridge, where the finger plucks
+    double pluckRing; // pizzicato decay times, relative to the violin's
+    dsp::LossSpec loss; // bowed string losses
+    double bowPositionScale; // the Bow Position setting times this is where the bow plays
+    bool fretted; // notes step from fret to fret; vibrato only bends up
+    bool pickup; // heard through a magnetic pickup rather than a body
+    bool flatBridge; // the bow also catches the strings beside the played ones
+    // The player listens for the pitch the twisting string really sounds,
+    // slightly sharp of the note. The violin's player was tuned listening at
+    // the note itself, and keeps doing so.
+    bool playerHearsTwist;
+
+    const StringSpec& string (int s) const { return strings[s]; }
+};
+
+inline constexpr InstrumentSpec violinSpec {
+    strings.data(),
+    static_cast<int> (strings.size()),
+    55,
+    103,
+    0.328,
+    0.07,
+    1.0,
+    dsp::LossSpec {},
+    1.0,
+    false,
+    false,
+    false,
+    false,
+};
+
+// A solid-body electric guitar played with a violin bow, as Jimmy Page did.
+// Its bridge is flat, so the bow cannot reach one string without touching its
+// neighbours. Range: open low E to the 22nd fret of the top string. The bow
+// plays further from the bridge than on the violin (0.16 of the string at the
+// default Bow Position), between the pickups, where the steel strings speak
+// most cleanly.
+inline constexpr InstrumentSpec bowedGuitarSpec {
+    guitarStrings.data(),
+    static_cast<int> (guitarStrings.size()),
+    40,
+    86,
+    0.628,
+    0.12,
+    3.0,
+    dsp::LossSpec { 6.0, 1.2, 4000.0 },
+    1.45,
+    true,
+    true,
+    true,
+    true,
+};
+
+// A steel-string acoustic played with a violin bow, as Ramin Djawadi bowed a
+// Yamaha acoustic in his scores. The same flat bridge and frets as the
+// electric, but heard through a wooden body: the strings drive the bridge,
+// which drives the top, so the body takes more of their energy, the upper
+// harmonics most (fitted to a recording, docs/BOWED_GUITAR.md). The top is in
+// the bow's way near the bridge, so the bow plays nearer the soundhole: 0.19
+// of the string at the default Bow Position.
+inline constexpr InstrumentSpec bowedAcousticGuitarSpec {
+    acousticGuitarStrings.data(),
+    static_cast<int> (acousticGuitarStrings.size()),
+    40,
+    84,
+    0.650,
+    0.12,
+    2.0,
+    dsp::LossSpec { 3.0, 0.15, 2000.0 },
+    1.7,
+    true,
+    false,
+    true,
+    true,
+};
+
+inline const InstrumentSpec& instrumentSpec (Instrument i)
+{
+    switch (i)
+    {
+        case Instrument::bowedGuitar:
+            return bowedGuitarSpec;
+        case Instrument::bowedAcousticGuitar:
+            return bowedAcousticGuitarSpec;
+        default:
+            return violinSpec;
+    }
+}
+
+// Whether the instrument is one of the guitars (six strings, fretted, drones).
+inline bool isGuitar (Instrument i)
+{
+    return i == Instrument::bowedGuitar || i == Instrument::bowedAcousticGuitar;
+}
+
+// Lowest open string of any instrument: delay lines are sized for it.
+inline constexpr int lowestOpenNote = 40;
 
 // Highest string whose open pitch is at or below the note (the usual choice).
 inline const StringSpec& stringForNote (double midiNote)

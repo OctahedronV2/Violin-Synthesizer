@@ -34,7 +34,16 @@ public:
     // on every body, leaving headroom for loud four-string chords. Measured
     // with ViolinSynthTests "[.diagnostics]" (single string, before Phase 4 resonance).
     static constexpr float targetRmsDb = -21.0f;
-    static constexpr std::array<float, numBodies> measuredConvolutionRmsDb { -10.8f, -5.8f, -7.0f, -12.4f };
+    // After the violins, the bowed acoustic guitar's body (docs/BOWED_GUITAR.md):
+    // not in the Body menu, and always convolved. Its level is set so the
+    // "Bowed Acoustic" preset plays as loud as the violin's (PresetTests.cpp).
+    static constexpr int guitarBody = numBodies;
+    static constexpr int numImpulseResponses = numBodies + 1;
+    static constexpr std::array<float, numImpulseResponses> measuredConvolutionRmsDb { -10.8f,
+                                                                                       -5.8f,
+                                                                                       -7.0f,
+                                                                                       -12.4f,
+                                                                                       19.7f };
     static constexpr std::array<float, numBodies> measuredModalRmsDb { -10.5f, -6.4f, -7.9f, -11.4f };
 
     enum class Quality
@@ -50,7 +59,8 @@ public:
     void prepare (double sampleRate, int bodyIndex);
     void reset();
 
-    // Audio thread. A convolution body change crossfades.
+    // Audio thread. A convolution body change crossfades. guitarBody plays
+    // through convolution whatever the quality.
     void setBody (int bodyIndex);
     void setQuality (Quality q);
     void process (float* samples, int numSamples);

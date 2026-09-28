@@ -243,8 +243,10 @@ StringDisplay::StringDisplay (ViolinSynthProcessor& p)
 
 void StringDisplay::timerCallback()
 {
-    bool changed = false;
-    for (int s = 0; s < 4; ++s)
+    bool changed = processor.getInstrument() != instrument;
+    instrument = processor.getInstrument();
+    const auto& spec = engine::instrumentSpec (instrument);
+    for (int s = 0; s < spec.numStrings; ++s)
     {
         const auto& state = processor.getStringState (s);
         const auto note = state.note.load();
@@ -261,9 +263,9 @@ void StringDisplay::timerCallback()
     if (changed)
     {
         juce::StringArray playing;
-        for (int s = 0; s < 4; ++s)
+        for (int s = 0; s < spec.numStrings; ++s)
             if (notes[static_cast<std::size_t> (s)] >= 0)
-                playing.add (juce::String (engine::strings[static_cast<std::size_t> (s)].name) + " string "
+                playing.add (juce::String (spec.string (s).name) + " string "
                              + noteName (notes[static_cast<std::size_t> (s)]));
         setDescription (playing.isEmpty() ? "No notes playing" : "Playing: " + playing.joinIntoString (", "));
         repaint();
@@ -272,19 +274,21 @@ void StringDisplay::timerCallback()
 
 void StringDisplay::paint (juce::Graphics& g)
 {
+    const auto& instrumentSpec = engine::instrumentSpec (instrument);
+    const auto count = instrumentSpec.numStrings;
     auto bounds = getLocalBounds().toFloat();
-    const auto rowHeight = bounds.getHeight() / 4.0f;
-    constexpr float thickness[] { 3.2f, 2.5f, 1.9f, 1.3f };
+    const auto rowHeight = bounds.getHeight() / static_cast<float> (count);
 
-    // Highest string at the top, as seen by the player.
-    for (int row = 0; row < 4; ++row)
+    // Highest string at the top, as seen by the player; the lowest is the thickest.
+    for (int row = 0; row < count; ++row)
     {
-        const auto s = 3 - row;
+        const auto s = count - 1 - row;
+        const auto thickness = 1.3f + 1.9f * static_cast<float> (count - 1 - s) / static_cast<float> (count - 1);
         auto area = bounds.removeFromTop (rowHeight).reduced (0.0f, 4.0f);
         const auto note = notes[static_cast<std::size_t> (s)];
         const auto levelDb = juce::Decibels::gainToDecibels (levels[static_cast<std::size_t> (s)], -60.0f);
         const auto meter = juce::jlimit (0.0f, 1.0f, (levelDb + 50.0f) / 50.0f);
-        const auto& spec = engine::strings[static_cast<std::size_t> (s)];
+        const auto& spec = instrumentSpec.string (s);
 
         // String name
         auto badge = area.removeFromLeft (area.getHeight()).reduced (4.0f);
@@ -306,7 +310,7 @@ void StringDisplay::paint (juce::Graphics& g)
         // The string from the nut (left) to the bridge (right); it glows while sounding.
         const auto centreY = area.getCentreY();
         g.setColour (colours::dimText.interpolatedWith (colours::accent, meter));
-        g.drawLine (area.getX(), centreY, area.getRight(), centreY, thickness[s] + 1.5f * meter);
+        g.drawLine (area.getX(), centreY, area.getRight(), centreY, thickness + 1.5f * meter);
         g.setColour (colours::panelEdge);
         g.fillRect (juce::Rectangle<float> (3.0f, area.getHeight() * 0.7f).withCentre ({ area.getX(), centreY }));
         g.fillRect (juce::Rectangle<float> (3.0f, area.getHeight() * 0.7f).withCentre ({ area.getRight(), centreY }));

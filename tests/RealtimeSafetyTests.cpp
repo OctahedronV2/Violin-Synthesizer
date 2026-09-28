@@ -120,11 +120,11 @@ TEST_CASE ("On-screen keyboard notes reach the engine without the audio thread l
     processor.getKeyboardState().noteOn (1, 74, 0.6f); // a click on the keyboard, on the message thread
     for (int i = 0; i < 20; ++i)
         player.play();
-    CHECK (processor.getStringState (engine::Violin::numStrings - 2).note.load() == 74); // on the A string
+    CHECK (processor.getStringState (2).note.load() == 74); // on the A string
 
     processor.getKeyboardState().noteOff (1, 74, 0.0f);
     player.play();
-    CHECK (processor.getStringState (engine::Violin::numStrings - 2).note.load() == -1);
+    CHECK (processor.getStringState (2).note.load() == -1);
 }
 
 TEST_CASE ("Notes from the host light up the on-screen keyboard", "[realtime][keyboard]")
@@ -143,7 +143,7 @@ TEST_CASE ("Notes from the host light up the on-screen keyboard", "[realtime][ke
     // Shown notes are not played a second time.
     for (int i = 0; i < 4; ++i)
         player.play();
-    CHECK (processor.getStringState (engine::Violin::numStrings - 2).note.load() == 72);
+    CHECK (processor.getStringState (2).note.load() == 72);
 
     midi.clear();
     midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
@@ -152,7 +152,7 @@ TEST_CASE ("Notes from the host light up the on-screen keyboard", "[realtime][ke
     CHECK_FALSE (processor.getKeyboardState().isNoteOn (1, 72));
     for (int i = 0; i < 4; ++i)
         player.play();
-    CHECK (processor.getStringState (engine::Violin::numStrings - 2).note.load() == -1);
+    CHECK (processor.getStringState (2).note.load() == -1);
 }
 
 TEST_CASE ("Idle cost does not rise as the tails decay towards zero", "[realtime][denormals]")
