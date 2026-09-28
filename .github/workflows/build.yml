@@ -22,6 +22,7 @@ env:
   BUILD_TYPE: Release
   BUILD_DIR: build
   PLUGINVAL_VERSION: v1.0.4
+  VST3_SDK_TAG: v3.8.1_build_84
   ARTEFACTS: build/ViolinSynth_artefacts/Release
   PRODUCT_NAME: Violin Synthesizer
 
@@ -55,6 +56,39 @@ jobs:
         run: pip install -r requirements.txt
       - name: pytest
         run: python -m pytest -q
+
+  rtsan:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    name: RealtimeSanitizer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Clang 20 and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang-20 libclang-rt-20-dev ninja-build \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
+            libfontconfig1-dev libfreetype-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+            libglu1-mesa-dev mesa-common-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
+            -DVIOLINSYNTH_ENABLE_RTSAN=ON
+
+      - name: Build tests
+        run: cmake --build "$BUILD_DIR" --target ViolinSynthTests --parallel 4
+
+      # processBlock and the engine are marked nonblocking: any allocation,
+      # lock or system call reached from them stops the run with a stack trace.
+      - name: Tests under RealtimeSanitizer
+        run: "$BUILD_DIR/tests/ViolinSynthTests"
 
   build:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
@@ -136,6 +170,28 @@ jobs:
 
           $runner "$exe" --strictness-level 10 --validate-in-process \
             --validate "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3"
+
+      - name: Steinberg VST3 validator (extensive)
+        run: |
+          # Only the SDK parts the validator needs; it builds in under a minute.
+          git clone -q --depth 1 --branch "$VST3_SDK_TAG" https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+          git -C "$RUNNER_TEMP/vst3sdk" submodule update -q --init --depth 1 base pluginterfaces public.sdk cmake
+
+          case "$RUNNER_OS" in
+            Windows) args=(-A x64) ;;
+            *)       args=(-G Ninja -DCMAKE_BUILD_TYPE=Release) ;;
+          esac
+          cmake -S "$RUNNER_TEMP/vst3sdk" -B "$RUNNER_TEMP/vst3sdk-build" "${args[@]}" \
+            -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF \
+            -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_RUN_VST_VALIDATOR=OFF > /dev/null
+          cmake --build "$RUNNER_TEMP/vst3sdk-build" --config Release --target validator --parallel 4 > /dev/null
+          validator=$(find "$RUNNER_TEMP/vst3sdk-build/bin" -type f \( -name validator -o -name validator.exe \) | head -n 1)
+
+          runner=""
+          if [ "$RUNNER_OS" = "Linux" ]; then runner="xvfb-run -a"; fi
+
+          # Prints errors only; exits non-zero if any test fails.
+          $runner "$validator" -e -q "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3"
 
       - name: auval (AU)
         if: runner.os == 'macOS'

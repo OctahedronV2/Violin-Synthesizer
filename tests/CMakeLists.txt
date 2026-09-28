@@ -1,10 +1,12 @@
 set(VIOLINSYNTH_TEST_SOURCES
     PluginProcessorTests.cpp
     EngineTests.cpp
+    HostBehaviourTests.cpp
     Phase4Tests.cpp
     Phase5Tests.cpp
     BowNoiseTests.cpp
     PresetTests.cpp
+    RealtimeSafetyTests.cpp
     StringAllocatorTests.cpp
     StringDspTests.cpp)
 

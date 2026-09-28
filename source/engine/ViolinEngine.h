@@ -2,6 +2,7 @@
 
 #include "engine/Body.h"
 #include "engine/OutputChain.h"
+#include "engine/Realtime.h"
 #include "engine/SympatheticStrings.h"
 #include "engine/Violin.h"
 
@@ -45,7 +46,7 @@ public:
     void updateConvolutionBody();
 
     // Audio thread. Renders into all channels of `buffer` (1 or 2), consuming `midi`.
-    void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi);
+    void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi) VIOLINSYNTH_NONBLOCKING;
 
     int getOversamplingFactor() const { return 1 << oversamplingOrder; }
     double getInternalSampleRate() const { return hostRate * getOversamplingFactor(); }
