@@ -21,7 +21,7 @@ struct VoiceSettings
     double vibratoDelaySeconds = 0.3;
     double portamentoSeconds = 0.05;
     double pitchBendRangeSemitones = 2.0;
-    double humanise = 0.5; // 0..1: random drift of vibrato rate and depth
+    double humanise = 0.5; // 0..1: random drift of vibrato, bow speed, contact point and finger pitch
     double imperfection = 0.0; // 0..1: 0 plays cleanly like a professional, 1 is the unassisted model
     double resonance = 0.3; // 0..1: sympathetic resonance of undamped strings
     bool autoBowChange = true;
@@ -127,6 +127,8 @@ private:
     double envelopeShape() const;
     double nextNoise();
     void updateNoise();
+    void updateArm();
+    void advanceGlide (const VoiceSettings& settings, double seconds);
     void setTarget (int note, bool glide);
     void setDamping (Damping d);
     void setArticulation (Articulation a);
@@ -150,6 +152,13 @@ private:
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0, noiseScale = 1.0;
+    double glideFrom = 0.0, glideProgress = 1.0;
+    bool shifting = false; // the slur moves the hand, rather than changing finger
+    int handPosition = 1; // semitones from the open string to the lowest note the first finger reaches
+    // The player's slow wander (unit variance times armScale), and its random sequence.
+    double speedWander = 0.0, betaWander = 0.0, pitchWander = 0.0, armCoeff = 0.0, armScale = 1.0;
+    double speedDrive = 0.0, betaDrive = 0.0, pitchDrive = 0.0; // the first of the two smoothing stages
+    std::uint32_t armRandom = 1;
     double minF0 = 0.0;
 
     // Control-rate state

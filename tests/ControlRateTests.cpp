@@ -61,26 +61,54 @@ TEST_CASE ("Control-rate glide follows the per-sample glide", "[engine][controlr
 {
     VoiceSettings settings;
     settings.vibratoDepthCents = 0.0;
+    settings.humanise = 0.0;
     settings.portamentoSeconds = 0.05;
     StringContext context;
 
+    // A slur from B4 to F#5 on the A string shifts the hand: the pitch eases
+    // (raised cosine in log frequency) over the portamento time.
     StringVoice voice;
     voice.prepare (internalRate, 2);
-    voice.start (69, 0.5f);
+    voice.start (71, 0.5f);
     for (int n = 0; n < 10000; ++n)
         voice.processSample (settings, context);
 
-    // One-pole glide in log frequency, time constant a third of the portamento time.
-    voice.legato (73, 0.5f);
-    const auto coeff = std::exp (-3.0 / (settings.portamentoSeconds * internalRate));
-    double logF0 = std::log (440.0), worst = 0.0;
-    const auto target = std::log (440.0 * std::pow (2.0, 4.0 / 12.0));
+    voice.legato (78, 0.5f);
+    const auto from = std::log (440.0 * std::pow (2.0, 2.0 / 12.0));
+    const auto target = std::log (440.0 * std::pow (2.0, 9.0 / 12.0));
+    double worst = 0.0;
     for (int n = 0; n < static_cast<int> (0.3 * internalRate); ++n)
     {
         voice.processSample (settings, context);
-        logF0 = target + coeff * (logF0 - target);
+        const auto progress = std::min (1.0, (n + 1) / (settings.portamentoSeconds * internalRate));
+        const auto logF0 = from + (target - from) * (0.5 - 0.5 * std::cos (std::numbers::pi * progress));
         worst = std::max (worst, std::abs (cents (voice.currentF0(), std::exp (logF0))));
     }
     CHECK (worst < 0.2);
     CHECK (std::abs (cents (voice.currentF0(), std::exp (target))) < 0.01);
+}
+
+TEST_CASE ("A slur within the hand changes finger instead of sliding", "[engine][controlrate]")
+{
+    VoiceSettings settings;
+    settings.vibratoDepthCents = 0.0;
+    settings.humanise = 0.0;
+    settings.portamentoSeconds = 0.05;
+    StringContext context;
+
+    // From the open A, and from B4 up to D5: both in first position.
+    for (const auto [from, to] : { std::pair { 69, 74 }, std::pair { 71, 74 }, std::pair { 74, 71 } })
+    {
+        StringVoice voice;
+        voice.prepare (internalRate, 2);
+        voice.start (from, 0.5f);
+        for (int n = 0; n < 10000; ++n)
+            voice.processSample (settings, context);
+        voice.legato (to, 0.5f);
+        const auto expected = 440.0 * std::pow (2.0, (to - 69) / 12.0);
+        for (int n = 0; n < static_cast<int> (0.012 * internalRate); ++n)
+            voice.processSample (settings, context);
+        CAPTURE (from, to);
+        CHECK (std::abs (cents (voice.currentF0(), expected)) < 0.5);
+    }
 }
