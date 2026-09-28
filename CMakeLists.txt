@@ -21,6 +21,10 @@ option(VIOLINSYNTH_BUILD_TESTS "Build the unit test executable" ON)
 option(VIOLINSYNTH_COPY_PLUGIN_AFTER_BUILD "Install plugins into the user's plugin folders after each build" OFF)
 option(VIOLINSYNTH_ENABLE_SANITIZERS "Build with AddressSanitizer and UBSan (GCC/Clang only)" OFF)
 option(VIOLINSYNTH_ENABLE_RTSAN "Build with RealtimeSanitizer (Clang 20 or later)" OFF)
+# Link-time optimisation in Release builds. It makes each plugin, test and
+# benchmark link redo code generation for all of JUCE, which is most of a CI
+# build, so pull request builds turn it off (docs/CI.md).
+option(VIOLINSYNTH_ENABLE_LTO "Link-time optimisation in Release builds" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
@@ -69,8 +73,11 @@ target_link_libraries(ViolinSynth
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags)
+        juce::juce_recommended_config_flags)
+
+if(VIOLINSYNTH_ENABLE_LTO)
+    target_link_libraries(ViolinSynth PUBLIC juce::juce_recommended_lto_flags)
+endif()
 
 violinsynth_enable_sanitizers(ViolinSynth)
 violinsynth_enable_rtsan(ViolinSynth)

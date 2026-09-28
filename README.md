@@ -14,10 +14,10 @@ See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis appro
 
 ### 1. Get a build
 
-Every push runs the **Build** workflow on GitHub Actions for Linux, macOS (universal: Apple silicon and Intel) and Windows. The repository is public, so this is free.
+Every pull request and push to `main` runs the **Build** workflow on GitHub Actions for Windows. Linux and macOS (universal: Apple silicon and Intel) builds run for version tags, for runs started by hand, and for pull requests labelled `all-platforms`; see [docs/CI.md](docs/CI.md). The repository is public, so this is free.
 
 1. Open the repository's **Actions** tab, then the latest green **Build** run for your branch.
-2. Under **Artifacts**, download `ViolinSynth-Windows`, `ViolinSynth-macOS` or `ViolinSynth-Linux`.
+2. Under **Artifacts**, download `ViolinSynth-Windows` (or `ViolinSynth-macOS` or `ViolinSynth-Linux`, when that run built them).
 3. Unzip it. Inside are one zip per format (`ViolinSynth-VST3-…zip`, `ViolinSynth-AU-…zip`, `ViolinSynth-Standalone-…zip`). Unzip the ones you need.
 
 You can also build locally for free (see [Building from source](#building-from-source)). On Windows that needs Visual Studio 2022 with the "Desktop development with C++" workload, plus CMake.
@@ -112,7 +112,7 @@ Useful options:
 
 ### Validating
 
-CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 on all platforms, and `auval -strict` on the AU on macOS. To run it locally:
+CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 on every platform it builds, and `auval -strict` on the AU on macOS. To run it locally:
 
 ```sh
 pluginval --strictness-level 10 --validate "build/ViolinSynth_artefacts/Release/VST3/Violin Synthesizer.vst3"
