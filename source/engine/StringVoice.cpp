@@ -167,6 +167,7 @@ void StringVoice::reset()
     vibratoPhase = 0.0;
     glideProgress = 1.0;
     handPosition = firstPosition;
+    armSpeedGain = 1.0;
     speedWander = betaWander = pitchWander = speedDrive = betaDrive = pitchDrive = 0.0;
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
@@ -535,6 +536,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     }
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
+    armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander;
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
@@ -704,8 +706,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
 
         // Speed from dynamics; force follows speed within the string's playable window.
         const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics)) * speedScale
-            * context.bowChangeGain * (twists() ? torsionMakeup : 1.0)
-            * (1.0 + armSpeedWander * std::clamp (settings.humanise, 0.0, 1.0) * armScale * speedWander);
+            * context.bowChangeGain * (twists() ? torsionMakeup : 1.0) * armSpeedGain;
         auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
         if (stage == Stage::release)
         {

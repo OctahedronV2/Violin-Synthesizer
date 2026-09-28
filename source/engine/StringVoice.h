@@ -157,6 +157,7 @@ private:
     int handPosition = 1; // semitones from the open string to the lowest note the first finger reaches
     // The player's slow wander (unit variance times armScale), and its random sequence.
     double speedWander = 0.0, betaWander = 0.0, pitchWander = 0.0, armCoeff = 0.0, armScale = 1.0;
+    double armSpeedGain = 1.0; // the bow speed's wander, set at the control rate
     double speedDrive = 0.0, betaDrive = 0.0, pitchDrive = 0.0; // the first of the two smoothing stages
     std::uint32_t armRandom = 1;
     double minF0 = 0.0;
