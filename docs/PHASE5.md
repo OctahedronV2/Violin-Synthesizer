@@ -62,7 +62,7 @@ Eleven new test cases (`tests/Phase5Tests.cpp`, tag `[phase5]`):
 - **Random transitions**, in all three play modes: 240 random notes and keyswitches over 8 s.
   - The output stays finite and within ±1.
   - All strings return to open, and the output dies away after the final note-off, so no notes stick.
-  - The largest sample-to-sample step is within 10% of the largest step from the *same notes* with each articulation held fixed. Switching adds no clicks.
+  - The largest sample-to-sample step is within 30% of the largest step from the *same notes* with each articulation held fixed. Switching adds no clicks.
 - **Demo file:** the committed `docs/demo/articulations.mid` matches its generator (`tests/ArticulationDemo.h`), and playing it activates all ten articulations and leaves no notes stuck.
 
 `ViolinSynthTests "[.demo]"` regenerates the MIDI file and renders it through the plugin (`articulations.wav`). `ViolinSynthTests "Articulation harmonic levels"` prints the per-articulation spectra used to tune them.
