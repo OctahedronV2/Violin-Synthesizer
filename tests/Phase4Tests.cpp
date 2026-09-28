@@ -164,7 +164,7 @@ TEST_CASE ("Long notes get automatic bow changes", "[phase4]")
         return e.getViolin().bowChangeCount();
     };
 
-    CHECK (changes (true) >= 5); // 62 cm of bow at 0.6 m/s lasts about a second
+    CHECK (changes (true) >= 2); // 2 m of bow at 0.6 m/s lasts about 3.3 s
     CHECK (changes (false) == 0);
 }
 

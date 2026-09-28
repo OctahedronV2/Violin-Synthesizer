@@ -167,13 +167,54 @@ BowChangeStats bowChanges (double beta, double pressure, const std::vector<int>&
 
 TEST_CASE ("Held notes keep sounding through automatic bow changes", "[bownoise]")
 {
-    // A held note used to drop to 14% of its level at every bow change (every
-    // 1.4 s at this dynamic) and restart with a scratch.
-    const auto stats = bowChanges (0.11, 0.5, { 55, 60, 67, 72 }, 3.2);
+    // A held note used to drop to 14% of its level at every bow change and
+    // restart with a scratch. At this dynamic the bow now turns every 4.4 s.
+    const auto stats = bowChanges (0.11, 0.5, { 55, 60, 67, 72 }, 10.0);
     INFO ("changes " << stats.count << ", level dips to " << stats.dip << ", recovery " << stats.recovery << " dB");
     REQUIRE (stats.count >= 4);
     CHECK (stats.dip > 0.25);
     CHECK (stats.recovery < -16.0);
+}
+
+TEST_CASE ("Slurred lines turn the bow on a note change", "[bownoise]")
+{
+    // A turn mid-note scratched where nothing covered it (the showcase at 4 s
+    // and 15 s). In a slur the bow now turns with the next note once half of
+    // it is used.
+    engine::ViolinEngine e;
+    e.setSettings (noiseSettings (Articulation::legato));
+    e.prepare (fs, block);
+    std::vector<Event> events;
+    std::vector<double> starts;
+    const std::vector<int> line { 69, 71, 72, 74, 76, 74, 72, 71 };
+    for (int i = 0; i < 24; ++i)
+    {
+        const auto t = 0.1 + 0.6 * i;
+        const auto note = line[static_cast<std::size_t> (i) % line.size()];
+        events.push_back ({ t, on (note) });
+        events.push_back ({ t + 0.65, off (note) }); // overlapping: one slur
+        starts.push_back (t);
+    }
+    int seen = 0, turns = 0, midNote = 0;
+    run (e,
+         15.0,
+         events,
+         [&] (double t)
+         {
+             if (e.getViolin().bowChangeCount() == seen)
+                 return;
+             seen = e.getViolin().bowChangeCount();
+             ++turns;
+             const auto nearest
+                 = *std::min_element (starts.begin(),
+                                      starts.end(),
+                                      [t] (double a, double b) { return std::abs (a - t) < std::abs (b - t); });
+             if (t - nearest > 2.0 * block / fs || t < nearest)
+                 ++midNote;
+         });
+    INFO ("turns " << turns << ", mid-note " << midNote);
+    CHECK (turns >= 3);
+    CHECK (midNote == 0);
 }
 
 TEST_CASE ("Staccato stops without a crunch", "[bownoise]")
@@ -222,7 +263,7 @@ TEST_CASE ("Bow noise scorecard", "[.bownoisereport]")
     std::printf ("Held legato notes through automatic bow changes (means)\n");
     for (auto [beta, p] : { std::pair { 0.11, 0.5 }, std::pair { 0.075, 0.65 } })
     {
-        const auto s = bowChanges (beta, p, scaleNotes, 5.0);
+        const auto s = bowChanges (beta, p, scaleNotes, 10.0);
         std::printf ("  beta %.3f pressure %.2f: %d changes, before %6.1f dB, worst %6.1f dB, "
                      "recovery %6.1f dB, level dips to %.2f\n",
                      beta,
