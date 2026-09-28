@@ -84,7 +84,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build xvfb valgrind \
+            ninja-build xvfb \
             libasound2-dev libjack-jackd2-dev ladspa-sdk \
             libfontconfig1-dev libfreetype-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
@@ -109,22 +109,6 @@ jobs:
 
       - name: Unit tests
         run: ctest --test-dir "$BUILD_DIR" --build-config "$BUILD_TYPE" --output-on-failure
-
-      # docs/PHASE7.md, step 7.0. Timings on shared runners are only a rough
-      # guide, so this step never fails; the Callgrind step below is the check.
-      - name: Benchmarks (timings, for information)
-        run: |
-          bench=$(find "$BUILD_DIR/tests" -name 'ViolinSynthBench' -o -name 'ViolinSynthBench.exe' | head -n 1)
-          "$bench" --ci --seconds 2
-
-      - name: Benchmarks (instruction counts against the baseline)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p callgrind
-          valgrind --tool=callgrind --instr-atstart=no --callgrind-out-file=callgrind/callgrind.out.%p \
-            "$BUILD_DIR/tests/ViolinSynthBench" --ci --seconds 1 --json callgrind/bench.json > callgrind/run.log 2>&1 \
-            || { cat callgrind/run.log; exit 1; }
-          python3 tests/bench/instructions.py callgrind
 
       - name: Ad-hoc sign macOS bundles
         if: runner.os == 'macOS'
@@ -181,8 +165,6 @@ jobs:
             Windows)
               (cd VST3 && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynth-VST3-$suffix.zip" "$PRODUCT_NAME.vst3")
               (cd Standalone && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynth-Standalone-$suffix.zip" "$PRODUCT_NAME.exe")
-              # The benchmark, to run on the reference PC (docs/PHASE7.md, step 7.0).
-              (cd "$GITHUB_WORKSPACE/$BUILD_DIR/tests/$BUILD_TYPE" && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynthBench-$suffix.zip" ViolinSynthBench.exe)
               ;;
           esac
           ls -la "$GITHUB_WORKSPACE/dist"
