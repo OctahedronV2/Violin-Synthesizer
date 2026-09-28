@@ -100,9 +100,10 @@ Humanise) and the stopped pitch (±2 cents).
 The period-to-period scratch meter can't tell rosin noise from scratch, so it
 reads more noise by design. Tests that measure the clean model
 (`plainSettings`, `useSteadySettings`, the preset level test) turn Bow Noise
-off. The benchmark baseline is raised by the extra work: about +3.7% on one
-note and +6.7% on a four-note chord (the per-sample noise at the internal
-rate), scaled from a local Callgrind run of main against this branch.
+off. The benchmark baseline is re-recorded for the extra work (the per-sample
+noise at the internal rate): against main, about +3.7% on one note and +6.7%
+on a four-note chord. (The committed baseline was already 1 to 3% below
+main; a local Callgrind run gives the same counts as CI's.)
 
 ## Checks
 
