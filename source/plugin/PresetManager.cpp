@@ -24,10 +24,16 @@ PresetManager::PresetManager (juce::AudioProcessorValueTreeState& s, juce::File 
 
 juce::File PresetManager::defaultUserFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-        .getChildFile ("OctahedronV2")
-        .getChildFile ("Violin Synthesizer")
-        .getChildFile ("Presets");
+    const auto vendor
+        = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("OctahedronV2");
+    const auto folder = vendor.getChildFile ("Octavio").getChildFile ("Presets");
+
+    // The plugin was called Violin Synthesizer before 1.0; bring its presets along the first time.
+    const auto oldFolder = vendor.getChildFile ("Violin Synthesizer").getChildFile ("Presets");
+    if (! folder.exists() && oldFolder.isDirectory())
+        oldFolder.copyDirectoryTo (folder);
+
+    return folder;
 }
 
 void PresetManager::refresh()

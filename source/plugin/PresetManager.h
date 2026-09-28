@@ -30,7 +30,8 @@ public:
     // `userFolder` defaults to defaultUserFolder(); tests pass a temporary one.
     explicit PresetManager (juce::AudioProcessorValueTreeState& state, juce::File userFolder = {});
 
-    // <user documents>/OctahedronV2/Violin Synthesizer/Presets
+    // <user documents>/OctahedronV2/Octavio/Presets (presets saved before the
+    // rename to Octavio are copied over from .../Violin Synthesizer/Presets once)
     static juce::File defaultUserFolder();
     juce::File getUserFolder() const { return userFolder; }
 

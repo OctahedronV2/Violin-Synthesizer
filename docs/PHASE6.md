@@ -11,7 +11,7 @@ This phase adds 27 factory presets that load with one click, user presets, and a
   - Clicking the name opens a menu of every preset by category, your own presets, and **Save preset…**, **Show preset folder** and **Rescan presets**.
   - Hover over the name to see the preset's description.
 - **Save** stores the current settings as a user preset, with a name and a category (default "User"). Saving under an existing name overwrites that preset. **Delete** removes the current user preset; factory presets can't be deleted.
-- User presets are small XML files (`.vspreset`) in `Documents/OctahedronV2/Violin Synthesizer/Presets`. Copy them between computers or share them.
+- User presets are small XML files (`.vspreset`) in `Documents/OctahedronV2/Octavio/Presets`. Copy them between computers or share them.
 - **In the DAW:** presets live only in the plugin's own browser. They are deliberately not exposed as host *programs*. A program change rewrites every parameter behind the host's back, which made pluginval's state-restoration test fail on Windows, and some hosts select program 0 when loading a project, which would wipe your settings. The host's own preset save and load (in FL Studio, the wrapper's preset menu) still stores the complete plugin state, including the current preset.
 - **Saving with the project:** the current preset name and any edits are saved in the host project and come back when it is reopened.
 

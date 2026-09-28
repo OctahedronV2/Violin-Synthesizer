@@ -167,7 +167,7 @@ In the violin plugin the body filter is a convolution, and it is expensive. Runn
 | `OutputChain`: width and room per instance | Width per section; room moves to the orchestra |
 | `Articulation.h`: keyswitches from note 24 | Keyswitch base per section |
 
-The engine becomes a shared library inside the same repository, with two plugin targets: Violin Synthesizer, which must sound identical after the refactor (the existing golden tests check this), and Octastra. Improvements to the strings then reach both.
+The engine becomes a shared library inside the same repository, with two plugin targets: Octavio (the violin, formerly Violin Synthesizer), which must sound identical after the refactor (the existing golden tests check this), and Octastra. Improvements to the strings then reach both.
 
 ## CPU budget
 

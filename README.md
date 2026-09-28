@@ -1,6 +1,6 @@
-# Violin-Synthesizer
+# Octavio
 
-An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standalone) built with JUCE.
+An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standalone) built with JUCE. Octavio was called Violin Synthesizer before version 1.0. It keeps the same plugin IDs, so delete the old `Violin Synthesizer` plugin when installing Octavio; saved projects should then load with Octavio, and user presets are copied to the new folder the first time it runs.
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
@@ -14,11 +14,15 @@ See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis appro
 
 ### 1. Get a build
 
+The simplest way is the [latest release](https://github.com/OctahedronV2/Violin-Synthesizer/releases/latest): download `Octavio-VST3-Windows.zip` (or the macOS or Linux zip) under **Assets**.
+
+To try a change before it is released:
+
 Every pull request and push to `main` runs the **Build** workflow on GitHub Actions for Windows. Linux and macOS (universal: Apple silicon and Intel) builds run for version tags, for runs started by hand, and for pull requests labelled `all-platforms`; see [docs/CI.md](docs/CI.md). The repository is public, so this is free.
 
 1. Open the repository's **Actions** tab, then the latest green **Build** run for your branch.
-2. Under **Artifacts**, download `ViolinSynth-Windows` (or `ViolinSynth-macOS` or `ViolinSynth-Linux`, when that run built them).
-3. Unzip it. Inside are one zip per format (`ViolinSynth-VST3-…zip`, `ViolinSynth-AU-…zip`, `ViolinSynth-Standalone-…zip`). Unzip the ones you need.
+2. Under **Artifacts**, download `Octavio-Windows` (or `Octavio-macOS` or `Octavio-Linux`, when that run built them).
+3. Unzip it. Inside are one zip per format (`Octavio-VST3-…zip`, `Octavio-AU-…zip`, `Octavio-Standalone-…zip`). Unzip the ones you need.
 
 You can also build locally for free (see [Building from source](#building-from-source)). On Windows that needs Visual Studio 2022 with the "Desktop development with C++" workload, plus CMake.
 
@@ -34,25 +38,25 @@ You can also build locally for free (see [Building from source](#building-from-s
 **macOS only:** the CI builds are ad-hoc signed but not notarised, so Gatekeeper blocks them when downloaded. After copying, run:
 
 ```sh
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Violin Synthesizer.vst3"
-xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"Violin Synthesizer.component"
-xattr -dr com.apple.quarantine "/path/to/Violin Synthesizer.app"   # Standalone, if used
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/"Octavio.vst3"
+xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/"Octavio.component"
+xattr -dr com.apple.quarantine "/path/to/Octavio.app"   # Standalone, if used
 ```
 
 If Logic or GarageBand does not list the AU straight away, run `killall -9 AudioComponentRegistrar` and restart the host.
 
 ### 3. Check that it works
 
-Rescan plugins in your DAW, then create an instrument track with **Violin Synthesizer** (vendor **OctahedronV2**).
+Rescan plugins in your DAW, then create an instrument track with **Octavio** (vendor **OctahedronV2**).
 
 In **FL Studio**:
 1. Open **Options → Manage plugins → Find installed plugins**.
-2. Add **Violin Synthesizer** from the Channel Rack.
+2. Add **Octavio** from the Channel Rack.
 3. The plugin reports a small latency (from oversampling), which FL Studio compensates automatically.
 
 Things to try:
 
-- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Violin Synthesizer/Presets`.
+- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Octavio/Presets`.
 - **Play expressively:**
   - Velocity sets how hard the bow is drawn.
   - Overlapping notes glide legato; separate notes get a new bow stroke.
@@ -98,7 +102,7 @@ cmake --build build --config Release --parallel
 ctest --test-dir build --build-config Release --output-on-failure
 ```
 
-The plugins are written to `build/ViolinSynth_artefacts/Release/{VST3,AU,Standalone}`.
+The plugins are written to `build/Octavio_artefacts/Release/{VST3,AU,Standalone}`.
 
 Useful options:
 
@@ -115,7 +119,7 @@ Useful options:
 CI runs [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10 on the VST3 on every platform it builds, and `auval -strict` on the AU on macOS. To run it locally:
 
 ```sh
-pluginval --strictness-level 10 --validate "build/ViolinSynth_artefacts/Release/VST3/Violin Synthesizer.vst3"
+pluginval --strictness-level 10 --validate "build/Octavio_artefacts/Release/VST3/Octavio.vst3"
 ```
 
 ### Code style
@@ -151,7 +155,7 @@ The measured violin bodies come from the [CNSM Dataset](https://doi.org/10.5281/
 
 ## Licensing
 
-Violin Synthesizer is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License, version 3** (AGPLv3), as published by the Free Software Foundation. See [LICENSE](LICENSE).
+Octavio is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License, version 3** (AGPLv3), as published by the Free Software Foundation. See [LICENSE](LICENSE).
 
 It is distributed in the hope that it will be useful, but **without any warranty**; without even the implied warranty of merchantability or fitness for a particular purpose. See the licence for details.
 

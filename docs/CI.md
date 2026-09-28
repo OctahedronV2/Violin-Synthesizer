@@ -13,6 +13,7 @@ CI is one workflow, `.github/workflows/build.yml`. It is set up to give a quick 
 | Benchmark (instruction counts) | Linux | Code the benchmark measures, `tests/bench/` or `docs/benchmarks/` changed. |
 | Windows | Windows | Same as RealtimeSanitizer. Builds, runs the unit tests, pluginval and Steinberg's validator, and uploads the plugin. |
 | Linux, macOS | Linux, macOS | Same files as Windows, but only for version tags (`v*`), runs started by hand, and pull requests labelled `all-platforms`. |
+| Publish release | Linux | Version tags (`v*`) only, after every other job passed. Creates the GitHub Release with the plugin zips for all three platforms, using `docs/releases/<tag>.md` as the notes. |
 
 A change to the workflow file runs everything. Markdown-only changes run nothing.
 
@@ -35,3 +36,9 @@ Add the `all-platforms` label. That starts a run with just Linux and macOS (Wind
 ## Reusing this for Octastra
 
 The same layout carries over to the orchestra plugin. Change the product and artefact names in the `env` block, and the file lists in the Plan job's filters (for example, a shared `common/` DSP folder would go in every C++ list). The platform choice, the `all-platforms` label, the compile cache and the validator cache need no change. If both plugins end up in one repository, give each its own filter entries and jobs so a change to one plugin does not rebuild the other.
+
+## Making a release
+
+1. Set the version in `project(Octavio VERSION …)` in `CMakeLists.txt` and write the notes in `docs/releases/v<version>.md`, in a pull request.
+2. After it is merged, tag that commit on `main` and push the tag: `git tag v1.0.0 && git push origin v1.0.0`.
+3. The tag's Build run checks everything on all three platforms, then the Publish release job creates the release with the zips attached.

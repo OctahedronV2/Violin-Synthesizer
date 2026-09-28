@@ -1,4 +1,4 @@
-# Violin Synthesizer: Development Plan
+# Octavio (formerly Violin Synthesizer): Development Plan
 
 A plan for building an expressive violin synthesizer as a VST3 plugin (plus AU and Standalone) with the JUCE framework.
 
