@@ -202,10 +202,30 @@ Checks in each host:
 - MPE, where the host supports it.
 - **16 instances playing** a four-part phrase. Record the host's CPU meter. This is the Octastra template workflow.
 
+## 7.K Playing and automating in FL Studio (done first)
+
+Jake asked for these when Phase 7 started. They shipped before the optimisation steps.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| FL Studio's typing keyboard didn't play the plugin while its window was open | A click anywhere in the editor gave keyboard focus to a control (often the on-screen keyboard). The editor then kept the keys, and the on-screen keyboard used some of them itself, at full velocity. | No control takes keyboard focus on a click, and the on-screen keyboard has no computer-key mapping. The host keeps its keyboard. Text boxes still take focus while a value is typed, and Tab still reaches every control. |
+| Right-click did nothing, so FL's *Create automation clip* wasn't there | The controls ignored right-clicks (a knob even moved on a right-drag) | Right-click (Ctrl-click on macOS) on any knob, drop-down, switch or articulation button opens the host's menu for that parameter: in FL Studio, *Create automation clip*, *Link to controller* and so on. On the bow pad, it opens a menu with a submenu for position and one for pressure. Hosts that don't offer a menu (Standalone, AU) get a small menu with *Reset to default*. |
+| Velocity 100 (FL's typing keyboard) sounded scratchy; 64 sounded right | Velocity mapped straight to dynamics, so 100 bowed at 79% of the maximum | A velocity curve that leaves velocity 64 where it was and flattens above it. The new **Vel Range** knob (Play panel, default 70%) sets the dynamics at velocity 127. At 70%, velocity 100 now plays at 63% instead of 79%. 100% gives the old, linear response. |
+| Z on FL's typing keyboard plays C3 (FL calls it C4), below the violin's G3 | FL chooses the notes its typing keyboard sends; the plugin can't change that | The new **Octave** drop-down (Play panel, −2 to +2) shifts every played note. Keyswitches don't move. Set it to +1 and Z plays C4. Held notes are released correctly if it changes while they sound. |
+
+Both new controls are ordinary parameters, so they are saved with the project and can be automated. Every parameter is automatable, and a test checks this.
+
+**The factory presets were re-levelled** for the new velocity curve. They are within ±0.9 dB of *Default Violin* on the test phrase again. *Spiccato* is at the +12 dB limit of the gain control.
+
+**Tests** (`tests/KeyboardInputTests.cpp`, tag `[keyboard]`): the velocity curve and its effect on bow speed, the octave shift (keyswitches unaffected, release after a change), saving both controls with the project, every parameter automatable, no editor component taking focus on a click, and a right-click on every knob opening the menu without moving it. The engine's model tests keep the linear velocity response they were calibrated on.
+
+**Still to check in FL Studio on Windows** (not testable here): the typing keyboard plays with the editor open and after clicking controls, and right-click shows FL's menu with *Create automation clip*.
+
 ## Work order
 
 | Step | Content | Depends on |
 |---|---|---|
+| 7.K | Typing keyboard, right-click automation, velocity curve and octave shift in FL Studio | — (done first) |
 | 7.0 | Benchmark suite, CI regression job, reference renders and sound check | — |
 | 7.1 | Remove wasted work | 7.0 |
 | 7.2 | Control-rate voice maths | 7.0, legato-stutter and bow-noise work merged |
@@ -231,3 +251,8 @@ Jake, 2026-09-27:
 - **Reference machine:** Jake's Windows 11 PC. FL Studio, Reaper and Ableton Live must pass there.
 - **Tolerances:** the "sounds the same" tolerances above are accepted, so the control-rate work (7.2) goes ahead. Output is not required to be bit-exact.
 - **FFT library:** PFFFT for the measured body (7.3).
+
+Jake, when Phase 7 started:
+
+- FL Studio's typing keyboard must play the plugin by default, and nearly every control must be automatable from FL's right-click menu.
+- Velocity 100 is too intense; velocity 64 sounds right (7.K).

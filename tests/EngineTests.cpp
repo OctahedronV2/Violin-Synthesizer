@@ -64,6 +64,7 @@ engine::EngineSettings quietSettings (engine::Body::Quality quality = engine::Bo
     s.performance.voice.humanise = 0.0;
     s.output.room = 0.0f;
     s.output.width = 0.0f;
+    s.performance.velocityTop = 1.0; // the model tests are calibrated on linear velocity
     s.bodyQuality = quality;
     return s;
 }

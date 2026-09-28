@@ -4,11 +4,55 @@
 
 #include <functional>
 #include <memory>
+#include <vector>
 
 namespace violinsynth
 {
 class ViolinSynthProcessor;
 class PresetManager;
+
+// Shows the host's menu for a parameter at the mouse, as a right-click on a
+// plugin control does in FL Studio, Cubase and other VST3 hosts (create an
+// automation clip, MIDI learn and so on). Hosts without one get a small menu
+// of our own.
+void showParameterMenu (juce::Component& control, juce::RangedAudioParameter& parameter);
+
+// The same for a control that sets several parameters: one submenu each.
+void showParameterMenu (juce::Component& control, const std::vector<juce::RangedAudioParameter*>& parameters);
+
+// Stops clicks on the component or any of its children taking keyboard focus.
+void stopClicksTakingFocus (juce::Component&);
+
+// A control whose right-click (or Ctrl-click on macOS) opens the parameter
+// menu instead of moving the control.
+template <typename Base>
+class ParameterControl final : public Base
+{
+public:
+    using Base::Base;
+
+    std::function<void()> onParameterMenu;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onParameterMenu != nullptr)
+            onParameterMenu();
+        else
+            Base::mouseDown (e);
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! (e.mods.isPopupMenu() && onParameterMenu != nullptr))
+            Base::mouseDrag (e);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! (e.mods.isPopupMenu() && onParameterMenu != nullptr))
+            Base::mouseUp (e);
+    }
+};
 
 // Bow position (x: bridge to fingerboard) against bow pressure (y) in one
 // pad. Drag to play with both; double-click resets; arrow keys nudge.
