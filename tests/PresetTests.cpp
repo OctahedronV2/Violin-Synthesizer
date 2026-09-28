@@ -242,9 +242,11 @@ TEST_CASE ("Factory presets are level-matched", "[presets]")
         UNSCOPED_INFO (f.manager.getCurrentName() << ": " << level - reference << " dB");
         // A light bow right by the bridge is chaotic: the level moves by a
         // dB or two with tiny changes, including floating-point differences
-        // between platforms, so those presets get more room.
+        // between platforms, so those presets get more room. So does the
+        // heavy mute: a 0.05 cent change in the vibrato moves it by a dB.
         const auto name = f.manager.getCurrentName();
-        const auto tolerance = name == "Eerie Tremolo" || name == "Sul Ponticello" ? 2.5 : 1.5;
+        const auto tolerance
+            = name == "Eerie Tremolo" || name == "Sul Ponticello" || name == "Practice Mute" ? 2.5 : 1.5;
         CHECK (std::abs (level - reference) < tolerance);
     }
 }
