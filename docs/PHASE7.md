@@ -117,6 +117,12 @@ Each of these must null against the reference.
 
 Bypassing on silence has to be seamless: a note must start on the very next sample with no click, and a tail must never be cut. Tests check both.
 
+**Status (body and idle PR):** done except two rows: skipping the 192 kHz string loop, and the skips for **Room** or **Width** at 0.
+
+- The sympathetic strings, the body (both forms) and the chain after the body each stop computing once their input has been below −200 dBFS for longer than their own tail, and start on the first sample of sound. The reverb never decays to zero in float (it settles near −140 dBFS), so the chain after the body ends its tail at −120 dBFS.
+- The open strings' tuning is computed in `prepare()`, and the upsampler is gone: the string renders straight into the oversampler's buffer. Both are bit-exact.
+- Idle after a note has rung out: **2.6% → 0.34%** (Linux VM, same method as the table above). What remains is the string loop and the downsampler, which wait for 7.2 because skipping them changes when a silent voice's control-rate updates fall.
+
 ## 7.2 Control-rate voice maths (largest gain)
 
 The voice recomputes pitch, vibrato, bends, bow position, speed and force every internal sample. They will be computed every 32 internal samples (6 kHz at 192 kHz, far faster than any gesture) and interpolated linearly in between.
@@ -138,6 +144,24 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 - **Resample the IRs once** at `prepare` for the host rate, as now, but off the audio thread and without reallocating when only the body changes.
 
 **Expected:** the measured body costs 2–4× less and becomes nearly as cheap as the light body. For Octastra, bodies run per body bus, not per player, so this matters for sections more than for players.
+
+**Status (body and idle PR):** done, without trimming.
+
+- `source/dsp/PartitionedConvolution.cpp`: uniform partitions of about 2.7 ms (128 samples at 44.1/48 kHz, 256 at 88.2/96, 512 above), on PFFFT, vendored in `third_party/pffft`. Every host call transforms its partial block, so the body has **zero latency** at any buffer size, and a small buffer costs one extra FFT pair instead of more partitions. Non-uniform partitions weren't needed for the targets.
+- All four bodies are resampled (the way JUCE did) and transformed in `prepare()`. A body change is a 50 ms crossfade on the audio thread, with no loading or allocation; both bodies share the input history, so the new one starts with its full tail. The first note after `prepare()` now goes through the body; JUCE's background load played it dry for the first few blocks.
+- Output nulls with `main` to −120 dB below the peak (float rounding).
+- One note with the measured body now costs the same as the light body. Before and after, 48 kHz, one note with vibrato unless noted, Linux VM:
+
+| Case | `main` | This PR |
+|---|---|---|
+| Idle, never played | 2.6% | 0.35% |
+| Idle, 5 s after a note | 2.6% | 0.34% |
+| One note, measured body | 5.0% | 4.0% |
+| One note, light body | 4.8% | 4.0% |
+| Four-note chord, measured body | 13.0% | 11.7% |
+| One note, 32-sample buffer | 6.2% | 4.2% |
+| One note, 1024-sample buffer | 4.3% | 4.1% |
+| One note, 96 kHz | 7.4% | 5.3% |
 
 ## 7.4 Real-time safety
 

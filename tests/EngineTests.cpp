@@ -2,7 +2,6 @@
 #include "engine/ViolinEngine.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
-#include <juce_events/juce_events.h>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -75,19 +74,6 @@ note (int number, double fs, double onSeconds, double offSeconds, float velocity
              { static_cast<int> (offSeconds * fs), juce::MidiMessage::noteOff (1, number) } };
 }
 
-// JUCE's Convolution loads impulse responses on a background thread; render
-// until the body is installed so tests are deterministic.
-void waitForConvolution (engine::ViolinEngine& e, double fs)
-{
-    juce::AudioBuffer<float> buffer (2, 256);
-    juce::MidiBuffer none;
-    for (int i = 0; i < 200; ++i)
-    {
-        e.process (buffer, none);
-        juce::Thread::sleep (5);
-    }
-    juce::ignoreUnused (fs);
-}
 } // namespace
 
 TEST_CASE ("Engine runs the string at 176.4 kHz or more", "[engine]")
@@ -121,8 +107,6 @@ TEST_CASE ("Engine plays a bowed note in tune and releases it", "[engine]")
     engine::ViolinEngine e;
     e.setSettings (quietSettings (quality));
     e.prepare (fs, blockSize);
-    if (quality == engine::Body::Quality::convolution)
-        waitForConvolution (e, fs);
 
     const auto r = render (e, fs, blockSize, 5.0, note (69, fs, 0.0, 1.5));
     REQUIRE (r.finite);
@@ -187,8 +171,6 @@ TEST_CASE ("Every body and quality produces finite, bounded sound", "[engine][bo
     s.output.room = 0.5f;
     e.setSettings (s);
     e.prepare (fs, 512);
-    if (quality == engine::Body::Quality::convolution)
-        waitForConvolution (e, fs);
 
     const auto r = render (e, fs, 512, 1.0, note (55, fs, 0.0, 0.8, 1.0f));
     CHECK (r.finite);
@@ -248,8 +230,6 @@ TEST_CASE ("Diagnostics: level and CPU per body", "[.diagnostics]")
             s.output.gainDb = -40.0f; // measure below the limiter
             e.setSettings (s);
             e.prepare (fs, 512);
-            if (quality == engine::Body::Quality::convolution)
-                waitForConvolution (e, fs);
 
             const auto start = std::chrono::steady_clock::now();
             const auto r = render (e, fs, 512, 10.0, note (69, fs, 0.0, 9.0));
