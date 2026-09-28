@@ -1,6 +1,6 @@
 # Host checks (Phase 7)
 
-Hand checks for the hosts that must work: **FL Studio, Reaper and Ableton Live on Windows 11** (see [PHASE7.md](PHASE7.md), step 7.6). Use the VST3 from the latest Windows CI build (`ViolinSynth-VST3-Windows.zip`). Copy `Violin Synthesizer.vst3` to `C:\Program Files\Common Files\VST3` and rescan plugins in each host.
+Hand checks for the hosts that must work: **FL Studio, Reaper and Ableton Live on Windows 11** (see [PHASE7.md](PHASE7.md), step 7.6). Use the VST3 from the latest Windows CI build (`Octavio-VST3-Windows.zip`). Copy `Octavio.vst3` to `C:\Program Files\Common Files\VST3` and rescan plugins in each host.
 
 For each check, write ✓, ✗ with what happened, or n/a. Put the date and the build (commit or PR) at the top of the column.
 

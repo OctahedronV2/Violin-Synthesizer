@@ -7,7 +7,7 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 # have the matching Visual C++ Redistributable installed.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-project(ViolinSynthesizer VERSION 0.1.0 LANGUAGES C CXX)
+project(Octavio VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,11 +39,11 @@ if(APPLE)
     list(APPEND VIOLINSYNTH_FORMATS AU)
 endif()
 
-juce_add_plugin(ViolinSynth
-    PRODUCT_NAME "Violin Synthesizer"
+juce_add_plugin(Octavio
+    PRODUCT_NAME "Octavio"
     VERSION "${PROJECT_VERSION}"
     COMPANY_NAME "OctahedronV2"
-    BUNDLE_ID "com.octahedronv2.violinsynthesizer"
+    BUNDLE_ID "com.octahedronv2.octavio"
     # Four-character IDs that hosts use to identify the plugin. Changing them
     # after release breaks saved projects, so treat them as permanent.
     PLUGIN_MANUFACTURER_CODE Octa
@@ -61,14 +61,14 @@ juce_add_plugin(ViolinSynth
 
 add_subdirectory(source)
 
-target_compile_definitions(ViolinSynth
+target_compile_definitions(Octavio
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0
         JUCE_DISPLAY_SPLASH_SCREEN=0)
 
-target_link_libraries(ViolinSynth
+target_link_libraries(Octavio
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
@@ -76,11 +76,11 @@ target_link_libraries(ViolinSynth
         juce::juce_recommended_config_flags)
 
 if(VIOLINSYNTH_ENABLE_LTO)
-    target_link_libraries(ViolinSynth PUBLIC juce::juce_recommended_lto_flags)
+    target_link_libraries(Octavio PUBLIC juce::juce_recommended_lto_flags)
 endif()
 
-violinsynth_enable_sanitizers(ViolinSynth)
-violinsynth_enable_rtsan(ViolinSynth)
+violinsynth_enable_sanitizers(Octavio)
+violinsynth_enable_rtsan(Octavio)
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -60,7 +60,7 @@ TEST_CASE ("Processor describes itself as an instrument", "[processor]")
     juce::ScopedJuceInitialiser_GUI juce;
     ViolinSynthProcessor processor;
 
-    CHECK (processor.getName() == "Violin Synthesizer");
+    CHECK (processor.getName() == "Octavio");
     CHECK (processor.acceptsMidi());
     CHECK_FALSE (processor.producesMidi());
     CHECK_FALSE (processor.isMidiEffect());

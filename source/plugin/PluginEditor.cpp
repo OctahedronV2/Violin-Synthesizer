@@ -137,7 +137,7 @@ public:
         auto header = getLocalBounds().removeFromTop (headerHeight).reduced (20, 10);
         g.setColour (colours::text);
         g.setFont (juce::FontOptions { 25.0f, juce::Font::bold });
-        g.drawText ("Violin Synthesizer", header.removeFromTop (28), juce::Justification::centredLeft);
+        g.drawText ("Octavio", header.removeFromTop (28), juce::Justification::centredLeft);
         g.setColour (colours::dimText);
         g.setFont (juce::FontOptions { 12.5f });
         g.drawText ("v" JucePlugin_VersionString "  |  physically modelled violin",

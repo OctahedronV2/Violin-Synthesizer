@@ -16,10 +16,10 @@ set(VIOLINSYNTH_SOURCES
     plugin/PluginProcessor.cpp
     plugin/PresetManager.cpp)
 
-target_sources(ViolinSynth PRIVATE ${VIOLINSYNTH_SOURCES})
-target_include_directories(ViolinSynth PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_sources(Octavio PRIVATE ${VIOLINSYNTH_SOURCES})
+target_include_directories(Octavio PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-violinsynth_set_warnings(ViolinSynth ${VIOLINSYNTH_SOURCES})
+violinsynth_set_warnings(Octavio ${VIOLINSYNTH_SOURCES})
 
 # Measured body impulse responses (research/scripts/export_plugin_assets.py).
 juce_add_binary_data(ViolinSynthBodies
@@ -31,7 +31,7 @@ juce_add_binary_data(ViolinSynthBodies
         "${PROJECT_SOURCE_DIR}/resources/bodies/stoppani.wav"
         "${PROJECT_SOURCE_DIR}/resources/bodies/iowa.wav")
 set_target_properties(ViolinSynthBodies PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-target_link_libraries(ViolinSynth PRIVATE ViolinSynthBodies)
+target_link_libraries(Octavio PRIVATE ViolinSynthBodies)
 
 # PFFFT (BSD-like licence, third_party/pffft/README.md): the FFT behind the
 # measured-body convolution, with SSE and NEON on every platform.
@@ -41,4 +41,4 @@ set_target_properties(ViolinSynthPffft PROPERTIES POSITION_INDEPENDENT_CODE TRUE
 if(NOT WIN32)
     target_link_libraries(ViolinSynthPffft PRIVATE m)
 endif()
-target_link_libraries(ViolinSynth PRIVATE ViolinSynthPffft)
+target_link_libraries(Octavio PRIVATE ViolinSynthPffft)
