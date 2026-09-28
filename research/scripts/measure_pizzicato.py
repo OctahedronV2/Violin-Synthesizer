@@ -17,6 +17,10 @@ separately:
   decay   dB/s of the fundamental, harmonics 2-3 and harmonics 4-8, over the
           first 80 ms and from 120 to 600 ms (the fast, then slow decay)
   H       harmonic levels 1-8 in the first 40 ms, dB re the fundamental
+  drop    how far the level falls from the first 0.3 s to 0.3-0.8 s and to
+          0.8-1.4 s, per string (recorded notes followed by another within
+          0.85 s are left out, and within 1.45 s leave out the later window;
+          so are levels within 10 dB of the recording's noise floor)
 """
 
 from __future__ import annotations
@@ -118,20 +122,40 @@ def measure(x, fs, f0):
     return np.array(decay), levels
 
 
-def recordings():
+def level_drop(x, fs, f0, floor=-200.0):
+    """Level of the first 0.3 s minus that of 0.3-0.8 s and 0.8-1.4 s (dB); NaN
+    where the later level is within 10 dB of the noise floor."""
+    x = sosfiltfilt(butter(4, 0.7 * f0, "high", fs=fs, output="sos"), x)
+    k = int(np.argmax(np.abs(x[: int(0.05 * fs)])))
+    db = [20 * np.log10(np.sqrt(np.mean(x[k + int(a * fs) : k + int(b * fs)] ** 2)) + 1e-12)
+          for a, b in [(0.0, 0.3), (0.3, 0.8), (0.8, 1.4)]]
+    return np.array([db[0] - d if d > floor + 10 else np.nan for d in db[1:]])
+
+
+def noise_floor(x, fs):
+    """Level of the quietest non-silent 50 ms stretches of a recording (dB)."""
+    x = sosfiltfilt(butter(4, 150, "high", fs=fs, output="sos"), x)
+    n = int(0.05 * fs)
+    r = np.sqrt(np.mean(x[: len(x) // n * n].reshape(-1, n) ** 2, 1))
+    return 20 * np.log10(np.percentile(r[r > 1e-6], 5)) if (r > 1e-6).any() else -200.0
+
+
+def recordings(gaps=False):
     for path in sorted(TARGET.glob("Violin.pizz.*.aif")):
         dyn, string, span = path.name.split(".")[2:5]
         lo, hi = (midi(n) for n in re.findall(r"[A-G]b?\d", span))
         x, fs = sf.read(path)
         x = x.mean(1) if x.ndim > 1 else x
-        for k in onsets(x, fs):
+        found, floor = onsets(x, fs), noise_floor(x, fs)
+        for i, k in enumerate(found):
             note = x[max(0, k - int(0.01 * fs)) : k + int(1.5 * fs)]
             if len(note) < fs:
                 continue
             f0 = f0_of(note[int(0.04 * fs) : int(0.2 * fs)], fs, hz(lo - 1), hz(hi + 1))
             if f0 is None or not hz(lo - 0.6) < f0 < hz(hi + 0.6):
                 continue
-            yield string, 12 * np.log2(f0 / 440) + 69, note, fs, f0
+            gap = (found[i + 1] - k) / fs if i + 1 < len(found) else 9.0
+            yield (string, 12 * np.log2(f0 / 440) + 69, note, fs, f0) + ((gap, floor) if gaps else ())
 
 
 def renders(folder):
@@ -161,11 +185,33 @@ def report(title, notes):
             print(f"{key:14s}{len(groups[key]):4d}   {' '.join(f'{v:5.0f}' for v in d)}   {' '.join(f'{v:4.0f}' for v in h)}")
 
 
+def report_drop(title, notes):
+    """Level drop of open strings and of stopped notes up to four semitones above them."""
+    groups = {}
+    for string, note, x, fs, f0, gap, floor in notes:
+        above = note - OPEN[string]
+        kind = "open" if abs(above) < 0.5 else "stopped" if 0.5 < above < 4.5 else None
+        if kind is None or gap < 0.85 or len(x) < 1.45 * fs:
+            continue
+        drop = level_drop(x, fs, f0, floor)
+        if gap < 1.45:
+            drop[1] = np.nan
+        groups.setdefault(f"{string} {kind}", []).append(drop)
+    print(f"\n{title}: level drop, dB, to 0.3-0.8 s and to 0.8-1.4 s")
+    for key in [f"{s} {k}" for s in OPEN for k in ("open", "stopped")]:
+        if key in groups:
+            d = np.nanmedian(groups[key], 0)
+            print(f"{key:14s}{len(groups[key]):4d}   {d[0]:5.1f} {d[1]:5.1f}")
+
+
 def main():
     fetch()
     report("Recordings (Iowa MIS)", recordings())
     for folder in sys.argv[1:]:
         report(f"Synth ({folder})", renders(folder))
+    report_drop("Recordings (Iowa MIS)", recordings(gaps=True))
+    for folder in sys.argv[1:]:
+        report_drop(f"Synth ({folder})", (n + (9.0, -200.0) for n in renders(folder)))
 
 
 if __name__ == "__main__":

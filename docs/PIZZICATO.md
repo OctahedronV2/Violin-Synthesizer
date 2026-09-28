@@ -58,15 +58,31 @@ and measures notes up to a fifth above each open string. Medians:
 |---|---|---|---|
 | Stopped notes, recorded | -91 / -56 dB/s | -143 / -71 | -209 / -73 |
 | Stopped notes, old synth | -77 / -70 | -123 / -100 | -330 / -201 |
-| Stopped notes, new synth | -113 / -42 | -133 / -49 | -203 / -90 |
+| Stopped notes, new synth | -125 / -63 | -151 / -71 | -223 / -110 |
 | Open strings, recorded | -17 / -15 | -78 / -15 | -20 / -32 |
 | Open strings, old synth | -71 / -68 | -96 / -90 | -258 / -178 |
-| Open strings, new synth | -28 / -18 | -38 / -22 | -94 / -21 |
+| Open strings, new synth | -83 / -40 | -95 / -39 | -141 / -42 |
 
 Real stopped notes decay about twice as fast in their first 80 ms as later.
-Open strings decay four times more slowly than stopped notes, and a stopped
-note's decay rate rises with its pitch (about 0.13 dB per period, which is
-what a fingertip taking a fixed share per period gives).
+Open-string fundamentals decay slowly, but their upper harmonics do not, so
+the level heard falls much faster than the fundamental alone suggests. The
+level over the first second is what the ear follows, so the decay is fitted to
+that too (the script's "level drop": isolated notes, high-passed, leaving out
+levels within 10 dB of the recording's noise floor). Medians per string, G to
+E:
+
+| Level drop from the first 0.3 s | to 0.3-0.8 s | to 0.8-1.4 s |
+|---|---|---|
+| Stopped notes, recorded | 25, 17, 25, 41 dB | 30, 36, over 45, over 45 |
+| Stopped notes, first fit | 13, 16, 22, 32 | 25, 32, 46, 69 |
+| Stopped notes, new synth | 21, 24, 29, 35 | 44, 51, 61, 75 |
+| Open strings, recorded | 6, 13, 17, 11 | 24, 30, -, 34 |
+| Open strings, first fit | 7, 7, 8, 10 | 16, 15, 17, 19 |
+| Open strings, new synth | 18, 18, 18, 20 | 34, 34, 35, 38 |
+
+Higher stopped notes die sooner. An open string starts at the level of its
+stopped neighbours and rings on a little above them. The synth now errs
+slightly on the short side, as Jake asked (below).
 
 ## The model
 
@@ -88,16 +104,16 @@ All in `StringVoice` (source/engine/StringVoice.cpp) and one addition to
 - **Two swings.** The existing string is the horizontal swing; a second
   waveguide is the vertical one, used only for plucked notes. The pluck is
   split between them by its angle (0.5 rad from the top). The vertical swing
-  drives the bridge at 0.9 of the horizontal's strength and is tuned 0.7
+  drives the bridge at 0.7 of the horizontal's strength and is tuned 0.7
   cents sharp (it sees a stiffer bridge), which adds a slow, gentle beat.
 - **Decay fitted to the recordings** (T60 at the fundamental and at 4 kHz):
 
   | | Vertical | Horizontal |
   |---|---|---|
-  | Open string | 6.0 s, 1.5 s | 3.5 s, 0.1 s |
-  | Stopped note | 700 / f0 s, 0.25 s | 120 / f0 s, 0.08 s |
+  | Open string | 2.0 s, 0.8 s | 0.6 s, 0.1 s |
+  | Stopped note | 1.1 s, 0.25 s at A4 | 0.4 s, 0.08 s at A4 |
 
-  The stopping fingertip damps the horizontal swing most: the string can roll
+  A stopped note's T60 scales as 1 / sqrt (f0). The stopping fingertip damps the horizontal swing most: the string can roll
   across the soft fingertip but is pressed vertically into the hard
   fingerboard.
 - **Humanise** moves the pluck point by up to 8 mm, the angle by 0.2 rad, the
@@ -111,12 +127,20 @@ distance and the fitted decay constants.
 
 - The spectrum now falls away from the fundamental as recorded notes do, and
   the fixed hole at every fourth harmonic is gone.
-- Decays: see the table. Stopped notes have the fast-then-slow shape; open
-  strings ring for seconds.
+- Decays: see the tables. Stopped notes have the fast-then-slow shape; open
+  strings ring on a little longer.
+- **First listening round.** Jake found every note rang slightly too long and
+  the open strings (G, D, A, E) much louder than the rest. The first fit
+  followed the fundamental only: open strings rang for 6 s, and stopped notes
+  for 700 / f0 s. By one second the open strings stood 20 to 50 dB above
+  their neighbours. Refitting to the level drop as well gave the constants
+  above: open strings ring about a third as long, stopped notes a little
+  shorter on every string, and the vertical swing drives the bridge a little
+  less (0.7 of the horizontal's strength, from 0.9).
 - Loudness: the pluck has a wider dynamic range than before (median peak 0.10
   at pp to 0.24 at ff, against 0.09 to 0.16). The Pizzicato presets were
-  re-levelled (output gain 6.0 to 2.25 dB, and 8.5 to 3.5 dB for Pizzicato
-  Hall), because the notes ring longer.
+  re-levelled to match the other presets (output gain 6.0 to 5.0 dB, and 8.5
+  to 5.75 dB for Pizzicato Hall).
 - The pluck lands when the finger lets go, 2.5 ms after the note starts.
 - CPU: the vertical swing is a second string waveguide for each plucked note,
   about 0.8% of a core per note on the cloud test machine. In the Callgrind

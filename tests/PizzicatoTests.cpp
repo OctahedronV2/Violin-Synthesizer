@@ -88,6 +88,8 @@ double levelDb (const std::vector<double>& x, double from, double to)
 TEST_CASE ("An open string rings on; a stopped note dies sooner", "[pizzicato]")
 {
     // The stopping fingertip takes energy from the string (docs/PIZZICATO.md).
+    // Recorded open strings fall about 30 dB in their first second, stopped
+    // notes about 50 dB or more.
     for (auto [open, stopped] : { std::pair { 55, 57 }, { 62, 64 }, { 69, 71 }, { 76, 78 } })
     {
         CAPTURE (open, stopped);
@@ -95,7 +97,9 @@ TEST_CASE ("An open string rings on; a stopped note dies sooner", "[pizzicato]")
         const auto s = pluckNote (stopped, 1.2);
         const auto openDrop = levelDb (o, 0.03, 0.1) - levelDb (o, 1.0, 1.1);
         const auto stoppedDrop = levelDb (s, 0.03, 0.1) - levelDb (s, 1.0, 1.1);
-        CHECK (openDrop < 30.0);
+        CAPTURE (openDrop, stoppedDrop);
+        CHECK (openDrop > 25.0);
+        CHECK (openDrop < 50.0);
         CHECK (stoppedDrop > openDrop + 10.0);
     }
 }

@@ -74,17 +74,18 @@ constexpr double pluckReleaseHard = 0.00005; // ... and hardest
 // they give the fast, then slow decay of real plucked notes.
 constexpr double pluckAngle = 0.5; // rad from the top plate, a typical pluck
 constexpr double pluckAngleSpread = 0.2; // rad, from one pluck to the next at full Humanise
-constexpr double verticalGain = 0.9; // how strongly the vertical swing drives the bridge
+constexpr double verticalGain = 0.7; // how strongly the vertical swing drives the bridge
 constexpr double verticalTuning = 1.0004; // it sees a stiffer bridge: 0.7 cents sharp
-// Decay, fitted to recordings (T60 at the fundamental and at 4 kHz). An open
-// string rings for seconds. A stopping fingertip takes a fixed share of the
-// energy each period (T60 = k / f0), so higher notes die sooner, and it damps
-// the horizontal swing most: the string can roll across the soft fingertip,
-// but is pressed vertically into the hard fingerboard.
-constexpr dsp::LossSpec openVerticalLoss { 6.0, 1.5, 4000.0 };
-constexpr dsp::LossSpec openHorizontalLoss { 3.5, 0.1, 4000.0 };
-constexpr double stoppedVerticalK = 700.0, stoppedVerticalHigh = 0.25;
-constexpr double stoppedHorizontalK = 120.0, stoppedHorizontalHigh = 0.08;
+// Decay, fitted to the level of recorded notes over their first second
+// (T60 at the fundamental and at 4 kHz). An open string rings about twice as
+// long as a stopped note. A stopped note rings shorter the higher it is, as
+// 1 / sqrt (f0) (T60 given at A4). The stopping fingertip damps the horizontal
+// swing most: the string can roll across the soft fingertip, but is pressed
+// vertically into the hard fingerboard.
+constexpr dsp::LossSpec openVerticalLoss { 2.0, 0.8, 4000.0 };
+constexpr dsp::LossSpec openHorizontalLoss { 0.6, 0.1, 4000.0 };
+constexpr dsp::LossSpec stoppedVerticalLoss { 1.1, 0.25, 4000.0 };
+constexpr dsp::LossSpec stoppedHorizontalLoss { 0.4, 0.08, 4000.0 };
 
 double onePoleCoeff (double seconds, double rate)
 {
@@ -205,12 +206,15 @@ void StringVoice::setArticulation (Articulation a)
     noteArticulation = a;
     if (a == Articulation::pizzicato)
     {
-        const auto f0 = midiToHz (std::max (currentNote, spec->openMidiNote));
-        const auto stopped
-            = [f0] (double k, double high) { return dsp::LossSpec { std::clamp (k / f0, 0.3, 3.0), high, 4000.0 }; };
         const bool open = currentNote == spec->openMidiNote;
-        pluckLoss = open ? openVerticalLoss : stopped (stoppedVerticalK, stoppedVerticalHigh);
-        pluckLossHorizontal = open ? openHorizontalLoss : stopped (stoppedHorizontalK, stoppedHorizontalHigh);
+        const auto stopped
+            = [scale = std::sqrt (440.0 / midiToHz (std::max (currentNote, spec->openMidiNote)))] (dsp::LossSpec loss)
+        {
+            loss.t60 *= scale;
+            return loss;
+        };
+        pluckLoss = open ? openVerticalLoss : stopped (stoppedVerticalLoss);
+        pluckLossHorizontal = open ? openHorizontalLoss : stopped (stoppedHorizontalLoss);
         if (damping == Damping::plucked)
             damping = Damping::bowed; // apply this note's loss
     }
