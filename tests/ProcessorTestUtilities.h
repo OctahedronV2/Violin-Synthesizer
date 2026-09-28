@@ -25,13 +25,14 @@ inline void setParameter (ViolinSynthProcessor& p, const juce::ParameterID& id, 
     parameter->setValueNotifyingHost (parameter->convertTo0to1 (plainValue));
 }
 
-// No vibrato, humanising, resonance, room or width: a steady, repeatable tone.
+// No vibrato, humanising, bow noise, resonance, room or width: a steady, repeatable tone.
 // The modal body renders the same every time; the convolution body loads its
 // impulse response on a background thread.
 inline void useSteadySettings (ViolinSynthProcessor& p, bool modalBody = true)
 {
     setParameter (p, params::id::vibratoDepth, 0.0f);
     setParameter (p, params::id::humanise, 0.0f);
+    setParameter (p, params::id::bowNoise, 0.0f);
     setParameter (p, params::id::resonance, 0.0f);
     setParameter (p, params::id::room, 0.0f);
     setParameter (p, params::id::width, 0.0f);

@@ -21,6 +21,7 @@ inline engine::EngineSettings plainSettings()
     engine::EngineSettings s;
     s.performance.voice.vibratoDepthCents = 0.0;
     s.performance.voice.humanise = 0.0;
+    s.performance.voice.bowNoise = 0.0;
     s.performance.voice.resonance = 0.0;
     s.output.room = 0.0f;
     s.output.width = 0.0f;

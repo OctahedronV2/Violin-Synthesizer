@@ -195,9 +195,12 @@ double phraseLevelDb (ViolinSynthProcessor& processor, float velocity)
     auto settings = params::Reader (processor.getParameters()).read();
     settings.bodyQuality = engine::Body::Quality::modal; // no background IR loading in tests
     settings.performance.octaveShift = 0; // the phrase is written where it sounds
-    // Humanise lets the bow speed wander by a dB or so, which a 3 s phrase's
-    // loudest moment picks up by chance; the presets' own levels are compared.
+    // Humanise lets the bow speed wander by a dB or so, and bow noise can tip
+    // a light bow by the bridge in or out of clean motion; a 3 s phrase's
+    // loudest moment picks either up by chance. The presets' own levels are
+    // compared.
     settings.performance.voice.humanise = 0.0;
+    settings.performance.voice.bowNoise = 0.0;
 
     engine::ViolinEngine e;
     e.setSettings (settings);

@@ -60,11 +60,58 @@ sequence, so the vibrato and tremolo draws are unchanged.
 
 At Humanise 0 nothing wanders, as before.
 
+## 3. Bow noise and tremor
+
+Jake's feedback on the first round: still synthetic, and some intentional
+scratch and the small shakes of a human player might help. The Iowa held notes
+(no vibrato) measured against the model, with the pitch fitted every 100 ms so
+that pitch drift isn't counted:
+
+| Held notes, middle of the note | Iowa (median) | Before | After |
+|---|---|---|---|
+| Non-repeating part of the sound (period-to-period residual) | −23.8 dB | −39.4 dB | −21.0 dB |
+| Level jitter, 4 to 14 Hz (std) | 0.55 dB | 0.13 dB | 0.38 dB |
+| Pitch jitter, 4 to 14 Hz (std; the tracker's floor is about 0.45) | 1.26 cents | 0.45 cents | 0.8 cents |
+
+The noise sits in the same bands as the real violin's: within 2 dB of it from
+1.2 to 10 kHz, and a few dB above it around the fundamental, where the tremor
+adds to it. The default errs on the rough side of real.
+
+**Bow noise.** Rosin and the separate hairs drag the string unevenly. The
+model adds a fine, broadband flutter (white noise low-passed at 15 kHz) to the
+bow's velocity at the contact point: in proportion to the bow speed, full
+while the string slips and a fifth of that while it sticks. It goes into the
+string, so the string filters it like any motion at the bow, and it comes out
+as noise pulses locked to the slips, as with a real bow. A new **Bow Noise**
+control (Play panel, automatable) sets it: 50% by default matches the Iowa
+notes, 0 is the clean model, and 100% is twice the real amount, for a rougher
+player.
+
+Putting the same noise into the bow force instead was tried first. The clean
+bowing player heard it as scratch and lifted the bow, and at the higher
+settings notes lost up to 10 dB. As a velocity it leaves the level alone:
+held legato notes on every string are within 0.2 dB of Bow Noise 0 at 50%,
+and within 0.2 dB on G, D and A and 3.3 dB lower on E at 100%.
+
+**Tremor.** Both hands shake a little (physiological tremor). Humanise now
+also adds band-passed noise from 4 to 14 Hz to the bow speed (±15% at full
+Humanise) and the stopped pitch (±2 cents).
+
+The period-to-period scratch meter can't tell rosin noise from scratch, so it
+reads more noise by design. Tests that measure the clean model
+(`plainSettings`, `useSteadySettings`, the preset level test) turn Bow Noise
+off. The benchmark baseline is raised by the extra work: about +3.7% on one
+note and +6.7% on a four-note chord (the per-sample noise at the internal
+rate), scaled from a local Callgrind run of main against this branch.
+
 ## Checks
 
-- Scratch (`ViolinSynthTests "[.bownoisereport]"`, Humanise 50%, pitch drift
-  off so the meter reads only noise): every articulation within about 1 dB of
-  before; held notes through bow changes −39.4 dB (was −39.2).
+- Scratch from the wander of section 2 (`ViolinSynthTests "[.bownoisereport]"`,
+  Humanise 50%, pitch drift and Bow Noise off so the meter reads only the
+  model's own noise): every articulation within about 1 dB of before; held
+  notes through bow changes −39.4 dB (was −39.2).
+- `ViolinSynthTests "[.naturalheld]"` renders plain held notes (no vibrato)
+  at the default Humanise and Bow Noise, for the table in section 3.
 - `ViolinSynthTests "[.naturalrender]"` renders held notes G3 to E6 at
   velocity 64 without room (for comparison with the Iowa notes), a slow
   slurred melody and slurred runs.

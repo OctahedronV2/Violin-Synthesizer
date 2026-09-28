@@ -94,11 +94,9 @@ public:
         playChoices = { &addChoice (id::playMode, "Mode") };
         playToggles = { &addToggle (id::autoBowChange, "Auto bow change"), &addToggle (id::mpe, "MPE") };
         playChoices.push_back (&addChoice (id::octave, "Octave"));
-        playKnobs = { &addKnob (id::resonance, "Resonance"),
-                      &addKnob (id::humanise, "Humanise"),
-                      &addKnob (id::imperfection, "Imperfect"),
-                      &addKnob (id::velocityRange, "Vel Range"),
-                      &addKnob (id::mpeBendRange, "MPE Bend") };
+        playKnobs = { &addKnob (id::resonance, "Resonance"),     &addKnob (id::humanise, "Humanise"),
+                      &addKnob (id::imperfection, "Imperfect"),  &addKnob (id::bowNoise, "Bow Noise"),
+                      &addKnob (id::velocityRange, "Vel Range"), &addKnob (id::mpeBendRange, "MPE Bend") };
 
         // Body and output
         bodyChoices = { &addChoice (id::body, "Violin"), &addChoice (id::bodyQuality, "Quality") };

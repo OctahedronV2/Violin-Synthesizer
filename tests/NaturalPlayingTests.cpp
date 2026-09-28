@@ -126,3 +126,29 @@ TEST_CASE ("Render held notes and phrases with the default player", "[.naturalre
     runs.emplace_back (62, -2.0, 0.55);
     phrase ("natural_runs", runs, 0.6);
 }
+
+// Not run by default: `ViolinSynthTests "[.naturalheld]"` writes held notes G3
+// to E6 without vibrato, room or resonance, at the default Humanise and Bow
+// Noise (natural_plain.wav, one note every 4 s), to measure bow noise and
+// tremor against the Iowa recordings, which have no vibrato.
+TEST_CASE ("Render plain held notes", "[.naturalheld]")
+{
+    auto s = plainSettings();
+    const engine::EngineSettings defaults;
+    s.performance.voice.humanise = defaults.performance.voice.humanise;
+    s.performance.voice.bowNoise = defaults.performance.voice.bowNoise;
+    s.performance.velocityTop = defaults.performance.velocityTop;
+    engine::ViolinEngine e;
+    e.setSettings (s);
+    e.prepare (fs, block);
+    std::vector<Event> events;
+    auto t = 0.2;
+    for (int note : { 55, 57, 60, 62, 64, 67, 69, 71, 74, 76, 79, 81, 84, 88 })
+    {
+        events.push_back ({ t, on (note, 1, 64.0f / 127.0f) });
+        events.push_back ({ t + 3.0, off (note) });
+        t += 4.0;
+    }
+    const auto [left, right] = renderStereo (e, t, events);
+    writeWav ("natural_plain", left, right);
+}

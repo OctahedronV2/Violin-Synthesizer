@@ -40,6 +40,22 @@ constexpr double armBandwidthHz = 1.5;
 constexpr double armSpeedWander = 0.22; // fraction of the bow speed
 constexpr double armBetaWander = 0.1; // fraction of the distance from the bridge
 constexpr double fingerWanderCents = 7.0;
+// ... and both hands shake a little: physiological tremor, 4 to 14 Hz.
+// Amounts at full Humanise, set against the Iowa held notes.
+constexpr double tremorLowHz = 4.0, tremorHighHz = 14.0;
+constexpr double tremorSpeed = 0.15; // fraction of the bow speed
+constexpr double tremorCents = 2.0;
+
+// Bow noise (docs/NATURAL_PLAYING.md): rosin and the hundred-odd separate
+// hairs drag the string unevenly, so the bow's motion at the contact carries
+// a fine, broadband flutter. It is injected at the bow point as a velocity,
+// in proportion to the bow speed, full while the string slips and weaker
+// while it sticks, and the string filters it like any other motion there.
+// Amount (standard deviation, a fraction of the bow speed) at full Bow Noise;
+// the default of 50% matches the noise in the Iowa held notes.
+constexpr double hairNoise = 1.0;
+constexpr double hairStick = 0.2;
+constexpr double hairNoiseHz = 15000.0;
 
 // Clean bowing (docs/CLEAN_BOWING.md). The player's weight never takes the
 // force past this fraction of F_max, where the model turns to noise
@@ -148,6 +164,19 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     peakDecay = onePoleCoeff (0.3, fs);
     random = 0x9e3779b9u * static_cast<std::uint32_t> (stringIndex + 1);
     armRandom = 0x85ebca6bu * static_cast<std::uint32_t> (stringIndex + 1);
+    hairRandom = 0xc2b2ae35u * static_cast<std::uint32_t> (stringIndex + 1);
+    tremorLowCoeff = std::exp (-2.0 * std::numbers::pi * tremorLowHz * controlInterval / fs);
+    tremorHighCoeff = std::exp (-2.0 * std::numbers::pi * tremorHighHz * controlInterval / fs);
+    hairCoeff = std::exp (-2.0 * std::numbers::pi * hairNoiseHz / fs);
+    // Both scaled to unit variance (uniform noise has variance 1/3).
+    hairScale = 1.0 / std::sqrt ((1.0 - hairCoeff) / (3.0 * (1.0 + hairCoeff)));
+    {
+        const auto a = tremorHighCoeff, b = tremorLowCoeff;
+        const auto variance = ((1.0 - a) * (1.0 - a) / (1.0 - a * a) + (1.0 - b) * (1.0 - b) / (1.0 - b * b)
+                               - 2.0 * (1.0 - a) * (1.0 - b) / (1.0 - a * b))
+            / 3.0;
+        tremorScale = 1.0 / std::sqrt (variance);
+    }
     reset();
 }
 
@@ -169,6 +198,9 @@ void StringVoice::reset()
     handPosition = firstPosition;
     armSpeedGain = 1.0;
     speedWander = betaWander = pitchWander = speedDrive = betaDrive = pitchDrive = 0.0;
+    speedTremor = {};
+    pitchTremor = {};
+    hairLevel = 0.0;
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
     forceFraction = 0.48;
@@ -488,6 +520,12 @@ void StringVoice::updateArm()
         *smooth = armCoeff * *smooth + (1.0 - armCoeff) * draw();
         *w = std::clamp (armCoeff * *w + (1.0 - armCoeff) * *smooth, -limit, limit);
     }
+    for (auto* t : { &speedTremor, &pitchTremor })
+    {
+        const auto x = draw();
+        t->low = tremorLowCoeff * t->low + (1.0 - tremorLowCoeff) * x;
+        t->high = tremorHighCoeff * t->high + (1.0 - tremorHighCoeff) * x;
+    }
 }
 
 void StringVoice::updateNoise()
@@ -509,7 +547,8 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
                         + 30.0 * expression.pressure);
     const auto vibratoCents = 0.5 * std::max (depth, 0.0) * std::sin (2.0 * std::numbers::pi * vibratoPhase);
     const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
-        + fingerWanderCents * humanise * armScale * pitchWander;
+        + fingerWanderCents * humanise * armScale * pitchWander
+        + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
 }
 
@@ -536,7 +575,8 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     }
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
-    armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander;
+    armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
+        + tremorSpeed * humanise * speedTremor.band() * tremorScale;
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
@@ -777,9 +817,18 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         force = forceGain * fMax * fraction;
         if (const auto locked = stuckSamples / (lockedPeriods * fs / f0); locked > 1.0)
             force *= std::pow (lockedEase, locked); // easing further the longer it holds
+        hairRandom = hairRandom * 1664525u + 1013904223u;
+        const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
+        hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
+        hairVelocity = hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
+            * (string.isSticking() ? hairStick : 1.0);
     }
 
-    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0, b, context.direction * speed, force);
+    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0,
+                             b,
+                             context.direction * speed,
+                             force,
+                             isBowed() ? hairVelocity : 0.0);
     if (verticalActive)
     {
         const auto v = verticalGain * vertical.process (f0 * verticalTuning, b, 0.0, 0.0);
