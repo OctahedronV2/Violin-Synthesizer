@@ -154,6 +154,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::drive, "Drive", Range { 0.0f, 1.0f }, 0.3f, Format::percent));
     layout.add (floatParam (id::drone, "Drone", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
 
+    // Bow noise: the grain of rosin and hair in the friction. 50% matches the
+    // noise of real held notes; 0 is the clean model (docs/NATURAL_PLAYING.md).
+    layout.add (floatParam (id::bowNoise, "Bow Noise", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
+
     return layout;
 }
 
@@ -186,7 +190,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       instrument (state.getRawParameterValue (id::instrument.getParamID())),
       pickup (state.getRawParameterValue (id::pickup.getParamID())),
       drive (state.getRawParameterValue (id::drive.getParamID())),
-      drone (state.getRawParameterValue (id::drone.getParamID()))
+      drone (state.getRawParameterValue (id::drone.getParamID())),
+      bowNoise (state.getRawParameterValue (id::bowNoise.getParamID()))
 {
 }
 
@@ -217,6 +222,7 @@ engine::EngineSettings Reader::read() const
     s.performance.voice.resonance = resonance->load();
     s.performance.voice.humanise = humanise->load();
     s.performance.voice.imperfection = imperfection->load();
+    s.performance.voice.bowNoise = bowNoise->load();
     s.performance.voice.autoBowChange = autoBowChange->load() > 0.5f;
     s.performance.playMode = static_cast<engine::PlayMode> (juce::jlimit (0, 2, static_cast<int> (playMode->load())));
     s.performance.mpe = mpe->load() > 0.5f;

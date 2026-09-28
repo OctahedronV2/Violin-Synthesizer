@@ -39,6 +39,7 @@ inline const juce::ParameterID instrument { "instrument", 4 };
 inline const juce::ParameterID pickup { "pickup", 4 };
 inline const juce::ParameterID drive { "drive", 4 };
 inline const juce::ParameterID drone { "drone", 4 };
+inline const juce::ParameterID bowNoise { "bowNoise", 5 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -88,5 +89,6 @@ private:
     std::atomic<float>* pickup;
     std::atomic<float>* drive;
     std::atomic<float>* drone;
+    std::atomic<float>* bowNoise;
 };
 } // namespace violinsynth::params

@@ -22,6 +22,41 @@ constexpr double vibratoOnsetSeconds = 0.25;
 constexpr double silenceThreshold = 1.0e-5;
 constexpr double noiseBandwidthHz = 0.7; // humanisation drift
 
+// Slurs (docs/NATURAL_PLAYING.md). Within a hand position a new finger drops
+// onto the string, or one lifts off it, and the pitch changes almost at once;
+// only a shift of the hand slides, over the Portamento time. A position
+// reaches handSpan semitones up from the lowest first finger; first position
+// starts a semitone above the open string.
+constexpr int handSpan = 6;
+constexpr int firstPosition = 1;
+constexpr double fingerChangeSeconds = 0.01;
+
+// The player's arm and hand are not a machine (docs/NATURAL_PLAYING.md): bow
+// speed and contact point wander slowly through a stroke, and the stopping
+// finger's pitch drifts by a few cents. Standard deviations at full Humanise,
+// set so the default (50%) matches the level and pitch drift of held notes in
+// the Iowa recordings (about 1 dB and 3 cents).
+constexpr double armBandwidthHz = 1.5;
+constexpr double armSpeedWander = 0.22; // fraction of the bow speed
+constexpr double armBetaWander = 0.1; // fraction of the distance from the bridge
+constexpr double fingerWanderCents = 7.0;
+// ... and both hands shake a little: physiological tremor, 4 to 14 Hz.
+// Amounts at full Humanise, set against the Iowa held notes.
+constexpr double tremorLowHz = 4.0, tremorHighHz = 14.0;
+constexpr double tremorSpeed = 0.15; // fraction of the bow speed
+constexpr double tremorCents = 2.0;
+
+// Bow noise (docs/NATURAL_PLAYING.md): rosin and the hundred-odd separate
+// hairs drag the string unevenly, so the bow's motion at the contact carries
+// a fine, broadband flutter. It is injected at the bow point as a velocity,
+// in proportion to the bow speed, full while the string slips and weaker
+// while it sticks, and the string filters it like any other motion there.
+// Amount (standard deviation, a fraction of the bow speed) at full Bow Noise;
+// the default of 50% matches the noise in the Iowa held notes.
+constexpr double hairNoise = 1.0;
+constexpr double hairStick = 0.2;
+constexpr double hairNoiseHz = 15000.0;
+
 // Clean bowing (docs/CLEAN_BOWING.md). The player's weight never takes the
 // force past this fraction of F_max, where the model turns to noise
 // (docs/PHASE1_FINDINGS.md, section 3.1).
@@ -114,6 +149,11 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     noiseCoeff = std::exp (-2.0 * std::numbers::pi * noiseBandwidthHz * noiseFilterStep / fs);
     // Scales the drifting noise to unit variance.
     noiseScale = 1.0 / (0.577 * std::sqrt ((1.0 - noiseCoeff) / (1.0 + noiseCoeff)));
+    // Two one-poles in series, scaled to unit variance: the wander is slow
+    // and smooth, with no fast jitter for the string to turn into noise.
+    armCoeff = std::exp (-2.0 * std::numbers::pi * armBandwidthHz * controlInterval / fs);
+    const auto c = armCoeff;
+    armScale = 1.0 / std::sqrt (std::pow (1.0 - c, 4.0) * (1.0 + c * c) / (3.0 * std::pow (1.0 - c * c, 3.0)));
     biteDecay = onePoleCoeff (staccatoBiteSeconds, fs);
     peakDecay = onePoleCoeff (0.3, fs);
     configure (violinSpec, stringIndex);
@@ -135,6 +175,20 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
 
     minF0 = midiToHz (spec->openMidiNote - 1.0);
     random = 0x9e3779b9u * static_cast<std::uint32_t> (stringIndex + 1);
+    armRandom = 0x85ebca6bu * static_cast<std::uint32_t> (stringIndex + 1);
+    hairRandom = 0xc2b2ae35u * static_cast<std::uint32_t> (stringIndex + 1);
+    tremorLowCoeff = std::exp (-2.0 * std::numbers::pi * tremorLowHz * controlInterval / fs);
+    tremorHighCoeff = std::exp (-2.0 * std::numbers::pi * tremorHighHz * controlInterval / fs);
+    hairCoeff = std::exp (-2.0 * std::numbers::pi * hairNoiseHz / fs);
+    // Both scaled to unit variance (uniform noise has variance 1/3).
+    hairScale = 1.0 / std::sqrt ((1.0 - hairCoeff) / (3.0 * (1.0 + hairCoeff)));
+    {
+        const auto a = tremorHighCoeff, b = tremorLowCoeff;
+        const auto variance = ((1.0 - a) * (1.0 - a) / (1.0 - a * a) + (1.0 - b) * (1.0 - b) / (1.0 - b * b)
+                               - 2.0 * (1.0 - a) * (1.0 - b) / (1.0 - a * b))
+            / 3.0;
+        tremorScale = 1.0 / std::sqrt (variance);
+    }
     droning = false;
     droneWeight = 1.0;
     reset();
@@ -161,6 +215,13 @@ void StringVoice::reset()
     logF0 = targetLogF0 = std::log (midiToHz (spec->openMidiNote));
     envelopePosition = 0.0;
     vibratoPhase = 0.0;
+    glideProgress = 1.0;
+    handPosition = firstPosition;
+    armSpeedGain = 1.0;
+    speedWander = betaWander = pitchWander = speedDrive = betaDrive = pitchDrive = 0.0;
+    speedTremor = {};
+    pitchTremor = {};
+    hairLevel = 0.0;
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
     droning = false;
@@ -177,8 +238,21 @@ void StringVoice::setTarget (int note, bool glide)
 {
     // A string cannot sound below its open pitch.
     note = std::max (note, spec->openMidiNote);
+    // Move the hand if the note is out of its reach: up, the new note falls
+    // under the third finger; down, under the first. Leaving or landing on an
+    // open string needs no slide.
+    const auto above = note - spec->openMidiNote;
+    auto shift = false;
+    if (above > 0 && (above < handPosition || above > handPosition + handSpan))
+    {
+        shift = true;
+        handPosition = above > handPosition + handSpan ? above - 4 : std::max (firstPosition, above - 1);
+    }
+    shifting = shift && currentNote > spec->openMidiNote;
     currentNote = note;
     targetLogF0 = std::log (midiToHz (note));
+    glideFrom = logF0;
+    glideProgress = glide ? 0.0 : 1.0;
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
@@ -433,11 +507,51 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
 {
     // Glide and vibrato, stepped over the whole interval.
     const auto seconds = samples / fs;
-    logF0 = targetLogF0 + onePoleCoeff (settings.portamentoSeconds / 3.0, fs / samples) * (logF0 - targetLogF0);
+    advanceGlide (settings, seconds);
     secondsSinceNoteChange += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     vibratoPhase += settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * seconds;
     vibratoPhase -= std::floor (vibratoPhase);
+}
+
+void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
+{
+    // A slur changes finger quickly, or shifts over the Portamento time; the
+    // pitch eases in and out of the move, as the hand does.
+    if (glideProgress < 1.0)
+    {
+        const auto time
+            = shifting ? settings.portamentoSeconds : std::min (fingerChangeSeconds, settings.portamentoSeconds);
+        glideProgress = time <= 0.0 ? 1.0 : std::min (1.0, glideProgress + seconds / time);
+    }
+    if (glideProgress >= 1.0)
+        logF0 = targetLogF0;
+    else
+        logF0 = glideFrom + (targetLogF0 - glideFrom) * (0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress));
+}
+
+void StringVoice::updateArm()
+{
+    // Its own random sequence, so the vibrato and tremolo draws are unchanged.
+    const auto draw = [this]
+    {
+        armRandom = armRandom * 1664525u + 1013904223u;
+        return static_cast<double> (armRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
+    };
+    const auto limit = 2.5 / armScale;
+    for (auto& [smooth, w] : { std::pair { &speedDrive, &speedWander },
+                               std::pair { &betaDrive, &betaWander },
+                               std::pair { &pitchDrive, &pitchWander } })
+    {
+        *smooth = armCoeff * *smooth + (1.0 - armCoeff) * draw();
+        *w = std::clamp (armCoeff * *w + (1.0 - armCoeff) * *smooth, -limit, limit);
+    }
+    for (auto* t : { &speedTremor, &pitchTremor })
+    {
+        const auto x = draw();
+        t->low = tremorLowCoeff * t->low + (1.0 - tremorLowCoeff) * x;
+        t->high = tremorHighCoeff * t->high + (1.0 - tremorHighCoeff) * x;
+    }
 }
 
 void StringVoice::updateNoise()
@@ -463,7 +577,9 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
     const auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
-    const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones);
+    const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
+        + fingerWanderCents * humanise * armScale * pitchWander
+        + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
 }
 
@@ -489,6 +605,10 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         default:
             break;
     }
+    const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
+    betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
+    armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
+        + tremorSpeed * humanise * speedTremor.band() * tremorScale;
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
@@ -533,6 +653,7 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
         return;
     }
 
+    updateArm();
     updateTargets (settings, context);
     if (stage == Stage::attack || stage == Stage::sustain)
         player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
@@ -559,8 +680,7 @@ void StringVoice::jumpControl (const VoiceSettings& settings, const StringContex
     {
         secondsSinceNoteChange += remaining / fs;
         if (jumpGlides)
-            logF0
-                = targetLogF0 + onePoleCoeff (settings.portamentoSeconds / 3.0, fs / remaining) * (logF0 - targetLogF0);
+            advanceGlide (settings, remaining / fs);
     }
 
     const auto end = controlF0 (settings, context);
@@ -658,7 +778,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
 
         // Speed from dynamics; force follows speed within the string's playable window.
         const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics)) * speedScale
-            * context.bowChangeGain * (twists() ? torsionMakeup : 1.0);
+            * context.bowChangeGain * (twists() ? torsionMakeup : 1.0) * armSpeedGain;
         auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
         if (stage == Stage::release)
         {
@@ -729,9 +849,18 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         force = forceGain * fMax * fraction;
         if (const auto locked = stuckSamples / (lockedPeriods * fs / f0); locked > 1.0)
             force *= std::pow (lockedEase, locked); // easing further the longer it holds
+        hairRandom = hairRandom * 1664525u + 1013904223u;
+        const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
+        hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
+        hairVelocity = hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
+            * (string.isSticking() ? hairStick : 1.0);
     }
 
-    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0, b, context.direction * speed, force);
+    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0,
+                             b,
+                             context.direction * speed,
+                             force,
+                             isBowed() ? hairVelocity : 0.0);
     // Through a pickup the player's ear still follows the bridge force, but
     // the sound is the string's velocity under the coils.
     auto out = instrument->pickup ? string.pickupVelocity() : y;

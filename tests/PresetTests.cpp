@@ -195,6 +195,12 @@ double phraseLevelDb (ViolinSynthProcessor& processor, float velocity)
     auto settings = params::Reader (processor.getParameters()).read();
     settings.bodyQuality = engine::Body::Quality::modal; // no background IR loading in tests
     settings.performance.octaveShift = 0; // the phrase is written where it sounds
+    // Humanise lets the bow speed wander by a dB or so, and bow noise can tip
+    // a light bow by the bridge in or out of clean motion; a 3 s phrase's
+    // loudest moment picks either up by chance. The presets' own levels are
+    // compared.
+    settings.performance.voice.humanise = 0.0;
+    settings.performance.voice.bowNoise = 0.0;
 
     engine::ViolinEngine e;
     e.setSettings (settings);
@@ -264,13 +270,15 @@ TEST_CASE ("Factory presets are level-matched", "[presets]")
         const auto level = phraseLevelDb (f.processor);
         CAPTURE (f.manager.getCurrentName(), level, reference);
         UNSCOPED_INFO (f.manager.getCurrentName() << ": " << level - reference << " dB");
-        // A light bow right by the bridge is chaotic: the level moves by a
-        // dB or two with tiny changes, including floating-point differences
-        // between platforms, so those presets get more room. So does the
-        // heavy mute: a 0.05 cent change in the vibrato moves it by a dB.
-        const auto name = f.manager.getCurrentName();
-        const auto tolerance
-            = name == "Eerie Tremolo" || name == "Sul Ponticello" || name == "Practice Mute" ? 2.5 : 1.5;
-        CHECK (std::abs (level - reference) < tolerance);
+        // The loudest moment of a slurred preset (the default among them) is
+        // a sustained note, and of a detached one a fresh stroke's onset,
+        // which peaks up to about 2.5 dB higher. (Until slurs changed finger
+        // instead of sliding, the default's loudest moment was a swell on the
+        // slide from the open D, level with the detached onsets.) A light bow
+        // right by the bridge is also chaotic: the level moves by a dB or two
+        // with tiny changes, including floating-point differences between
+        // platforms. So does the heavy mute: a 0.05 cent change in the
+        // vibrato moves it by a dB.
+        CHECK (std::abs (level - reference) < 3.0);
     }
 }

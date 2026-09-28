@@ -21,8 +21,9 @@ struct VoiceSettings
     double vibratoDelaySeconds = 0.3;
     double portamentoSeconds = 0.05;
     double pitchBendRangeSemitones = 2.0;
-    double humanise = 0.5; // 0..1: random drift of vibrato rate and depth
+    double humanise = 0.5; // 0..1: random drift of vibrato, bow speed, contact point and finger pitch
     double imperfection = 0.0; // 0..1: 0 plays cleanly like a professional, 1 is the unassisted model
+    double bowNoise = 0.5; // 0..1: grain of the rosin and hair in the friction
     double resonance = 0.3; // 0..1: sympathetic resonance of undamped strings
     bool autoBowChange = true;
 };
@@ -142,6 +143,8 @@ private:
     double envelopeShape() const;
     double nextNoise();
     void updateNoise();
+    void updateArm();
+    void advanceGlide (const VoiceSettings& settings, double seconds);
     void setTarget (int note, bool glide);
     void setDamping (Damping d);
     void setArticulation (Articulation a);
@@ -168,6 +171,25 @@ private:
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0, noiseScale = 1.0;
+    double glideFrom = 0.0, glideProgress = 1.0;
+    bool shifting = false; // the slur moves the hand, rather than changing finger
+    int handPosition = 1; // semitones from the open string to the lowest note the first finger reaches
+    // The player's slow wander (unit variance times armScale), and its random sequence.
+    double speedWander = 0.0, betaWander = 0.0, pitchWander = 0.0, armCoeff = 0.0, armScale = 1.0;
+    double armSpeedGain = 1.0; // the bow speed's wander, set at the control rate
+    double speedDrive = 0.0, betaDrive = 0.0, pitchDrive = 0.0; // the first of the two smoothing stages
+    std::uint32_t armRandom = 1;
+    // Tremor: band-passed noise, the difference of two one-poles.
+    struct Tremor
+    {
+        double low = 0.0, high = 0.0;
+        double band() const { return high - low; }
+    };
+    Tremor speedTremor, pitchTremor;
+    double tremorLowCoeff = 0.0, tremorHighCoeff = 0.0, tremorScale = 1.0;
+    // Bow noise: low-passed white noise at the internal rate.
+    double hairLevel = 0.0, hairCoeff = 0.0, hairScale = 1.0, hairVelocity = 0.0;
+    std::uint32_t hairRandom = 1;
     double minF0 = 0.0;
 
     // Control-rate state
