@@ -178,13 +178,15 @@ Done in `StringVoice.cpp` and `BowedString.cpp`. What changed from the plan:
 | Pitch-bend sweep | 3.7–4.0% | 2.5% |
 | Articulation demo | 4.5–4.7% | 2.7% |
 
+In instruction counts (Callgrind, `tests/bench/instructions.py`): one note −28%, four-note chord −49%, four MPE notes −50%, idle +0.8%. The baseline in `docs/benchmarks/baseline.json` is updated.
+
 Above idle, a note now costs about 0.5% instead of 1.9%, roughly 75% less, which beats the 30–40% expected. The string voice alone renders 2.4–2.9× faster.
 
 **Sound:**
 
 - Pitch against `main`, over every note from G3 to E6 with vibrato, a slur and a bend: within 0.14 cent everywhere, except that the vibrato's reset at a slur is spread over one control period (0.17 ms) instead of stepping. MPE bends and pressure are within 0.11 cent. `ControlRateTests.cpp` checks vibrato and glide against the per-sample curves.
 - The bow-noise scratch meter (`[.bownoisereport]`) reads exactly the same as on `main`.
-- **Single renders can't be compared within the sound check's tolerances.** Under vibrato the bowed string is chaotic. Nudging `main`'s pitch by 0.05 cent (a quarter of the 0.2-cent tolerance) makes the 7.0 sound check fail 29–49 of its 188 checks, across six different nudges. It also moves single third-octave bands by up to 18 dB and preset levels in `PresetTests` by up to 3 dB. 7.2 fails 22 checks, inside that spread, and all of them are on phrases with vibrato or articulation onsets. Averaged over the G3–E6 set, levels match within 0.14 dB per note. So the sound check reference (`tests/golden/soundcheck.json`) was re-recorded with 7.2. The Practice Mute preset's level tolerance was widened to 2.5 dB for the same reason, like Eerie Tremolo and Sul Ponticello.
+- **Single renders can't be compared within the sound check's tolerances.** Under vibrato the bowed string is chaotic. Nudging `main`'s pitch by 0.05 cent (a quarter of the 0.2-cent tolerance) makes the 7.0 sound check fail 29–49 of its 188 checks, across six different nudges. It also moves single third-octave bands by up to 18 dB and preset levels in `PresetTests` by up to 3 dB. 7.2 fails 22–24, inside that spread, and all of them are on phrases with vibrato or articulation onsets. Averaged over the G3–E6 set, levels match within 0.14 dB per note. So the sound check reference (`tests/golden/soundcheck.json`) was re-recorded with 7.2. The Practice Mute preset's level tolerance was widened to 2.5 dB for the same reason, like Eerie Tremolo and Sul Ponticello.
 - **For later steps that are not bit-exact** (7.5's single precision and SIMD): the sound check as written can't tell them from chaos. It needs to compare against the spread of several nudged `main` renders, or average over many notes, as the scratch meter does.
 
 ## 7.3 A faster measured body

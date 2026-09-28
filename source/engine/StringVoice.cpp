@@ -411,16 +411,16 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
 {
     const auto dt = 1.0 / fs;
 
-    if (context.globalBendSemitones != lastGlobalBend)
-    {
-        lastGlobalBend = context.globalBendSemitones;
-        controlJump = true;
-    }
-
+    // A changed pitch bend lands on the sample it arrives, like a note (see jumpControl).
     if (controlCounter-- <= 0)
+    {
+        if (context.globalBendSemitones != lastGlobalBend)
+        {
+            lastGlobalBend = context.globalBendSemitones;
+            controlJump = true;
+        }
         updateControlRate (settings, context);
-    else if (controlJump)
-        jumpControl (settings, context);
+    }
 
     // Open strings are handled by SympatheticStrings at the host rate.
     if (stage == Stage::open)
@@ -428,6 +428,12 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         lastSpeed = 0.0;
         peakLevel *= peakDecay;
         return 0.0;
+    }
+
+    if (controlJump || context.globalBendSemitones != lastGlobalBend)
+    {
+        lastGlobalBend = context.globalBendSemitones;
+        jumpControl (settings, context);
     }
 
     // Envelope
