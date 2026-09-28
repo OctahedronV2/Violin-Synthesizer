@@ -13,6 +13,10 @@ namespace
 // calls per sample for no audible benefit; for a steady pitch the output is
 // identical to the reference implementation.
 constexpr double f0Tolerance = 1.0e-4;
+
+// Phase delay table: 5 cents per entry, six octaves above the lowest note.
+constexpr double tauStepsPerOctave = 240.0;
+constexpr int tauTableSize = 6 * 240 + 2;
 } // namespace
 
 void BowedString::prepare (double internalSampleRate, double lowestF0)
@@ -21,6 +25,8 @@ void BowedString::prepare (double internalSampleRate, double lowestF0)
     const auto maxDelay = fs / lowestF0 + 8.0;
     bridgeLine.prepare (maxDelay);
     nutLine.prepare (maxDelay);
+    tauLogLowest = std::log2 (lowestF0);
+    tauTable.assign (tauTableSize, -1.0);
     reset();
 }
 
@@ -38,15 +44,37 @@ void BowedString::setParams (const StringParams& newParams)
 {
     params = newParams;
     lastF0 = -1.0; // force a coefficient update
+    std::fill (tauTable.begin(), tauTable.end(), -1.0);
 }
 
 void BowedString::updateCoefficients (double f0)
 {
     const auto coeffs = lossCoefficients (f0, fs, params.loss);
     loopFilter.setCoefficients (coeffs);
-    tau = params.tuning == Tuning::harmonic ? harmonicPhaseDelay (coeffs.a, f0, fs)
+    tau = params.tuning == Tuning::harmonic ? tabulatedPhaseDelay (f0, coeffs.a)
                                             : onePolePhaseDelay (coeffs.a, 2.0 * std::numbers::pi * f0 / fs);
     lastF0 = f0;
+}
+
+double BowedString::tabulatedPhaseDelay (double f0, double a)
+{
+    const auto x = (std::log2 (f0) - tauLogLowest) * tauStepsPerOctave;
+    if (! (x >= 0.0 && x < tauTableSize - 1))
+        return harmonicPhaseDelay (a, f0, fs);
+
+    const auto i = static_cast<int> (x);
+    for (auto k : { i, i + 1 })
+    {
+        auto& entry = tauTable[static_cast<std::size_t> (k)];
+        if (entry < 0.0)
+        {
+            const auto f = std::exp2 (tauLogLowest + k / tauStepsPerOctave);
+            entry = harmonicPhaseDelay (lossCoefficients (f, fs, params.loss).a, f, fs);
+        }
+    }
+    const auto frac = x - i;
+    const auto t0 = tauTable[static_cast<std::size_t> (i)];
+    return t0 + frac * (tauTable[static_cast<std::size_t> (i) + 1] - t0);
 }
 
 double BowedString::minBeta (double f0) const

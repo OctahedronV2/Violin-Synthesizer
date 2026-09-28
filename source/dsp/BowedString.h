@@ -4,6 +4,8 @@
 #include "dsp/FrictionJunction.h"
 #include "dsp/LoopFilter.h"
 
+#include <vector>
+
 namespace violinsynth::dsp
 {
 enum class Tuning
@@ -50,12 +52,19 @@ public:
 
 private:
     void updateCoefficients (double f0);
+    double tabulatedPhaseDelay (double f0, double a);
 
     StringParams params;
     double fs = 192000.0;
     FractionalDelay bridgeLine;
     FractionalDelay nutLine;
     LoopFilter loopFilter;
+
+    // Harmonic phase delay on a log-frequency grid, filled as pitches are
+    // played and cleared when the loss settings change: under vibrato this
+    // replaces 40 atan2 calls per coefficient update with an interpolation.
+    std::vector<double> tauTable;
+    double tauLogLowest = 0.0;
 
     double lastF0 = -1.0;
     double tau = 0.0;
