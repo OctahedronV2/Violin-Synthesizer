@@ -119,8 +119,11 @@ distance and the fitted decay constants.
   Hall), because the notes ring longer.
 - The pluck lands when the finger lets go, 2.5 ms after the note starts.
 - CPU: the vertical swing is a second string waveguide for each plucked note,
-  about 0.8% of a core per note on the cloud test machine. Bowed notes are
-  unchanged.
+  about 0.8% of a core per note on the cloud test machine. In the Callgrind
+  benchmark the pizzicato scenario needs 30% more instructions (4325 to 5608
+  per output sample; the baseline was updated), still about the cost of one
+  bowed note. The other scenarios need 0.5% more, for the finger and
+  vertical-swing checks on every sample.
 
 ## Still open
 
