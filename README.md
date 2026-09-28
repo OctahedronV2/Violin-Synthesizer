@@ -163,6 +163,7 @@ Third-party components and data:
 |---|---|---|
 | [JUCE](https://juce.com) | AGPLv3 (this project's choice of JUCE's dual licence) | Plugin framework, fetched at build time |
 | Steinberg VST3 SDK (bundled with JUCE) | MIT | VST3 format |
+| [PFFFT](https://github.com/marton78/pffft) (Julien Pommier) | FFTPACKv5 licence (BSD-like) | FFT for the measured-body convolution, in [third_party/pffft](third_party/pffft) |
 | [Catch2](https://github.com/catchorg/Catch2) | Boost Software License 1.0 | Tests only |
 | [CNSM Dataset](https://doi.org/10.5281/zenodo.18696786) (Pauget Ballesteros 2026) | CC BY 4.0 | Measured bodies (Levaggi, Klimke, Stoppani) |
 | [University of Iowa Musical Instrument Samples](https://theremin.music.uiowa.edu/MIS.html) | Free to use "for any projects, without restrictions" | Measured body (Tambovsky) |

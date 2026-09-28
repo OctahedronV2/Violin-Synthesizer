@@ -41,8 +41,10 @@ public:
     // Audio thread, once per block before process().
     void setSettings (const EngineSettings& s);
 
-    // Message thread: applies a body change that needs an impulse-response load.
-    void updateConvolutionBody();
+    // Nothing to do: every body is prepared in prepare(), so body changes
+    // need nothing from the message thread. The processor's timer still
+    // calls this; the timer can go once no caller needs it.
+    void updateConvolutionBody() { }
 
     // Audio thread. Renders into all channels of `buffer` (1 or 2), consuming `midi`.
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi);
@@ -52,6 +54,10 @@ public:
     int getLatencySamples() const;
 
     Violin& getViolin() { return violin; }
+    // For tests: which stages are skipping silence.
+    const Body& getBody() const { return body; }
+    const SympatheticStrings& getSympathetic() const { return sympathetic; }
+    const OutputChain& getOutputChain() const { return output; }
 
     static int oversamplingOrderFor (double hostSampleRate);
 
@@ -62,13 +68,13 @@ private:
     int maxBlock = 512;
     int oversamplingOrder = 2;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampling;
+    juce::dsp::AudioBlock<float> internalBlock; // the oversampler's internal-rate buffer
 
     Violin violin;
     SympatheticStrings sympathetic;
     Body body;
     OutputChain output;
     EngineSettings settings;
-    std::atomic<int> requestedBody { 0 };
     float sordino = 0.0f; // smoothed: the Sordino setting or the con sordino articulation
 
     juce::AudioBuffer<float> mono;

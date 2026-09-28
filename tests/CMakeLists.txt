@@ -4,6 +4,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     Phase4Tests.cpp
     Phase5Tests.cpp
     BowNoiseTests.cpp
+    BodyConvolutionTests.cpp
     PresetTests.cpp
     KeyboardInputTests.cpp
     SoundCheckTests.cpp
