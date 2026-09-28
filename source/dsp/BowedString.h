@@ -44,6 +44,12 @@ public:
 
     double stringVelocity() const { return lastVelocity; }
     bool isSticking() const { return sticking; }
+    // Samples between the last two slip onsets (the string letting go of the
+    // bow), and whether this sample started a slip. Helmholtz motion lets go
+    // once per period.
+    bool slipStarted() const { return slipOnset; }
+    double slipInterval() const { return lastSlipInterval; }
+    double samplesSinceSlip() const { return sinceSlip; }
 
     // Smallest beta the delay lines support at f0 (at least 2 samples bow-to-bridge).
     double minBeta (double f0) const;
@@ -70,5 +76,7 @@ private:
     double tau = 0.0;
     bool sticking = false;
     double lastVelocity = 0.0;
+    bool slipOnset = false;
+    double sinceSlip = 0.0, lastSlipInterval = 0.0;
 };
 } // namespace violinsynth::dsp

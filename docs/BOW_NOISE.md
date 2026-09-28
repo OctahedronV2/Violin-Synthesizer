@@ -100,3 +100,5 @@ Four tests in the normal suite guard these results: the bow-change dip and recov
 - **Spiccato and tremolo** are made of constant restarts, so they stay the noisiest articulations.
 - **Harmonics** read about 2 dB noisier in the first 100 ms. Their tone colour is unchanged.
 - **Presets:** 12 presets had their output gain re-levelled, because the new force windows change the level. All are within the level-match test's tolerance again.
+
+Scratch and multiple slipping in the sustain are now handled by a player that listens to the string and adjusts the bow weight, with an Imperfection knob to turn it down: see [CLEAN_BOWING.md](CLEAN_BOWING.md).

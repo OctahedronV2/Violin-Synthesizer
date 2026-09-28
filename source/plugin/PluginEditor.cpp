@@ -95,6 +95,7 @@ public:
         playChoices.push_back (&addChoice (id::octave, "Octave"));
         playKnobs = { &addKnob (id::resonance, "Resonance"),
                       &addKnob (id::humanise, "Humanise"),
+                      &addKnob (id::imperfection, "Imperfect"),
                       &addKnob (id::velocityRange, "Vel Range"),
                       &addKnob (id::mpeBendRange, "MPE Bend") };
 

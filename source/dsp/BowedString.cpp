@@ -38,6 +38,8 @@ void BowedString::reset()
     lastF0 = -1.0;
     sticking = false;
     lastVelocity = 0.0;
+    slipOnset = false;
+    sinceSlip = lastSlipInterval = 0.0;
 }
 
 void BowedString::setParams (const StringParams& newParams)
@@ -103,6 +105,13 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
     const auto vH = fromBridge + fromNut;
 
     const auto result = solveJunction (vBow, vH, force, params.friction, sticking);
+    sinceSlip += 1.0;
+    slipOnset = sticking && ! result.sticking;
+    if (slipOnset)
+    {
+        lastSlipInterval = sinceSlip;
+        sinceSlip = 0.0;
+    }
     sticking = result.sticking;
     const auto injected = (result.velocity - vH) + excitation;
 

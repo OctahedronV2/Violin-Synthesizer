@@ -22,6 +22,14 @@ constexpr double vibratoOnsetSeconds = 0.25;
 constexpr double silenceThreshold = 1.0e-5;
 constexpr double noiseBandwidthHz = 0.7; // humanisation drift
 
+// Clean bowing (docs/CLEAN_BOWING.md). The player's weight never takes the
+// force past this fraction of F_max, where the model turns to noise
+// (docs/PHASE1_FINDINGS.md, section 3.1).
+constexpr double maxForceFraction = 0.9;
+// At the end of a note a player lifts the bow off the string rather than
+// scraping it to a stop: the force falls this much faster than the speed.
+constexpr double releaseLift = 3.0;
+
 // Articulations (docs/PHASE5.md)
 constexpr double detacheMaxAttack = 0.04;
 constexpr double staccatoAttack = 0.012;
@@ -47,6 +55,7 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     spec = &strings[static_cast<std::size_t> (stringIndex)];
     // Allow a semitone of bend below the open string.
     string.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
+    player.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
     bowedParams = string.getParams();
     bowedParams.friction.impedance = spec->impedance;
     string.setParams (bowedParams);
@@ -65,6 +74,7 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
 void StringVoice::reset()
 {
     string.reset();
+    player.reset();
     damping = Damping::bowed;
     string.setParams (bowedParams);
     noteArticulation = Articulation::legato;
@@ -327,7 +337,12 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     // fixes it. Articulations set the fraction itself, so they sound the
     // same on every string.
     const auto setting = context.pressureOverride >= 0.0 ? context.pressureOverride : settings.bowPressure;
-    fractionTarget = spec->forceWindowLow + (spec->forceWindowHigh - spec->forceWindowLow) * setting;
+    // The clean player uses the whole range where Helmholtz motion exists; the
+    // unassisted model scratches near its top, so it stops lower (docs/CLEAN_BOWING.md).
+    const auto imperfection = std::clamp (settings.imperfection, 0.0, 1.0);
+    const auto lo = spec->forceWindowLow;
+    const auto hi = spec->playerWindowHigh + (spec->forceWindowHigh - spec->playerWindowHigh) * imperfection;
+    fractionTarget = lo + (hi - lo) * setting;
     speedScale = 1.0;
     switch (noteArticulation)
     {
@@ -360,7 +375,10 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
     }
 
     updateTargets (settings, context);
+    if (stage == Stage::attack || stage == Stage::sustain)
+        player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
     f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
+    player.setPeriod (fs / f0Now);
     controlJump = jumpNote = false;
     advanceControl (settings, controlInterval);
     updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
@@ -487,6 +505,12 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics)) * speedScale
             * context.bowChangeGain;
         auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
+        if (stage == Stage::release)
+        {
+            const auto lift = releaseLift * (1.0 - std::clamp (settings.imperfection, 0.0, 1.0));
+            const auto shape = envelopeShape();
+            forceSpeed *= lift == releaseLift ? shape * shape * shape : std::pow (shape, lift);
+        }
         auto forceGain = 1.0;
         speed = forceSpeed;
 
@@ -545,10 +569,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
 
         const auto fMax = 2.0 * friction.impedance * forceSpeed / (beta * (friction.muS - friction.muD));
-        force = forceGain * fMax * forceFraction;
+        // The player's weight corrects the force, within the model's clean range.
+        const auto fraction = std::min (forceFraction * player.weight(), std::max (maxForceFraction, forceFraction));
+        force = forceGain * fMax * fraction;
     }
 
     const auto y = string.process (f0, b, context.direction * speed, force, excitation);
+    if (isBowed())
+        player.listen (y, string.slipStarted());
     lastSpeed = std::abs (speed);
     lastF0 = f0;
     peakLevel = std::max (std::abs (y), peakLevel * peakDecay);
@@ -560,6 +588,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         {
             // Finger lifted: the string becomes an undamped open string again.
             string.reset();
+            player.reset();
             setDamping (Damping::bowed);
             noteArticulation = Articulation::legato;
             stage = Stage::open;

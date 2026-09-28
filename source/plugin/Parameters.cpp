@@ -131,6 +131,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                                                               juce::StringArray { "-2", "-1", "0", "+1", "+2" },
                                                               octaveChoiceOffset));
 
+    // Clean bowing: 0 plays like a professional, keeping the string free of
+    // scratch; higher values let the unassisted model's errors back in
+    // (docs/CLEAN_BOWING.md).
+    layout.add (floatParam (id::imperfection, "Imperfection", Range { 0.0f, 1.0f }, 0.0f, Format::percent));
+
     return layout;
 }
 
@@ -158,7 +163,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       mpeBendRange (state.getRawParameterValue (id::mpeBendRange.getParamID())),
       articulation (state.getRawParameterValue (id::articulation.getParamID())),
       velocityRange (state.getRawParameterValue (id::velocityRange.getParamID())),
-      octave (state.getRawParameterValue (id::octave.getParamID()))
+      octave (state.getRawParameterValue (id::octave.getParamID())),
+      imperfection (state.getRawParameterValue (id::imperfection.getParamID()))
 {
 }
 
@@ -177,6 +183,7 @@ engine::EngineSettings Reader::read() const
 
     s.performance.voice.resonance = resonance->load();
     s.performance.voice.humanise = humanise->load();
+    s.performance.voice.imperfection = imperfection->load();
     s.performance.voice.autoBowChange = autoBowChange->load() > 0.5f;
     s.performance.playMode = static_cast<engine::PlayMode> (juce::jlimit (0, 2, static_cast<int> (playMode->load())));
     s.performance.mpe = mpe->load() > 0.5f;

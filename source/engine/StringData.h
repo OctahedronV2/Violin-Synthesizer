@@ -13,6 +13,12 @@ namespace violinsynth::engine
 // ends where the tone is still clean after the attack: above that the model
 // scratches long before a real string would, most on the heavy G string and
 // the thin E string (docs/BOW_NOISE.md).
+//
+// With clean bowing (docs/CLEAN_BOWING.md) the player eases off whenever the
+// string scratches, so the top of the G window goes back to where Helmholtz
+// motion exists: below about 0.5 F_max the G string tends to lock into a
+// hollow double slip instead. playerWindowHigh is the top at Imperfection 0,
+// forceWindowHigh at 100%.
 struct StringSpec
 {
     const char* name;
@@ -20,13 +26,14 @@ struct StringSpec
     double impedance; // kg/s
     double forceWindowLow;
     double forceWindowHigh;
+    double playerWindowHigh;
 };
 
 inline constexpr std::array<StringSpec, 4> strings { {
-    { "G", 55, 0.350, 0.24, 0.44 },
-    { "D", 62, 0.234, 0.13, 0.55 },
-    { "A", 69, 0.197, 0.09, 0.87 },
-    { "E", 76, 0.180, 0.11, 0.36 },
+    { "G", 55, 0.350, 0.24, 0.44, 0.74 },
+    { "D", 62, 0.234, 0.13, 0.55, 0.55 },
+    { "A", 69, 0.197, 0.09, 0.87, 0.87 },
+    { "E", 76, 0.180, 0.11, 0.36, 0.36 },
 } };
 
 // Highest string whose open pitch is at or below the note (the usual choice).

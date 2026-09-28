@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dsp/BowController.h"
 #include "dsp/BowedString.h"
 #include "engine/Articulation.h"
 #include "engine/StringData.h"
@@ -21,6 +22,7 @@ struct VoiceSettings
     double portamentoSeconds = 0.05;
     double pitchBendRangeSemitones = 2.0;
     double humanise = 0.5; // 0..1: random drift of vibrato rate and depth
+    double imperfection = 0.0; // 0..1: 0 plays cleanly like a professional, 1 is the unassisted model
     double resonance = 0.3; // 0..1: sympathetic resonance of undamped strings
     bool autoBowChange = true;
 };
@@ -82,6 +84,10 @@ public:
     double currentBowSpeed() const { return lastSpeed; }
     double currentF0() const { return lastF0; }
     double level() const { return peakLevel; } // decaying peak of the bridge force, for meters
+    // What the player hears (docs/CLEAN_BOWING.md): the share of the sound that
+    // is scratch, and how often the string lets go of the bow per period.
+    double scratch() const { return player.scratch(); }
+    double slipsPerPeriod() const { return player.slipsPerPeriod(); }
 
 private:
     enum class Stage
@@ -125,6 +131,7 @@ private:
     void setArticulation (Articulation a);
 
     dsp::BowedString string;
+    dsp::BowController player;
     dsp::StringParams bowedParams;
     Damping damping = Damping::bowed;
     double fs = 192000.0;
