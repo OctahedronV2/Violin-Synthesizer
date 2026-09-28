@@ -102,6 +102,33 @@ Nothing is optimised until this exists, so every later step can show its gain.
 
 **On Jake's Windows 11 PC:** the same executable, run by hand, prints the CPU model and a table to paste into the PR. This gives the absolute numbers. The Windows CI job also prints wall-clock numbers, as a rough check between runs on Jake's PC.
 
+### Status: done
+
+- **`ViolinSynthBench`** (`tests/bench/Benchmark.cpp`) has 33 scenarios, covering all of those above. It prints the CPU model, then each scenario's mean CPU and its p99, p99.9 and worst block time as a percentage of the block's duration. `--json` saves the results, `--only` picks scenarios, and `--seconds` sets the length. Each Windows CI build uploads it as `ViolinSynthBench-Windows.zip` next to the plugin. To measure on the reference PC, unzip it and run `ViolinSynthBench.exe > bench.txt` from a command prompt with nothing else busy.
+- **Instruction counts in CI:** the Linux job runs 25 scenarios under Callgrind, one second each, and `tests/bench/instructions.py` compares them with `docs/benchmarks/baseline.json`. The counts are repeatable to the instruction. The job fails if a scenario needs more than 3% more instructions per output sample. `instructions.py --update` records a new baseline.
+- **Timings in CI:** every platform prints the timing table for the CI scenarios. It is for information only and never fails.
+- **The sound check** (`tests/SoundCheckTests.cpp`, tag `[soundcheck]`) runs with the unit tests. It renders six phrases (sustained vibrato, a slurred line, a four-note chord, nine articulations, MPE, and a long note with bow changes) and compares them with `tests/golden/soundcheck.json`. The tolerances are the ones above. Making vibrato 1 cent deeper and the output 0.15 dB louder fails 44 of its 187 checks. `"[.soundcheck-render]"` writes the phrases as WAV files for listening, and `"[.soundcheck-update]"` records a new reference when a change of sound is intended.
+
+**Baseline** (cloud VM, 2.1 GHz Xeon, 10 s per scenario, 48 kHz and 128 samples unless noted):
+
+| Scenario | CPU % | Worst block, % of its duration |
+|---|---|---|
+| Idle | 2.7 | 8 |
+| One note, vibrato (T1) | 4.9 | 10 |
+| Four-note chord (T2) | 13.5 | 30 |
+| MPE, four notes | 13.0 | 24 |
+| One note, 96 kHz | 7.0 | 16 |
+| One note, 32-sample buffer | 6.3 | 42 |
+| Four notes, 32-sample buffer (T4) | 14.3 | 152 |
+| One note, random buffer sizes | 4.8 | 163 |
+| 16 violins summed (T7) | 84 | 188 |
+| 60 violins summed | 320 | 530 |
+
+Two new findings:
+
+- **Blocks of a few samples are very expensive.** With random buffer sizes, the worst block took 1.6 times its own duration, and so did the worst four-note block at 32 samples. Fixed costs per block (the convolution, oversampler and settings) dominate when a block is only a few samples long. Some hosts send such blocks around loop points and automation. This is a real dropout risk. 7.1 and 7.3 address it, and T4 tracks it.
+- **Each violin costs about 5% of a core here.** 60 of them need about 3.2 cores, so Octastra's symphonic target depends on 7.2 and the 7.5 experiments.
+
 ## 7.1 Remove wasted work (low risk, sound unchanged)
 
 Each of these must null against the reference.
@@ -230,7 +257,7 @@ Checks in each host:
 
 | Step | Content | Depends on |
 |---|---|---|
-| 7.0 | Benchmark suite, CI regression job, reference renders and sound check | — |
+| 7.0 | Benchmark suite, CI regression job, reference renders and sound check (done) | — |
 | 7.1 | Remove wasted work | 7.0 |
 | 7.2 | Control-rate voice maths | 7.0, legato-stutter and bow-noise work merged |
 | 7.3 | Faster measured body | 7.0 |
