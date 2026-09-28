@@ -26,6 +26,10 @@ on:
         type: choice
         options: [all, windows]
         default: all
+      release:
+        description: Publish a release of this commit, tagged v<version from CMakeLists.txt> (main only; builds all platforms)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -103,6 +107,7 @@ jobs:
           ADDED_LABEL: ${{ github.event.label.name }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           DISPATCH_PLATFORMS: ${{ inputs.platforms }}
+          DISPATCH_RELEASE: ${{ inputs.release }}
           CPP: ${{ steps.filter.outputs.cpp }}
           BENCH: ${{ steps.filter.outputs.bench }}
           RESEARCH: ${{ steps.filter.outputs.research }}
@@ -114,6 +119,7 @@ jobs:
               # A run started by hand checks everything.
               CPP=true BENCH=true RESEARCH=true FORMAT=true
               [ "$DISPATCH_PLATFORMS" = all ] && all_platforms=true
+              [ "$DISPATCH_RELEASE" = true ] && all_platforms=true
               ;;
             push)
               if [[ "$REF" == refs/tags/* ]]; then
@@ -464,12 +470,16 @@ jobs:
         if: always()
         run: sccache --show-stats
 
-  # A version tag (v1.0.0) publishes a GitHub Release with the plugin zips from
-  # every platform, once all the checks above have passed. The notes come from
-  # docs/releases/<tag>.md when that file exists.
+  # A release publishes a GitHub Release with the plugin zips from every
+  # platform, once all the checks above have passed. It starts either from a
+  # pushed version tag (v1.0.0), or from a run started by hand on main with
+  # "release" ticked, which tags the commit v<version in CMakeLists.txt>. The
+  # notes come from docs/releases/<tag>.md when that file exists.
   release:
     needs: [build, format, research, rtsan]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release && github.ref == 'refs/heads/main')
     name: Publish release
     runs-on: ubuntu-24.04
     permissions:
@@ -486,9 +496,24 @@ jobs:
       - name: Create the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          notes="docs/releases/$TAG.md"
+          if [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          else
+            version=$(sed -nE 's/^project\(Octavio VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+            [ -n "$version" ] || { echo "No version in CMakeLists.txt"; exit 1; }
+            tag="v$version"
+          fi
+          notes="docs/releases/$tag.md"
           if [ -f "$notes" ]; then notes_args=(--notes-file "$notes"); else notes_args=(--generate-notes); fi
           ls -la dist
-          gh release create "$TAG" dist/Octavio-*.zip --title "Octavio ${TAG#v}" --verify-tag "${notes_args[@]}"
+
+          if gh release view "$tag" > /dev/null 2>&1; then
+            # Made by hand on GitHub first: just attach the plugins.
+            gh release upload "$tag" dist/Octavio-*.zip --clobber
+          else
+            # Creates the tag on this commit when it does not exist yet.
+            gh release create "$tag" dist/Octavio-*.zip --target "$GITHUB_SHA" --title "Octavio ${tag#v}" "${notes_args[@]}"
+          fi
