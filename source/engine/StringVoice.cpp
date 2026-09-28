@@ -91,7 +91,10 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
-    controlJump = true; // start the new pitch or glide from the next sample
+    // Take the new pitch, or start the glide, from the next sample.
+    controlJump = jumpNote = true;
+    jumpGlides = glide;
+    jumpFresh = stage == Stage::open;
     silentSeconds = 0.0;
 }
 
@@ -351,14 +354,14 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
     controlCounter = controlInterval - 1;
     if (stage == Stage::open)
     {
-        controlJump = false;
+        controlJump = jumpNote = false;
         updateNoise();
         return;
     }
 
     updateTargets (settings, context);
-    f0Now = controlJump ? controlF0 (settings, context) : f0End;
-    controlJump = false;
+    f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
+    controlJump = jumpNote = false;
     advanceControl (settings, controlInterval);
     updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
     rampPitchTo (controlF0 (settings, context), controlInterval);
@@ -366,16 +369,35 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
 
 void StringVoice::jumpControl (const VoiceSettings& settings, const StringContext& context)
 {
-    // A note event between control updates: start from the new values now
-    // and reach the next update on time.
-    controlJump = false;
+    // An event between control updates: a note, a slur, or a bend or pressure
+    // change. The control state is already at the next update, `remaining`
+    // samples ahead, so the event's own changes are brought up to it there.
+    const auto note = jumpNote;
+    controlJump = jumpNote = false;
     if (stage == Stage::open)
         return;
     updateTargets (settings, context);
-    f0Now = controlF0 (settings, context);
     const auto remaining = controlCounter + 1;
-    advanceControl (settings, remaining);
-    rampPitchTo (controlF0 (settings, context), remaining);
+    if (note)
+    {
+        secondsSinceNoteChange += remaining / fs;
+        if (jumpGlides)
+            logF0
+                = targetLogF0 + onePoleCoeff (settings.portamentoSeconds / 3.0, fs / remaining) * (logF0 - targetLogF0);
+    }
+
+    const auto end = controlF0 (settings, context);
+    if (note && jumpGlides)
+    {
+        rampPitchTo (end, remaining); // a slur glides from where the pitch is now
+        return;
+    }
+    // A new note or a bend steps now, as before; within this interval the pitch
+    // keeps the shape it had.
+    f0Now = note && jumpFresh ? end : f0Now * (end / f0End);
+    f0End = end;
+    if (note && jumpFresh)
+        f0Ratio = 1.0;
 }
 
 void StringVoice::rampPitchTo (double f0, int samples)
@@ -388,6 +410,12 @@ void StringVoice::rampPitchTo (double f0, int samples)
 double StringVoice::processSample (const VoiceSettings& settings, const StringContext& context)
 {
     const auto dt = 1.0 / fs;
+
+    if (context.globalBendSemitones != lastGlobalBend)
+    {
+        lastGlobalBend = context.globalBendSemitones;
+        controlJump = true;
+    }
 
     if (controlCounter-- <= 0)
         updateControlRate (settings, context);

@@ -63,7 +63,11 @@ public:
     void legato (int note, float velocity, Articulation a = Articulation::legato); // glide, or enter mid-bow
     void release();
 
-    void setExpression (const NoteExpression& e) { expression = e; }
+    void setExpression (const NoteExpression& e)
+    {
+        expression = e;
+        controlJump = true;
+    }
     int midiChannel = 1; // channel of the current note (for MPE routing)
 
     double processSample (const VoiceSettings& settings, const StringContext& context);
@@ -139,7 +143,9 @@ private:
     // Control-rate state
     double betaTarget = 0.11, fractionTarget = 0.48, speedScale = 1.0;
     double f0Now = 440.0, f0End = 440.0, f0Ratio = 1.0;
-    bool controlJump = true; // a note event: start the next interval from the new values
+    bool controlJump = true; // an event to apply on the next sample: a note, a slur or a bend
+    bool jumpNote = false, jumpGlides = false, jumpFresh = false;
+    double lastGlobalBend = 0.0;
     std::uint32_t random = 1;
     NoteExpression expression;
     double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0, peakLevel = 0.0, peakDecay = 0.0;
