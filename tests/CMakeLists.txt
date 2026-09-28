@@ -5,6 +5,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     Phase4Tests.cpp
     Phase5Tests.cpp
     BowNoiseTests.cpp
+    ControlRateTests.cpp
     BodyConvolutionTests.cpp
     PresetTests.cpp
     RealtimeSafetyTests.cpp

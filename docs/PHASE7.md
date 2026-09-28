@@ -163,6 +163,38 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 
 **Sequencing:** this touches `StringVoice.cpp`, which the legato-stutter and bow-noise work is changing now. 7.2 starts after that work is merged, and its fixes join the reference renders first.
 
+### 7.2 result
+
+Done in `StringVoice.cpp` and `BowedString.cpp`. What changed from the plan:
+
+- **Only pitch is interpolated.** Glide, bends and vibrato (`exp`, `pow` and `sin`) run every 33 internal samples and the pitch is stepped geometrically in between. The bow position and force *targets* are also updated at that rate, but the one-pole smoothing of bow position, force and dynamics stays per sample, because it is a single multiply-add. `pow (dynamics, 1.5)` became `d * sqrt (d)`. With no vibrato, bend or glide, a note renders **bit-exactly** as before.
+- **33 samples, not 32:** the humanising noise has always stepped every 33 samples, so keeping that step leaves humanised vibrato and tremolo jitter unchanged.
+- **Events between control updates** (a new note, a slur, or a pitch-bend or pressure change) land on the next sample: a new note or a bend steps there, as before, and a slur starts its glide there. So glides, bends and MPE expression are not delayed.
+- **Loop-filter phase delay:** tabulated per string every 5 cents, filled the first time each pitch is played and cleared when the loss settings change. It no longer costs 40 `atan2` calls each time the pitch moves under vibrato.
+- `sin` is kept at control rate instead of a rotating phasor: at 5.8 kHz it no longer shows in the profile.
+
+**CPU** (cloud VM, 2.1 GHz Xeon, 48 kHz, 128-sample buffer, measured body, best of 3 runs, two runs each):
+
+| Case | `main` | 7.2 |
+|---|---|---|
+| Idle | 2.0% | 2.0% |
+| One note with vibrato | 3.7–3.9% | 2.5% |
+| Four-note chord | 9.5–9.9% | 4.0–4.2% |
+| Legato phrase with slides | 4.4% | 2.6–2.8% |
+| Pitch-bend sweep | 3.7–4.0% | 2.5% |
+| Articulation demo | 4.5–4.7% | 2.7% |
+
+In instruction counts (Callgrind, `tests/bench/instructions.py`, on top of 7.1 and 7.3): one note −37%, four-note chord −55%, four MPE notes −56%. Idle, which 7.3 already cut to about 800 instructions per sample, is 31 more (+3.8%), from the open strings' control-rate loop. Skipping that loop at idle (7.1) removes it. The baseline in `docs/benchmarks/baseline.json` is updated.
+
+Above idle, a note now costs about 0.5% instead of 1.9%, roughly 75% less, which beats the 30–40% expected. The string voice alone renders 2.4–2.9× faster.
+
+**Sound:**
+
+- Pitch against `main`, over every note from G3 to E6 with vibrato, a slur and a bend: within 0.14 cent everywhere, except that the vibrato's reset at a slur is spread over one control period (0.17 ms) instead of stepping. MPE bends and pressure are within 0.11 cent. `ControlRateTests.cpp` checks vibrato and glide against the per-sample curves.
+- The bow-noise scratch meter (`[.bownoisereport]`) reads exactly the same as on `main`.
+- **Single renders can't be compared within the sound check's tolerances.** Under vibrato the bowed string is chaotic. Nudging `main`'s pitch by 0.05 cent (a quarter of the 0.2-cent tolerance) makes the 7.0 sound check fail 29–49 of its 188 checks, across six different nudges. It also moves single third-octave bands by up to 18 dB and preset levels in `PresetTests` by up to 3 dB. 7.2 fails 22–24, inside that spread, and all of them are on phrases with vibrato or articulation onsets. Averaged over the G3–E6 set, levels match within 0.14 dB per note. So the sound check reference (`tests/golden/soundcheck.json`) was re-recorded with 7.2. The Practice Mute preset's level tolerance was widened to 2.5 dB for the same reason, like Eerie Tremolo and Sul Ponticello.
+- **For later steps that are not bit-exact** (7.5's single precision and SIMD): the sound check as written can't tell them from chaos. It needs to compare against the spread of several nudged `main` renders, or average over many notes, as the scratch meter does.
+
 ## 7.3 A faster measured body
 
 - **Replace JUCE's fallback FFT** with a partitioned convolution on PFFFT (BSD licence, SSE and NEON, a single C file). It gives the same speed on all three platforms. FFTW was considered and rejected as a large dependency to build in CI.
