@@ -177,7 +177,7 @@ If SIMD passes, the violin itself gets it for chords, and it becomes the core of
 
 ### By hand, in real hosts
 
-A checklist, `docs/DAW_TESTS.md` (written in 7.6), with one row per host and format. Windows 11 is the main platform, and FL Studio, Reaper and Ableton Live must pass there. Jake runs those; the rest are best effort.
+A checklist, [DAW_TESTS.md](DAW_TESTS.md), with one row per host and format. Windows 11 is the main platform, and FL Studio, Reaper and Ableton Live must pass there. Jake runs those; the rest are best effort.
 
 | Host | OS | Formats | Priority |
 |---|---|---|---|
