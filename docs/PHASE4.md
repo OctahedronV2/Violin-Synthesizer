@@ -30,7 +30,7 @@ A string plays one note at a time, and only notes at or above its open pitch.
 
 ### The bow
 
-There is one bow. Each new stroke turns it, and the notes of a chord share a stroke. The 62 cm of bow hair gets used up as it moves. When it runs out, an **automatic bow change** follows: the bow slows over 80 ms, turns at its slowest point, and speeds up again, as a player does on a long note. This can be switched off with **Auto bow change**.
+There is one bow. Each new stroke turns it, and the notes of a chord share a stroke. The bow hair gets used up as it moves. When it runs out, an **automatic bow change** follows: the bow slows, turns at its slowest point, and speeds up again, as a player does on a long note. (Since `BOW_NOISE.md` the bow is 2 m long and, in a slur, turns on a note change.) This can be switched off with **Auto bow change**.
 
 ### Sympathetic resonance
 

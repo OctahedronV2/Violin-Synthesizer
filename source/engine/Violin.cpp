@@ -80,6 +80,10 @@ void Violin::apply (const StringActions& actions)
                 voice.start (a.note, a.velocity, articulation);
                 break;
             case StringAction::Type::legato:
+                // A player changes bow with the note; a turn mid-note is exposed.
+                if (settings.voice.autoBowChange && bowChangePhase < 0.0
+                    && bowUsed > noteChangeTurnFraction * bowLengthMetres)
+                    startBowChange();
                 voice.midiChannel = a.channel;
                 voice.setExpression (expressionFor (a.channel));
                 voice.legato (a.note, a.velocity, articulation);
@@ -89,6 +93,13 @@ void Violin::apply (const StringActions& actions)
                 break;
         }
     }
+}
+
+void Violin::startBowChange()
+{
+    bowChangePhase = 0.0;
+    bowUsed = 0.0;
+    ++bowChanges;
 }
 
 void Violin::handleMidi (const juce::MidiMessage& m)
@@ -231,11 +242,7 @@ void Violin::render (float* out, int numSamples)
 
         bowUsed += fastest * dt;
         if (settings.voice.autoBowChange && bowUsed > bowLengthMetres && bowChangePhase < 0.0)
-        {
-            bowChangePhase = 0.0;
-            bowUsed = 0.0;
-            ++bowChanges;
-        }
+            startBowChange();
 
         out[i] = static_cast<float> (sum);
     }

@@ -36,7 +36,13 @@ class Violin
 {
 public:
     static constexpr int numStrings = StringAllocator::numStrings;
-    static constexpr double bowLengthMetres = 0.62; // usable bow hair
+    // Bow hair per stroke. A real bow has 62 cm, but the model bows a long
+    // note faster than a player would, and every turn scratches, so it uses
+    // more (docs/BOW_NOISE.md).
+    static constexpr double bowLengthMetres = 2.0;
+    // In a slur, the bow turns at the first note change past this much of the
+    // bow, where the new note covers the turn, instead of mid-note.
+    static constexpr double noteChangeTurnFraction = 0.5;
     static constexpr double bowChangeSeconds = 0.04;
 
     void prepare (double internalSampleRate);
@@ -65,6 +71,7 @@ public:
 private:
     void apply (const StringActions& actions);
     void setArticulation (Articulation a);
+    void startBowChange();
     NoteExpression expressionFor (int channel) const;
 
     std::array<StringVoice, numStrings> voices;

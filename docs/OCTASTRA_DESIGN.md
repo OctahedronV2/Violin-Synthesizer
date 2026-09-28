@@ -112,7 +112,7 @@ Mono compatibility needs a test: per-player delays can comb-filter when summed t
 
 The personalities come from a seed saved with the project, so a bounce always sounds like playback and like the last bounce. **Reshuffle** picks a new seed.
 
-Bow stagger deserves a note. The violin engine already changes bow automatically when the 62 cm of hair runs out (`Violin::bowLengthMetres`). Real sections stagger their bow changes on long notes so the section never breaks at once. Giving each player a slightly different bow speed and bow length does this naturally.
+Bow stagger deserves a note. The violin engine already changes bow automatically when the bow runs out (`Violin::bowLengthMetres`), preferably on a note change. Real sections stagger their bow changes on long notes so the section never breaks at once. Giving each player a slightly different bow speed and bow length does this naturally.
 
 ### Divisi: what happens when a section plays a chord
 
@@ -161,7 +161,7 @@ In the violin plugin the body filter is a convolution, and it is expensive. Runn
 | Today | Change |
 | --- | --- |
 | `StringData.h`: one fixed array of four violin strings, 328 mm | An `InstrumentSpec` per instrument: strings, length, impedances, force windows, bow length, range, keyswitch base, bodies |
-| `Violin` class, `bowLengthMetres = 0.62` | Becomes `BowedInstrument`, built from a spec; one per player |
+| `Violin` class, `bowLengthMetres = 2.0` | Becomes `BowedInstrument`, built from a spec; one per player |
 | `Body`: four violin bodies, one per engine | Body sets per instrument; body buses per section |
 | `ViolinEngine`: one violin, its own oversampling and output chain | A `Section` (players, divisi allocator, buses) and an `Orchestra` (sections, room, outputs) |
 | `OutputChain`: width and room per instance | Width per section; room moves to the orchestra |

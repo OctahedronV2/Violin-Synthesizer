@@ -17,9 +17,26 @@ The bowed string is chaotic while it settles into the sawtooth (Helmholtz) motio
 
 ### 1. Held legato notes stopped and restarted
 
-Legato notes use up bow hair, so every 62 cm the bow turns automatically: about every 1.4 s at a moderate dynamic. The turn took 80 ms. The bow slowed to 15% of its speed, then **reversed in a single sample**. That jolted the string, so the level fell to 14% and the note restarted with a scratch. The scratch was worst on the low strings, where the string takes longest to settle again.
+Legato notes use up bow hair, so every 62 cm the bow turned automatically: about every 1.4 s at a moderate dynamic (see 1b for the longer bow). The turn took 80 ms. The bow slowed to 15% of its speed, then **reversed in a single sample**. That jolted the string, so the level fell to 14% and the note restarted with a scratch. The scratch was worst on the low strings, where the string takes longest to settle again.
 
 **Change:** the turn now takes 40 ms, and the bow speed passes smoothly through zero (`Violin.cpp`). The force follows the speed, so the string is released and keeps ringing through the turn. The level now dips to about 40% instead of 14%.
+
+### 1b. Bow turns landed in the middle of held notes
+
+Even the smooth 40 ms turn scratches for about 50 ms: the string has to rebuild its Helmholtz motion in the other direction, and the level dips to about 40%. Neither a shorter or longer turn (15–150 ms) nor more or less weight through it made a reliable difference. On a held note nothing covers the scratch, so it sounds close and dry against the rest of the violin. The showcase had 21 turns, 20 of them mid-note, including the ones at 4 s and 15 s. A turn just before a note change was the worst: the new note starts on a string that is still recovering.
+
+**Change** (`Violin.h`, `Violin.cpp`):
+
+- **A longer bow.** The bow has 2 m of hair per stroke instead of 62 cm. The model bows a long note faster than a player would (a player saves bow on a long note), and every turn costs a scratch, so fewer turns sound better.
+- **Turns with the note.** In a slur, once half the bow is used, the bow turns at the next note change, as a player would. A turn mid-note happens only if one note uses more than the rest of the bow.
+
+The turn itself is unchanged, so the bow-change figures below still hold for each turn; there are just fewer of them, and they sit on note changes.
+
+| Showcase, dry render, sympathetic resonance off so the meter only hears the bowed string | Before | After |
+|---|---|---|
+| Bow turns | 21 (20 mid-note) | 9 (all on a note change) |
+| Time in the three legato sections scratchier than −12 dB | 2.2% | 0.8% |
+| Time scratchier than −8 dB | 0.8% | 0.1% |
 
 ### 2. The Bow Pressure range reached into force levels where the model scratches
 
@@ -65,7 +82,7 @@ Before is the Phase 6 build and after is this change, with the same notes and th
 | Legato, Bright Soloist bowing (0.075, 0.65) | −8.8 (+0.8) | −14.5 (−4.6) |
 | Staccato, Bright Soloist bowing | −6.5 (+1.0) | −8.1 (−1.5) |
 
-**Held legato notes through automatic bow changes** (48 changes)
+**Held legato notes through automatic bow changes** (48 changes; a turn sounds the same after 1b, it just happens less often)
 
 | | Before | After |
 |---|---|---|
@@ -75,7 +92,7 @@ Before is the Phase 6 build and after is this change, with the same notes and th
 | Tone just before the turn | −32.3 dB | −36.8 dB |
 | Same, Bright Soloist bowing: level at lowest point | 15% | 41% |
 
-Three tests in the normal suite guard these results: the bow-change dip and recovery, the staccato stop, and legato and detache attacks.
+Four tests in the normal suite guard these results: the bow-change dip and recovery, slurred lines turning only on note changes, the staccato stop, and legato and detache attacks.
 
 ## What is still open
 
