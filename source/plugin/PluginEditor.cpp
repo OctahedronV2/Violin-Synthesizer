@@ -98,23 +98,26 @@ public:
                       &addKnob (id::imperfection, "Imperfect"),  &addKnob (id::bowNoise, "Bow Noise"),
                       &addKnob (id::velocityRange, "Vel Range"), &addKnob (id::mpeBendRange, "MPE Bend") };
 
-        // Body and output
-        bodyChoices = { &addChoice (id::body, "Violin"), &addChoice (id::bodyQuality, "Quality") };
-        bodyKnobs = { &addKnob (id::sordino, "Mute"),
-                      &addKnob (id::width, "Width"),
-                      &addKnob (id::room, "Room"),
-                      &addKnob (id::outputGain, "Gain") };
+        // Instrument, body (violin), pickup and amp (electric guitar) or drones
+        // (acoustic guitar), and output
+        auto& instrumentChoice = addChoice (id::instrument, "Instrument");
+        auto& mute = addKnob (id::sordino, "Mute");
+        auto& width = addKnob (id::width, "Width");
+        auto& room = addKnob (id::room, "Room");
+        auto& gain = addKnob (id::outputGain, "Gain");
+        violinChoices = { &instrumentChoice, &addChoice (id::body, "Body"), &addChoice (id::bodyQuality, "Quality") };
+        violinKnobs = { &mute, &width, &room, &gain };
+        guitarChoices = { &instrumentChoice, &addChoice (id::pickup, "Pickup") };
+        auto& drone = addKnob (id::drone, "Drone");
+        guitarKnobs = { &addKnob (id::drive, "Drive"), &drone, &width, &room, &gain };
+        acousticChoices = { &instrumentChoice };
+        acousticKnobs = { &drone, &width, &room, &gain };
 
-        credits.setText ("Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and University of "
-                         "Iowa Musical Instrument Samples",
-                         juce::dontSendNotification);
         credits.setFont (juce::FontOptions { 11.0f });
         credits.setJustificationType (juce::Justification::centredRight);
         addAndMakeVisible (credits);
 
-        // The violin's range, G3 to G7, where the notes sound (after the Octave setting).
-        keyboard.setAvailableRange (engine::Violin::lowestNote, engine::Violin::highestNote);
-        keyboard.setLowestVisibleKey (engine::Violin::lowestNote);
+        // The instrument's range is set by showInstrument(), from timerCallback().
         keyboard.setOctaveForMiddleC (hostMiddleCOctave()); // named as in the host's piano roll
         keyboard.setTitle ("Keyboard");
         keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, colours::accent);
@@ -125,6 +128,7 @@ public:
         keyboard.setWantsKeyboardFocus (false);
         addAndMakeVisible (keyboard);
 
+        showInstrument (processor.getInstrument());
         timerCallback();
         startTimerHz (15);
     }
@@ -139,9 +143,12 @@ public:
         g.drawText ("Octavio", header.removeFromTop (28), juce::Justification::centredLeft);
         g.setColour (colours::dimText);
         g.setFont (juce::FontOptions { 12.5f });
-        g.drawText ("v" JucePlugin_VersionString "  |  physically modelled violin",
-                    header,
-                    juce::Justification::centredLeft);
+        g.drawText (
+            juce::String ("v" JucePlugin_VersionString "  |  physically modelled ")
+                + (engine::isGuitar (shownInstrument) ? "bowed " : "")
+                + juce::String (engine::instrumentNames[static_cast<std::size_t> (shownInstrument)]).toLowerCase(),
+            header,
+            juce::Justification::centredLeft);
 
         for (const auto& [title, bounds] : panels)
         {
@@ -167,7 +174,14 @@ public:
         panels.clear();
         auto bounds = getLocalBounds();
         keyboard.setBounds (bounds.removeFromBottom (keyboardHeight));
-        keyboard.setKeyWidth (static_cast<float> (keyboard.getWidth()) / 29.0f); // G3 to G7: 29 white keys
+        {
+            // The instrument's range fills the width (the violin's G3 to G7: 29 white keys).
+            const auto& spec = engine::instrumentSpec (shownInstrument);
+            int whiteKeys = 0;
+            for (int note = spec.lowestNote; note <= spec.highestNote; ++note)
+                whiteKeys += juce::MidiMessage::isMidiNoteBlack (note) ? 0 : 1;
+            keyboard.setKeyWidth (static_cast<float> (keyboard.getWidth()) / static_cast<float> (whiteKeys));
+        }
         credits.setBounds (bounds.removeFromBottom (creditsHeight).reduced (margin, 0));
 
         auto header = bounds.removeFromTop (headerHeight);
@@ -217,14 +231,41 @@ public:
             bottom.removeFromLeft (gap);
             auto play = addPanel ("Play", bottom.removeFromLeft ((bottom.getWidth() - gap) / 2));
             bottom.removeFromLeft (gap);
-            auto body = addPanel ("Body & Output", bottom);
+            const bool electric = shownInstrument == engine::Instrument::bowedGuitar;
+            const bool acoustic = shownInstrument == engine::Instrument::bowedAcousticGuitar;
+            auto body = addPanel (electric ? "Amp & Output" : acoustic ? "Bow & Output" : "Body & Output", bottom);
 
             const auto rowHeight = (pitch.getHeight() - rowGap) / 2;
             layoutKnobRow ({ pitchKnobs.begin(), pitchKnobs.begin() + 3 }, pitch.removeFromTop (rowHeight));
             layoutKnobRow ({ pitchKnobs.begin() + 3, pitchKnobs.end() }, pitch.removeFromBottom (rowHeight));
 
             layoutOptionsAndKnobs (playChoices, playToggles, playKnobs, play);
-            layoutOptionsAndKnobs (bodyChoices, {}, bodyKnobs, body);
+            // Only the current instrument's controls show.
+            const auto& shownChoices = electric ? guitarChoices : acoustic ? acousticChoices : violinChoices;
+            const auto& shownKnobs = electric ? guitarKnobs : acoustic ? acousticKnobs : violinKnobs;
+            for (const auto* set : { &violinChoices, &guitarChoices, &acousticChoices })
+                for (auto* c : *set)
+                {
+                    c->label.setVisible (false);
+                    c->box.setVisible (false);
+                }
+            for (const auto* set : { &violinKnobs, &guitarKnobs, &acousticKnobs })
+                for (auto* k : *set)
+                {
+                    k->label.setVisible (false);
+                    k->slider.setVisible (false);
+                }
+            for (auto* c : shownChoices)
+            {
+                c->label.setVisible (true);
+                c->box.setVisible (true);
+            }
+            for (auto* k : shownKnobs)
+            {
+                k->label.setVisible (true);
+                k->slider.setVisible (true);
+            }
+            layoutOptionsAndKnobs (shownChoices, {}, shownKnobs, body);
         }
     }
 
@@ -434,8 +475,31 @@ private:
         return numLines * optionHeight + (numLines - 1) * optionLineGap;
     }
 
+    // Shows the controls, range and credits of the instrument now selected.
+    void showInstrument (engine::Instrument instrument)
+    {
+        shownInstrument = instrument;
+        const auto& spec = engine::instrumentSpec (instrument);
+        // The range where the notes sound (after the Octave setting).
+        keyboard.setAvailableRange (spec.lowestNote, spec.highestNote);
+        keyboard.setLowestVisibleKey (spec.lowestNote);
+        credits.setText (instrument == engine::Instrument::bowedGuitar
+                             ? "Bowed electric guitar: six modelled steel strings, humbucking pickups, valve amplifier "
+                               "and 4x12 cabinet"
+                             : instrument == engine::Instrument::bowedAcousticGuitar
+                             ? "Bowed acoustic guitar: measured guitar body by pe_mace on Freesound (CC0)"
+                             : "Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and "
+                               "University of Iowa Musical Instrument Samples",
+                         juce::dontSendNotification);
+        resized();
+        repaint();
+    }
+
     void timerCallback() override
     {
+        if (const auto instrument = processor.getInstrument(); instrument != shownInstrument)
+            showInstrument (instrument);
+
         const auto active = static_cast<int> (processor.getActiveArticulation());
         if (active != shownArticulation)
         {
@@ -460,14 +524,15 @@ private:
     std::vector<std::unique_ptr<Knob>> knobs;
     std::vector<std::unique_ptr<Choice>> choices;
     std::vector<std::unique_ptr<Toggle>> toggles;
-    std::vector<Knob*> bowKnobs, pitchKnobs, playKnobs, bodyKnobs;
-    std::vector<Choice*> playChoices, bodyChoices;
+    std::vector<Knob*> bowKnobs, pitchKnobs, playKnobs, violinKnobs, guitarKnobs, acousticKnobs;
+    std::vector<Choice*> playChoices, violinChoices, guitarChoices, acousticChoices;
     std::vector<Toggle*> playToggles;
 
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> panels;
     juce::Rectangle<int> articulationStatusArea;
     juce::String playingText;
     int shownArticulation = -1;
+    engine::Instrument shownInstrument = engine::Instrument::violin;
 };
 
 //==============================================================================

@@ -43,6 +43,8 @@ BodyData bodyData (int index)
                      stoppaniOutputGain };
         case 3:
             return { BinaryData::iowa_wav, BinaryData::iowa_wavSize, iowaModes, iowaDirectGain, iowaOutputGain };
+        case Body::guitarBody:
+            return { BinaryData::acousticguitar_wav, BinaryData::acousticguitar_wavSize, {}, 0.0f, 1.0f };
         default:
             return { BinaryData::levaggi_wav,
                      BinaryData::levaggi_wavSize,
@@ -63,7 +65,7 @@ int Body::convolutionBlockSize (double sampleRate)
 
 std::vector<float> Body::impulseResponse (int bodyIndex, double sampleRate)
 {
-    bodyIndex = juce::jlimit (0, numBodies - 1, bodyIndex);
+    bodyIndex = juce::jlimit (0, numImpulseResponses - 1, bodyIndex);
     const auto data = bodyData (bodyIndex);
 
     juce::WavAudioFormat wav;
@@ -109,10 +111,10 @@ std::vector<float> Body::impulseResponse (int bodyIndex, double sampleRate)
 void Body::prepare (double sampleRate, int bodyIndex)
 {
     fs = sampleRate;
-    bodyIndex = juce::jlimit (0, numBodies - 1, bodyIndex);
+    bodyIndex = juce::jlimit (0, numImpulseResponses - 1, bodyIndex);
 
     std::vector<std::vector<float>> irs;
-    for (int b = 0; b < numBodies; ++b)
+    for (int b = 0; b < numImpulseResponses; ++b)
         irs.push_back (impulseResponse (b, fs));
     convolution.prepare (convolutionBlockSize (fs), irs, bodyIndex, static_cast<int> (crossfadeSeconds * fs));
 
@@ -136,7 +138,8 @@ void Body::reset()
 void Body::setBody (int bodyIndex)
 {
     convolution.selectFilter (bodyIndex);
-    setModalBody (bodyIndex);
+    if (bodyIndex < numBodies)
+        setModalBody (bodyIndex);
 }
 
 void Body::setQuality (Quality q)
@@ -155,7 +158,8 @@ void Body::setQuality (Quality q)
 
 bool Body::isDormant() const
 {
-    return quality == Quality::convolution ? convolution.isDormant() : modalDormant;
+    return quality == Quality::convolution || convolution.selectedFilter() == guitarBody ? convolution.isDormant()
+                                                                                         : modalDormant;
 }
 
 void Body::setModalBody (int bodyIndex)
@@ -182,7 +186,7 @@ void Body::setModalBody (int bodyIndex)
 
 void Body::process (float* samples, int numSamples)
 {
-    if (quality == Quality::convolution)
+    if (quality == Quality::convolution || convolution.selectedFilter() == guitarBody)
         convolution.process (samples, numSamples);
     else
         processModal (samples, numSamples);

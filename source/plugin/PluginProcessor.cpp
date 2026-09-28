@@ -157,10 +157,19 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     engine.process (buffer, *midi);
     const auto& violin = engine.getViolin();
     activeArticulation.store (static_cast<int> (violin.currentArticulation()));
-    for (int s = 0; s < engine::Violin::numStrings; ++s)
+    for (int s = 0; s < engine::Violin::maxStrings; ++s)
     {
         auto& state = stringStates[static_cast<std::size_t> (s)];
-        state.note.store (violin.noteOnString (s));
+        if (s >= violin.numStrings())
+        {
+            state.note.store (-1);
+            state.level.store (0.0f);
+            state.bowSpeed.store (0.0f);
+            continue;
+        }
+        // A drone sounds its open string.
+        state.note.store (violin.stringDrones (s) ? violin.instrumentSpec().string (s).openMidiNote
+                                                  : violin.noteOnString (s));
         state.level.store (static_cast<float> (violin.stringLevel (s)));
         state.bowSpeed.store (static_cast<float> (violin.stringBowSpeed (s)));
     }

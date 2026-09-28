@@ -101,10 +101,9 @@ constexpr double tremoloJitter = 0.12;
 
 // Pizzicato (docs/PIZZICATO.md). A fingertip grips the string over the end of
 // the fingerboard, draws it aside and lets go as the string rolls off it.
-// The finger stays the same distance from the bridge whatever note is
-// stopped, so the shorter the string, the nearer its middle the pluck lands.
-constexpr double scaleLength = 0.328; // m, open violin string
-constexpr double pluckDistance = 0.07; // m from the bridge
+// The finger stays the same distance from the bridge (InstrumentSpec::
+// pluckDistance) whatever note is stopped, so the shorter the string, the
+// nearer its middle the pluck lands.
 constexpr double pluckDistanceSpread = 0.008; // m, from one pluck to the next at full Humanise
 constexpr double maxPluckBeta = 0.42;
 constexpr double pluckDrawSeconds = 0.0025; // the finger drawing the string aside
@@ -140,15 +139,11 @@ double onePoleCoeff (double seconds, double rate)
 void StringVoice::prepare (double internalSampleRate, int stringIndex)
 {
     fs = internalSampleRate;
-    spec = &strings[static_cast<std::size_t> (stringIndex)];
-    // Allow a semitone of bend below the open string.
-    string.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
-    vertical.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
-    player.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
-    bowedParams = string.getParams();
-    bowedParams.friction.impedance = spec->impedance;
-    bowedParams.torsion = { torsionSpeedRatio, torsionImpedanceRatio, torsionQ };
-    string.setParams (bowedParams);
+    // Allow a semitone of bend below the lowest open string.
+    const auto lowest = midiToHz (lowestOpenNote - 1.5);
+    string.prepare (fs, lowest);
+    vertical.prepare (fs, lowest);
+    player.prepare (fs, lowest);
 
     smoothingCoeff = onePoleCoeff (smoothingSeconds, fs);
     noiseCoeff = std::exp (-2.0 * std::numbers::pi * noiseBandwidthHz * noiseFilterStep / fs);
@@ -160,8 +155,25 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     const auto c = armCoeff;
     armScale = 1.0 / std::sqrt (std::pow (1.0 - c, 4.0) * (1.0 + c * c) / (3.0 * std::pow (1.0 - c * c, 3.0)));
     biteDecay = onePoleCoeff (staccatoBiteSeconds, fs);
-    minF0 = midiToHz (spec->openMidiNote - 1.0);
     peakDecay = onePoleCoeff (0.3, fs);
+    configure (violinSpec, stringIndex);
+}
+
+void StringVoice::configure (const InstrumentSpec& newInstrument, int stringIndex)
+{
+    instrument = &newInstrument;
+    spec = &instrument->string (stringIndex);
+    string.setLowestF0 (midiToHz (spec->openMidiNote - 1.5));
+    vertical.setLowestF0 (midiToHz (spec->openMidiNote - 1.5));
+    bowedParams = {};
+    bowedParams.friction.impedance = spec->impedance;
+    bowedParams.torsion = { torsionSpeedRatio, torsionImpedanceRatio, torsionQ };
+    bowedParams.loss = instrument->loss;
+    string.setParams (bowedParams);
+    if (! instrument->pickup)
+        setPickup ({}, 0);
+
+    minF0 = midiToHz (spec->openMidiNote - 1.0);
     random = 0x9e3779b9u * static_cast<std::uint32_t> (stringIndex + 1);
     armRandom = 0x85ebca6bu * static_cast<std::uint32_t> (stringIndex + 1);
     hairRandom = 0xc2b2ae35u * static_cast<std::uint32_t> (stringIndex + 1);
@@ -177,7 +189,16 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
             / 3.0;
         tremorScale = 1.0 / std::sqrt (variance);
     }
+    droning = false;
+    droneWeight = 1.0;
     reset();
+}
+
+void StringVoice::setPickup (const std::array<double, dsp::BowedString::maxCoils>& coilMetres, int numCoils)
+{
+    const auto openF0 = midiToHz (spec->openMidiNote);
+    string.setPickup (coilMetres, numCoils, instrument->scaleLength, openF0);
+    vertical.setPickup (coilMetres, numCoils, instrument->scaleLength, openF0);
 }
 
 void StringVoice::reset()
@@ -203,6 +224,8 @@ void StringVoice::reset()
     hairLevel = 0.0;
     expression = {};
     silentSeconds = silenceSeconds + 1.0;
+    droning = false;
+    droneWeight = 1.0;
     forceFraction = 0.48;
     lastSpeed = 0.0;
     peakLevel = 0.0;
@@ -297,8 +320,15 @@ void StringVoice::setArticulation (Articulation a)
             loss.t60 *= scale;
             return loss;
         };
-        pluckLoss = open ? openVerticalLoss : stopped (stoppedVerticalLoss);
-        pluckLossHorizontal = open ? openHorizontalLoss : stopped (stoppedHorizontalLoss);
+        // A steel string on a solid body rings longer than the violin's.
+        const auto ring = [r = instrument->pluckRing] (dsp::LossSpec loss)
+        {
+            loss.t60 *= r;
+            loss.t60High *= r;
+            return loss;
+        };
+        pluckLoss = ring (open ? openVerticalLoss : stopped (stoppedVerticalLoss));
+        pluckLossHorizontal = ring (open ? openHorizontalLoss : stopped (stoppedHorizontalLoss));
         if (damping == Damping::plucked)
             damping = Damping::bowed; // apply this note's loss
     }
@@ -306,11 +336,6 @@ void StringVoice::setArticulation (Articulation a)
                     : a == Articulation::harmonics ? Damping::harmonic
                     : a == Articulation::sulTasto  ? Damping::soft
                                                    : Damping::bowed);
-}
-
-bool StringVoice::drawsBow() const
-{
-    return isBowed() && slurs (noteArticulation);
 }
 
 void StringVoice::start (int note, float velocity, Articulation a)
@@ -363,7 +388,8 @@ void StringVoice::legato (int note, float velocity, Articulation a)
     string.setFinger (0.0, 0.0);
     vertical.setFinger (0.0, 0.0);
     setArticulation (a);
-    setTarget (note, sounding);
+    // On a fretted string the note steps to the next fret.
+    setTarget (note, sounding && ! instrument->fretted);
     dynamicsTarget = std::clamp (static_cast<double> (velocity), 0.0, 1.0);
     dynamicsCoeff = onePoleCoeff (legatoDynamicsSeconds, fs);
 
@@ -412,8 +438,8 @@ void StringVoice::pluck (const VoiceSettings& settings)
     {
         // Where and how this pluck lands: no two are quite the same.
         const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-        const auto length = scaleLength * midiToHz (spec->openMidiNote) / f0Now;
-        const auto distance = pluckDistance + pluckDistanceSpread * humanise * nextNoise();
+        const auto length = instrument->scaleLength * midiToHz (spec->openMidiNote) / f0Now;
+        const auto distance = instrument->pluckDistance + pluckDistanceSpread * humanise * nextNoise();
         pluckBeta = std::clamp (distance / length, 0.05, maxPluckBeta);
         beta = betaTarget = pluckBeta;
         pluckAmplitude = pluckDisplacement * (0.15 + 0.85 * dynamics) * (1.0 + 0.1 * humanise * nextNoise());
@@ -545,7 +571,12 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
         = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
     const auto depth = (onset * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
-    const auto vibratoCents = 0.5 * std::max (depth, 0.0) * std::sin (2.0 * std::numbers::pi * vibratoPhase);
+    if (droning)
+        return std::exp (logF0); // an open string: nothing to bend it
+    // A fretted string can only be pushed sharp: its vibrato bends up from the note.
+    const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
+                                          : std::sin (2.0 * std::numbers::pi * vibratoPhase);
+    const auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
     const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
         + fingerWanderCents * humanise * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
@@ -559,6 +590,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget = settings.bowPosition;
     if (expression.timbre >= 0.0)
         betaTarget = 0.22 * std::pow (0.04 / 0.22, std::clamp (expression.timbre, 0.0, 1.0));
+    betaTarget *= instrument->bowPositionScale;
     switch (noteArticulation)
     {
         case Articulation::sulPonticello:
@@ -589,7 +621,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     const auto imperfection = std::clamp (settings.imperfection, 0.0, 1.0);
     const auto lo = spec->forceWindowLow;
     const auto hi = spec->playerWindowHigh + (spec->forceWindowHigh - spec->playerWindowHigh) * imperfection;
-    fractionTarget = lo + (hi - lo) * setting;
+    fractionTarget = (lo + (hi - lo) * setting) * droneWeight;
     speedScale = 1.0;
     switch (noteArticulation)
     {
@@ -626,7 +658,7 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
     if (stage == Stage::attack || stage == Stage::sustain)
         player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
     f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
-    player.setPeriod (fs / f0Now);
+    player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning : f0Now));
     controlJump = jumpNote = false;
     advanceControl (settings, controlInterval);
     updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
@@ -829,10 +861,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
                              context.direction * speed,
                              force,
                              isBowed() ? hairVelocity : 0.0);
+    // Through a pickup the player's ear still follows the bridge force, but
+    // the sound is the string's velocity under the coils.
+    auto out = instrument->pickup ? string.pickupVelocity() : y;
     if (verticalActive)
     {
         const auto v = verticalGain * vertical.process (f0 * verticalTuning, b, 0.0, 0.0);
         y += v;
+        out += instrument->pickup ? verticalGain * vertical.pickupVelocity() : v;
         verticalLevel = std::max (std::abs (v), verticalLevel * peakDecay);
         if (damping != Damping::plucked && verticalLevel < silenceThreshold)
         {
@@ -862,9 +898,11 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             stage = Stage::open;
             currentNote = -1;
             expression = {};
+            droning = false;
+            droneWeight = 1.0;
         }
     }
 
-    return y;
+    return out;
 }
 } // namespace violinsynth::engine

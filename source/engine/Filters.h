@@ -54,6 +54,23 @@ public:
         set ((1 - cw) / 2, 1 - cw, (1 - cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
     }
 
+    void setHighPass (double fs, double freq, double q = 0.707)
+    {
+        const auto w0 = 2.0 * std::numbers::pi * freq / fs;
+        const auto cw = std::cos (w0);
+        const auto alpha = std::sin (w0) / (2.0 * q);
+        set ((1 + cw) / 2, -(1 + cw), (1 + cw) / 2, 1 + alpha, -2 * cw, 1 - alpha);
+    }
+
+    void setPeak (double fs, double freq, double gainDb, double q)
+    {
+        const auto a = std::pow (10.0, gainDb / 40.0);
+        const auto w0 = 2.0 * std::numbers::pi * std::min (freq, 0.45 * fs) / fs;
+        const auto cw = std::cos (w0);
+        const auto alpha = std::sin (w0) / (2.0 * q);
+        set (1 + alpha * a, -2 * cw, 1 - alpha * a, 1 + alpha / a, -2 * cw, 1 - alpha / a);
+    }
+
 private:
     void set (double nb0, double nb1, double nb2, double na0, double na1, double na2)
     {

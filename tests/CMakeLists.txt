@@ -14,6 +14,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     StringAllocatorTests.cpp
     StringDspTests.cpp
     PizzicatoTests.cpp
+    BowedGuitarTests.cpp
     NaturalPlayingTests.cpp)
 
 add_executable(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})

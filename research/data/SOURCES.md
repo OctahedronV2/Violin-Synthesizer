@@ -38,3 +38,8 @@ Third-party data used by the research prototype, and the files derived from it. 
 ## Octastra reference data
 
 Data collected for the planned Octastra plugin (a rabāb measurement and body estimates from Freesound recordings) is described, with its licences and credits, in [octastra/SOURCES.md](octastra/SOURCES.md).
+
+## Freesound: bowed acoustic guitar
+
+- **Body:** "Sweep guitare_dc" by pe_mace, https://freesound.org/people/pe_mace/sounds/696487/. Licence: [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). It is a measured filter from a Godin guitar's under-saddle piezo to a microphone. `scripts/export_guitar_body.py` trims it to 200 ms and writes `resources/bodies/acoustic-guitar.wav`, which ships with the plugin (docs/BOWED_GUITAR.md).
+- **Reference, not shipped:** "Guitar_bow_playing_stereo" by leonseptavaux, https://freesound.org/people/leonseptavaux/sounds/346484/. Licence: [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). A recording of an acoustic guitar played with a bow. The acoustic's string losses were fitted to its spectrum.

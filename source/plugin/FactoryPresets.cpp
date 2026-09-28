@@ -7,6 +7,8 @@ namespace
 // Choice indices (see Parameters.cpp).
 constexpr float klimke = 1.0f, stoppani = 2.0f, iowa = 3.0f;
 constexpr float monoLegato = 1.0f, poly = 2.0f;
+constexpr float bowedGuitar = 1.0f, bowedAcousticGuitar = 2.0f;
+constexpr float bothPickups = 1.0f, bridgePickup = 2.0f;
 constexpr float detache = 1.0f, staccato = 2.0f, spiccato = 3.0f, tremolo = 4.0f, pizzicato = 5.0f, harmonics = 6.0f,
                 ponticello = 7.0f, tasto = 8.0f, sordino = 9.0f;
 } // namespace
@@ -124,6 +126,31 @@ const std::vector<FactoryPreset>& factoryPresets()
           "A monophonic lead line with quick, natural shifts: ideal for a keyboard melody.",
           { { "playMode", monoLegato }, { "portamento", 0.07f }, { "attack", 0.07f }, { "vibratoDepth", 28.0f },
             { "room", 0.25f }, { "outputGain", -0.5f } } },
+
+        // Bowed Guitar (docs/BOWED_GUITAR.md)
+        { "Bowed Guitar", "Bowed Guitar",
+          "An electric guitar played with a violin bow: neck pickup, a warm amp, the neighbouring strings humming along.",
+          { { "instrument", bowedGuitar }, { "attack", 0.15f }, { "release", 0.4f }, { "vibratoDepth", 18.0f },
+            { "vibratoDelay", 0.4f }, { "room", 0.3f }, { "width", 0.6f }, { "outputGain", -1.2f } } },
+        { "Heavy Bowed Guitar", "Bowed Guitar",
+          "The late-sixties sound: bridge pickup into a cranked amp, slow swells and a big room.",
+          { { "instrument", bowedGuitar }, { "pickup", bridgePickup }, { "drive", 0.8f }, { "drone", 0.7f },
+            { "attack", 0.25f }, { "release", 0.6f }, { "vibratoDepth", 22.0f }, { "vibratoDelay", 0.3f },
+            { "room", 0.5f }, { "width", 0.75f }, { "outputGain", -2.3f } } },
+        { "Bowed Drone Wash", "Bowed Guitar",
+          "Every note bows the strings around it: slow chords become a shimmering wall.",
+          { { "instrument", bowedGuitar }, { "pickup", bothPickups }, { "drive", 0.5f }, { "drone", 1.0f },
+            { "playMode", poly }, { "attack", 0.45f }, { "release", 1.0f }, { "vibratoDepth", 8.0f },
+            { "room", 0.65f }, { "width", 0.9f }, { "outputGain", -0.8f } } },
+        { "Bowed Acoustic", "Bowed Guitar",
+          "A steel-string acoustic played with a violin bow: woody and breathy, the open strings humming along.",
+          { { "instrument", bowedAcousticGuitar }, { "drone", 0.3f }, { "attack", 0.2f }, { "release", 0.5f },
+            { "vibratoDepth", 15.0f }, { "vibratoDelay", 0.35f }, { "room", 0.35f }, { "width", 0.6f } } },
+        { "Cinematic Bowed Acoustic", "Bowed Guitar",
+          "Dark, slow swells on a bowed acoustic in a big hall, in the style of modern fantasy TV scores.",
+          { { "instrument", bowedAcousticGuitar }, { "drone", 0.6f }, { "bowPosition", 0.14f }, { "attack", 0.45f },
+            { "release", 1.0f }, { "vibratoDepth", 20.0f }, { "vibratoDelay", 0.5f }, { "room", 0.6f },
+            { "width", 0.8f }, { "outputGain", 0.8f } } },
     };
     // clang-format on
     return list;

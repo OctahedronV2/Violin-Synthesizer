@@ -2,6 +2,7 @@ set(VIOLINSYNTH_SOURCES
     dsp/BowedString.cpp
     dsp/PartitionedConvolution.cpp
     engine/Body.cpp
+    engine/GuitarAmp.cpp
     engine/StringAllocator.cpp
     engine/OutputChain.cpp
     engine/ViolinEngine.cpp
@@ -30,7 +31,8 @@ juce_add_binary_data(ViolinSynthBodies
         "${PROJECT_SOURCE_DIR}/resources/bodies/levaggi.wav"
         "${PROJECT_SOURCE_DIR}/resources/bodies/klimke.wav"
         "${PROJECT_SOURCE_DIR}/resources/bodies/stoppani.wav"
-        "${PROJECT_SOURCE_DIR}/resources/bodies/iowa.wav")
+        "${PROJECT_SOURCE_DIR}/resources/bodies/iowa.wav"
+        "${PROJECT_SOURCE_DIR}/resources/bodies/acoustic-guitar.wav")
 set_target_properties(ViolinSynthBodies PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 target_link_libraries(Octavio PRIVATE ViolinSynthBodies)
 

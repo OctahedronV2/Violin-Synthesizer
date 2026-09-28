@@ -4,6 +4,7 @@
 #include "dsp/FrictionJunction.h"
 #include "dsp/LoopFilter.h"
 
+#include <array>
 #include <vector>
 
 namespace violinsynth::dsp
@@ -45,6 +46,17 @@ public:
     // Allocates the delay lines for notes down to lowestF0. Not real-time safe.
     void prepare (double internalSampleRate, double lowestF0);
     void reset();
+    // The lowest note this string will play, at or above prepare()'s: the
+    // phase delay table starts there. Real-time safe.
+    void setLowestF0 (double f0);
+
+    // A magnetic pickup: coils at up to four points, in metres from the bridge,
+    // on a string whose open length is openLength (m) at openF0 (Hz). The
+    // pickup hears the string's transverse velocity averaged over the coils
+    // (docs/BOWED_GUITAR.md). No coils: no pickup, and no cost.
+    static constexpr int maxCoils = 4;
+    void setPickup (const std::array<double, maxCoils>& coilMetres, int numCoils, double openLength, double openF0);
+    double pickupVelocity() const { return lastPickup; }
 
     void setParams (const StringParams& newParams);
     const StringParams& getParams() const { return params; }
@@ -104,5 +116,10 @@ private:
     double sinceSlip = 0.0, lastSlipInterval = 0.0;
     double fingerVelocity = 0.0, fingerHold = 0.0;
     double torsionReflection = -1.0, contactImpedance = 0.0, transverseShare = 1.0;
+
+    std::array<double, maxCoils> coils {}; // fraction of the open string, from the bridge
+    int numCoils = 0;
+    double pickupScale = 0.0; // coil fraction at f0 = coil fraction of the open string * f0 * pickupScale
+    double lastPickup = 0.0;
 };
 } // namespace violinsynth::dsp

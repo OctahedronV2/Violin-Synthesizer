@@ -17,7 +17,9 @@ struct FactoryPreset
 };
 
 // Categories in display order.
-inline constexpr const char* categories[] { "Solo", "Styles", "Articulations", "Character", "Expressive" };
+inline constexpr const char* categories[] {
+    "Solo", "Styles", "Articulations", "Character", "Expressive", "Bowed Guitar"
+};
 
 // The factory presets in display order. The first is the plugin's default sound.
 const std::vector<FactoryPreset>& factoryPresets();
