@@ -4,7 +4,10 @@ set(VIOLINSYNTH_TEST_SOURCES
     Phase4Tests.cpp
     Phase5Tests.cpp
     BowNoiseTests.cpp
+    BodyConvolutionTests.cpp
     PresetTests.cpp
+    KeyboardInputTests.cpp
+    SoundCheckTests.cpp
     StringAllocatorTests.cpp
     StringDspTests.cpp)
 
@@ -24,3 +27,12 @@ violinsynth_set_warnings(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})
 
 include(Catch)
 catch_discover_tests(ViolinSynthTests)
+
+# CPU benchmarks (docs/PHASE7.md): not a test, run by hand or under Callgrind in CI.
+add_executable(ViolinSynthBench bench/Benchmark.cpp)
+target_link_libraries(ViolinSynthBench PRIVATE ViolinSynth)
+target_include_directories(ViolinSynthBench SYSTEM PRIVATE
+    $<TARGET_PROPERTY:ViolinSynth,INCLUDE_DIRECTORIES>)
+target_compile_definitions(ViolinSynthBench PRIVATE
+    $<TARGET_PROPERTY:ViolinSynth,COMPILE_DEFINITIONS>)
+violinsynth_set_warnings(ViolinSynthBench bench/Benchmark.cpp)

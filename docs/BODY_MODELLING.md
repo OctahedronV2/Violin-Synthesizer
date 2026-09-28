@@ -99,7 +99,7 @@ The Iowa estimate also yields a fourth body filter, which has no licence restric
 
 1. **Listening check** of `research/renders/bodies/`.
 2. **Plugin body (Phase 3):**
-   - Ship the measured impulse responses, `research/data/body_ir_*_48k.wav`, via `juce::dsp::Convolution` as the high-quality body.
+   - Ship the measured impulse responses, `research/data/body_ir_*_48k.wav`, via `juce::dsp::Convolution` as the high-quality body. (Phase 7 replaced it with a zero-latency partitioned convolution on PFFFT, `source/dsp/PartitionedConvolution.cpp`.)
    - Offer a fitted modal bank as the low-CPU option.
    - Credit the CNSM dataset in the About screen.
 3. **Overpressure reference:** the recordings could provide real examples of heavy bowing, to compare with the model's noise-like overpressure behaviour (see Phase 1 findings, §3.1).

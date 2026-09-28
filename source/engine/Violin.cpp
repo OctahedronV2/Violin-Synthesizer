@@ -6,6 +6,14 @@
 
 namespace violinsynth::engine
 {
+double velocityToDynamics (double velocity, double top)
+{
+    const auto v = std::clamp (velocity, 0.0, 1.0);
+    top = std::clamp (top, 0.6, 1.0);
+    const auto b = (1.0 - top) / (top - 0.5);
+    return v * (1.0 + b) * top / (1.0 + b * v);
+}
+
 void Violin::prepare (double internalSampleRate)
 {
     fs = internalSampleRate;
@@ -30,6 +38,8 @@ void Violin::reset()
     globalPressure = 0.0;
     globalTimbre = -1.0;
     channelExpression.fill ({});
+    for (auto& channel : soundingNote)
+        channel.fill (-1);
 }
 
 void Violin::setSettings (const PerformanceSettings& s)
@@ -130,11 +140,19 @@ void Violin::handleMidi (const juce::MidiMessage& m)
     {
         if (member)
             channelExpression[static_cast<std::size_t> (channel)].pressure = 0.0; // MPE: pressure starts at zero
-        apply (allocator.noteOn (m.getNoteNumber(), channel, m.getFloatVelocity(), time));
+        const auto note = std::clamp (m.getNoteNumber() + 12 * settings.octaveShift, 0, 127);
+        soundingNote[static_cast<std::size_t> (channel)][static_cast<std::size_t> (m.getNoteNumber())]
+            = static_cast<std::int8_t> (note);
+        const auto dynamics = velocityToDynamics (m.getFloatVelocity(), settings.velocityTop);
+        apply (allocator.noteOn (note, channel, static_cast<float> (dynamics), time));
     }
     else if (m.isNoteOff())
     {
-        apply (allocator.noteOff (m.getNoteNumber(), channel));
+        auto& held = soundingNote[static_cast<std::size_t> (channel)][static_cast<std::size_t> (m.getNoteNumber())];
+        const auto note
+            = held >= 0 ? static_cast<int> (held) : std::clamp (m.getNoteNumber() + 12 * settings.octaveShift, 0, 127);
+        held = -1;
+        apply (allocator.noteOff (note, channel));
     }
     else if (m.isPitchWheel())
     {

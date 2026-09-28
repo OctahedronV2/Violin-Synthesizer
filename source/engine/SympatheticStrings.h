@@ -26,11 +26,22 @@ public:
 
     // Adds the open strings' response to `bridgeForce` in place. `isOpen[s]`
     // says which strings are currently undamped; amount is 0..1.
+    //
+    // Once the drive and the strings' ringing have both been silent for two
+    // round trips of the lowest string, the resonators are cleared and skipped
+    // until the drive returns.
     void process (float* bridgeForce, int numSamples, const std::array<bool, 4>& isOpen, double amount);
 
+    bool isDormant() const { return dormant; } // for tests
+
 private:
+    static constexpr float silenceThreshold = 1.0e-10f; // about -200 dBFS
+
     std::array<dsp::BowedString, 4> resonators;
     std::array<bool, 4> wasOpen {};
+    std::array<double, 4> f0 {}, beta {}; // fixed per string, set in prepare()
     double fs = 48000.0;
+    bool dormant = true;
+    int quietRun = 0, dormantAfter = 1; // samples of silent drive and response
 };
 } // namespace violinsynth::engine

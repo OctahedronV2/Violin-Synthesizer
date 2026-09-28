@@ -1,5 +1,8 @@
 #include "engine/OutputChain.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace violinsynth::engine
 {
 void OutputChain::prepare (double sampleRate, int maxBlockSize)
@@ -22,6 +25,7 @@ void OutputChain::prepare (double sampleRate, int maxBlockSize)
     limiter.setThreshold (-0.3f);
     limiter.setRelease (80.0f);
 
+    dormantAfter = std::max (1, static_cast<int> (dormantSeconds * fs));
     appliedSordino = -1.0f;
     appliedRoom = -1.0f;
     setSettings (settings);
@@ -35,12 +39,19 @@ void OutputChain::reset()
     dcBlocker.reset();
     sordinoShelf.reset();
     sordinoLowPass.reset();
+    resetPostBody();
+}
+
+void OutputChain::resetPostBody()
+{
     decorrelateA1.reset();
     decorrelateA2.reset();
     decorrelateB1.reset();
     decorrelateB2.reset();
     reverb.reset();
     limiter.reset();
+    postBodyDormant = true;
+    quietRun = dormantAfter;
 }
 
 void OutputChain::setSettings (const OutputSettings& s)
@@ -85,6 +96,24 @@ void OutputChain::processPreBody (float* mono, int numSamples)
 
 void OutputChain::processPostBody (const float* mono, float* left, float* right, int numSamples)
 {
+    // Read before processing: in mono, the engine passes `mono` as `right`.
+    const auto inputSilent
+        = std::all_of (mono, mono + numSamples, [] (float x) { return std::abs (x) <= silenceThreshold; });
+
+    if (postBodyDormant)
+    {
+        if (inputSilent)
+        {
+            std::fill (left, left + numSamples, 0.0f);
+            std::fill (right, right + numSamples, 0.0f);
+            width.skip (numSamples);
+            gain.skip (numSamples);
+            return;
+        }
+        postBodyDormant = false;
+        quietRun = 0;
+    }
+
     // Mid/side widening with two decorrelating all-pass chains. The side
     // signal cancels in a mono sum, so mono compatibility is preserved.
     for (int i = 0; i < numSamples; ++i)
@@ -110,5 +139,14 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
     }
 
     limiter.process (context);
+
+    // Asleep once the input and every tail have been silent for a while;
+    // the limiter's release is long over by then, so a reset changes nothing.
+    const auto quiet = [] (float x) { return std::abs (x) <= tailThreshold; };
+    const auto outputSilent
+        = inputSilent && std::all_of (left, left + numSamples, quiet) && std::all_of (right, right + numSamples, quiet);
+    quietRun = outputSilent ? quietRun + numSamples : 0;
+    if (quietRun >= dormantAfter)
+        resetPostBody();
 }
 } // namespace violinsynth::engine
