@@ -90,6 +90,7 @@ public:
     double slipsPerPeriod() const { return player.slipsPerPeriod(); }
 
 private:
+    bool twists() const { return string.getParams().torsion.speedRatio > 0.0; }
     enum class Stage
     {
         open, // undamped open string (sympathetic resonance only)

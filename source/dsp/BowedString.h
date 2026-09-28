@@ -14,9 +14,21 @@ enum class Tuning
     fundamental, // free vibration, e.g. pizzicato
 };
 
+// Torsional (twisting) waves. The bow drags the string's surface, which both
+// moves the string sideways and twists it; the twist travels much faster than
+// the transverse wave and dies away much sooner, which steadies the stick-slip
+// at the bow (docs/CLEAN_BOWING.md). speedRatio 0 turns it off.
+struct TorsionParams
+{
+    double speedRatio = 0.0; // torsional / transverse wave speed
+    double impedanceRatio = 3.0; // torsional / transverse impedance, at the string's surface
+    double q = 45.0; // quality factor of the torsional modes
+};
+
 struct StringParams
 {
     FrictionParams friction;
+    TorsionParams torsion;
     LossSpec loss;
     Tuning tuning = Tuning::harmonic;
 };
@@ -64,6 +76,7 @@ private:
     double fs = 192000.0;
     FractionalDelay bridgeLine;
     FractionalDelay nutLine;
+    FractionalDelay torsionBridgeLine, torsionNutLine;
     LoopFilter loopFilter;
 
     // Harmonic phase delay on a log-frequency grid, filled as pitches are
@@ -78,5 +91,6 @@ private:
     double lastVelocity = 0.0;
     bool slipOnset = false;
     double sinceSlip = 0.0, lastSlipInterval = 0.0;
+    double torsionReflection = -1.0, contactImpedance = 0.0, transverseShare = 1.0;
 };
 } // namespace violinsynth::dsp

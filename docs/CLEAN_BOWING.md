@@ -55,12 +55,60 @@ Two smaller changes go with it:
   lifts faster (the force follows the release envelope cubed), so it rings out
   instead of being scraped.
 
+## The string's twist
+
+The player cannot fix the first moments of a note: a string at rest scraped
+for its first 100 to 300 ms whatever the bow did. Jake heard it on the second
+note of his scale (D4 on a D string at rest).
+
+A real string twists as well as bends where the bow drags its surface. The
+twist travels several times faster than the bend and is damped far more
+heavily, and it steadies the stick-slip at the bow (Woodhouse). The waveguide
+now has a second pair of delay lines for the twist (`TorsionParams` in
+source/dsp/BowedString.h). The bow sees the bending and twisting impedances in
+series, and the change in contact velocity is shared between them by
+impedance. The values (StringVoice.cpp): the twist travels 5 times faster, its
+impedance at the string's surface is 3 times the bending one, and it rings
+with a quality factor of 2, so it dies within a couple of its own periods. It
+is off for harmonics, where it brightened the flageolet tone.
+
+Two side effects are compensated. The twist takes a quarter of the bow's
+motion, so the bow moves 4/3 as fast and the note stays as loud. And it
+lengthens each period slightly, 0.85 cents flat on average (up to 1.8), so a
+bowed string is tuned 1.4 cents sharp, which also removes the 0.55 cents the
+model was already flat.
+
+Measured with the player (dry, no vibrato):
+
+| Measure | Before | With the twist |
+|---|---|---|
+| Scale notes (448) with a 50 ms window above -20 dB | 105 | about 16 to 29 |
+| Mean time to Helmholtz motion, scale notes | 0.31 s | 0.11 s |
+| Share of sustain not in Helmholtz motion | 13.4% | 1 to 3% |
+| Noise in the first 30 ms of a note on a still string | -35 dB | -41 dB |
+| ... 30 to 100 ms | -28 dB | -33 dB |
+| ... 100 to 300 ms | -29 dB | -36 dB |
+
+On Jake's scale over ten velocities, notes with a scratchy moment went from
+16 of 80 to 2, settling in 0.11 s instead of 0.36 s. The tone is darker: the
+spectral centroid falls from 1.63 to about 1.42 harmonics, partly because
+the scratch was adding brightness. A weaker twist (impedance ratio 5 or 8)
+keeps more brightness but settles slower. Presets were re-levelled.
+
+Tried and dropped along the way: letting the bow's weight arrive before its
+speed at note starts. It settled scale notes faster, but a string at rest was
+grabbed and scraped for about 50 ms (+10 dB of noise at 30 to 100 ms). Starts
+with the speed leading, and textbook starts with constant acceleration and
+constant force, were noisier too. Lesson for measuring: scale tests mostly
+re-bow strings that are already ringing and skip the first 100 ms, so starts
+on a still string need their own test.
+
 ## The Imperfection knob
 
 Imperfection (0 to 100%, default 0, automatable, in the Play panel) scales all
-of the above. At 0 the player corrects fully. At 100% the output is identical
-to the instrument before this change: the player does nothing, the force
-windows and release are the old ones.
+of the above. At 0 the player corrects fully. At 100% the player does
+nothing and the force windows and release are the old ones; the string itself
+keeps its twist (below), so it is cleaner than before this change even there.
 
 ## Results
 
@@ -85,9 +133,10 @@ checks this on 64 notes.
 
 ## Cost
 
-About +5.7% CPU per bowed note and +11% for four-note chords (Callgrind,
-docs/benchmarks/baseline.json). Pizzicato and idle are unchanged. The cost is
-the same at any Imperfection setting.
+The player costs about +5.7% CPU per bowed note and +11% for four-note chords;
+the twist another +10% and +18% (Callgrind, docs/benchmarks/baseline.json). The
+twist is skipped while the bow is off the string, so pizzicato costs +4% and
+idle nothing. The cost is the same at any Imperfection setting.
 
 ## Tried and dropped
 
