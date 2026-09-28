@@ -170,6 +170,14 @@ TEST_CASE ("The window around the editor doesn't take the host's keyboard", "[ke
     hostWrapper.removeChildComponent (editor.get());
 }
 
+TEST_CASE ("Notes are named as in the host's piano roll", "[keyboard][editor]")
+{
+    // The test host is none of the known DAWs: middle C is C4.
+    CHECK (hostMiddleCOctave() == 4);
+    CHECK (noteName (60) == "C4");
+    CHECK (noteName (69) == "A4");
+}
+
 TEST_CASE ("Keyboard response is saved with the project", "[keyboard][state]")
 {
     juce::ScopedJuceInitialiser_GUI juce;

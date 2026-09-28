@@ -422,3 +422,36 @@ TEST_CASE ("Imperfection at 100% leaves the bow weight alone", "[bownoise][clean
     player.adjust (33.0 / (fs * 4.0), 1.0);
     CHECK (player.weight() < 1.0);
 }
+
+TEST_CASE ("A firm bow near the bridge never locks the string silent", "[bownoise][cleanbowing]")
+{
+    // v1.0.1: with Bright Soloist (bow position 0.075, pressure 0.65) the G
+    // string and the low A string stuck to the bow and moved with it in
+    // silence, for as long as the note was held.
+    auto level = [] (double bowPosition, double pressure, std::vector<Event> events, double from)
+    {
+        auto s = plainSettings();
+        s.performance.voice.bowPosition = bowPosition;
+        s.performance.voice.bowPressure = pressure;
+        engine::ViolinEngine e;
+        e.setSettings (s);
+        e.prepare (fs, block);
+        const auto out = run (e, from + 0.5, std::move (events));
+        return rms (out, from + 0.2, from + 0.5);
+    };
+
+    for (auto note : { 57, 64, 72, 75 })
+        for (auto velocity : { 0.5f, 0.8f, 1.0f })
+            for (auto [bowPosition, pressure] : { std::pair { 0.075, 0.65 }, { 0.06, 0.8 }, { 0.11, 1.0 } })
+            {
+                CAPTURE (note, velocity, bowPosition, pressure);
+                const auto reference = level (0.11, 0.5, { { 0.0, on (note, 1, velocity) } }, 0.0);
+                CHECK (level (bowPosition, pressure, { { 0.0, on (note, 1, velocity) } }, 0.0)
+                       > 0.1 * reference); // a locked string is 40 dB down
+            }
+
+    // Jake's case: G#4 held, then D#5 slurred across to the A string.
+    const auto slurred = level (0.075, 0.65, { { 0.0, on (68) }, { 1.0, on (75) }, { 1.0, off (68) } }, 1.0);
+    const auto reference = level (0.11, 0.5, { { 0.0, on (75) } }, 0.0);
+    CHECK (slurred > 0.1 * reference); // a locked string is 40 dB down
+}

@@ -69,15 +69,16 @@ public:
             auto& button = articulationButtons[static_cast<std::size_t> (a)];
             button.setButtonText (displayName (a));
             button.setTitle (juce::String ("Articulation: ") + displayName (a));
-            button.setTooltip ("Keyswitch "
-                               + juce::MidiMessage::getMidiNoteName (engine::firstKeyswitch + a, true, true, 4)
-                               + " (MIDI note " + juce::String (engine::firstKeyswitch + a) + ")");
+            button.setTooltip ("Keyswitch " + noteName (engine::firstKeyswitch + a) + " (MIDI note "
+                               + juce::String (engine::firstKeyswitch + a) + ")");
             button.setRadioGroupId (1);
             button.onClick = [this, a] { articulationAttachment.setValueAsCompleteGesture (static_cast<float> (a)); };
             button.onParameterMenu = [this, &button] { showParameterMenu (button, parameter (id::articulation)); };
             addAndMakeVisible (button);
         }
-        keyswitchHint.setText ("Keyswitches: C1 to A1 (C2 to A2 in FL Studio)", juce::dontSendNotification);
+        keyswitchHint.setText ("Keyswitches: " + noteName (engine::firstKeyswitch) + " to "
+                                   + noteName (engine::firstKeyswitch + engine::numArticulations - 1),
+                               juce::dontSendNotification);
         keyswitchHint.setFont (juce::FontOptions { 12.0f });
         keyswitchHint.setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (keyswitchHint);
@@ -116,7 +117,7 @@ public:
         // The violin's range, G3 to G7, where the notes sound (after the Octave setting).
         keyboard.setAvailableRange (engine::Violin::lowestNote, engine::Violin::highestNote);
         keyboard.setLowestVisibleKey (engine::Violin::lowestNote);
-        keyboard.setOctaveForMiddleC (4); // C4 = middle C, as in the rest of the editor
+        keyboard.setOctaveForMiddleC (hostMiddleCOctave()); // named as in the host's piano roll
         keyboard.setTitle ("Keyboard");
         keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, colours::accent);
         keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, colours::accent.withAlpha (0.3f));

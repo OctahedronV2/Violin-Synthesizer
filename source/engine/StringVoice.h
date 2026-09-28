@@ -162,6 +162,7 @@ private:
     NoteExpression expression;
     double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0, peakLevel = 0.0, peakDecay = 0.0;
     int controlCounter = 0;
+    double stuckSamples = 0.0; // samples the string has stuck to the moving bow without letting go
 
     // Articulation state
     Articulation noteArticulation = Articulation::legato;
