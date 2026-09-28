@@ -1,11 +1,10 @@
 #pragma once
 
+#include "dsp/PartitionedConvolution.h"
 #include "engine/Filters.h"
 
-#include <juce_dsp/juce_dsp.h>
-
 #include <array>
-#include <atomic>
+#include <vector>
 
 namespace violinsynth::engine
 {
@@ -14,6 +13,9 @@ namespace violinsynth::engine
 // Four measured bodies (docs/BODY_MODELLING.md), each available as
 //   - convolution with the measured impulse response (default, most detailed), or
 //   - a fitted modal bank of RBJ band-pass resonators (light CPU option).
+// The convolution is zero-latency and partitioned, on PFFFT (docs/PHASE7.md
+// 7.3). Both forms stop computing once their input and ringing have died
+// away, and start again on the next sample of sound.
 // Sources: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and the
 // University of Iowa MIS violin; see research/data/SOURCES.md.
 class Body
@@ -41,28 +43,36 @@ public:
         modal,
     };
 
-    // Message thread: allocates, and loads the impulse response of `bodyIndex`.
-    void prepare (double sampleRate, int maxBlockSize, int bodyIndex);
+    static constexpr double crossfadeSeconds = 0.05; // between convolution bodies
+
+    // Message thread: allocates, and prepares every body's impulse response
+    // at `sampleRate`, so body changes never allocate.
+    void prepare (double sampleRate, int bodyIndex);
     void reset();
 
-    // Message thread: starts loading another impulse response (crossfaded in by JUCE).
-    void loadConvolutionBody (int bodyIndex);
-    int convolutionBody() const { return loadedConvolutionBody; }
-
-    // Audio thread.
-    void setModalBody (int bodyIndex);
-    void setQuality (Quality q) { quality = q; }
+    // Audio thread. A convolution body change crossfades.
+    void setBody (int bodyIndex);
+    void setQuality (Quality q);
     void process (float* samples, int numSamples);
 
-    int getLatencySamples() const;
+    int getLatencySamples() const { return 0; }
+    int convolutionBody() const { return convolution.selectedFilter(); }
+    bool isDormant() const; // for tests: the active form is skipping silence
+
+    // The impulse response of `bodyIndex`, resampled to `sampleRate` and
+    // level-trimmed, as the convolution uses it.
+    static std::vector<float> impulseResponse (int bodyIndex, double sampleRate);
+    // Partition length: about 2.7 ms at any rate.
+    static int convolutionBlockSize (double sampleRate);
 
 private:
     static constexpr int maxModes = 64;
 
-    juce::dsp::Convolution convolution;
+    void setModalBody (int bodyIndex);
+    void processModal (float* samples, int numSamples);
+
+    dsp::PartitionedConvolution convolution;
     double fs = 48000.0;
-    int maxBlock = 512;
-    int loadedConvolutionBody = -1;
 
     Quality quality = Quality::convolution;
     int modalBody = -1;
@@ -71,7 +81,8 @@ private:
     int numModes = 0;
     float directGain = 0.0f;
     float modalOutputGain = 1.0f;
-    float convolutionTrim = 1.0f;
     float modalTrim = 1.0f;
+    bool modalDormant = true;
+    int modalQuietRun = 0, modalDormantAfter = 1; // samples of silent input and output
 };
 } // namespace violinsynth::engine

@@ -18,6 +18,10 @@ struct OutputSettings
 // Everything after the string except the body:
 //   before the body: DC blocker, sordino (mute on the bridge)
 //   after the body:  stereo width, small room, output gain, limiter
+//
+// Once the body's output and the chain's own tails (all-passes, room,
+// limiter) have been silent for a second (below -120 dBFS), the part after the body writes
+// silence without computing until sound arrives again.
 class OutputChain
 {
 public:
@@ -29,7 +33,17 @@ public:
     // Writes the stereo result into left/right from the mono body output.
     void processPostBody (const float* mono, float* left, float* right, int numSamples);
 
+    bool isPostBodyDormant() const { return postBodyDormant; } // for tests
+
 private:
+    static constexpr float silenceThreshold = 1.0e-10f; // input: about -200 dBFS
+    // Output: -120 dBFS. JUCE's reverb settles into a float limit cycle near
+    // -140 dBFS instead of decaying to zero, so its tail ends here.
+    static constexpr float tailThreshold = 1.0e-6f;
+    static constexpr double dormantSeconds = 1.0;
+
+    void resetPostBody();
+
     double fs = 48000.0;
     OutputSettings settings;
 
@@ -43,5 +57,8 @@ private:
 
     juce::dsp::Reverb reverb;
     juce::dsp::Limiter<float> limiter;
+
+    bool postBodyDormant = true;
+    int quietRun = 0, dormantAfter = 1; // samples of silent input and output
 };
 } // namespace violinsynth::engine

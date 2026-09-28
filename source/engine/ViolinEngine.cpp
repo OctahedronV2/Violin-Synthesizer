@@ -28,15 +28,25 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
             true,
             true);
         oversampling->initProcessing (static_cast<size_t> (maxBlock));
+
+        // The string writes straight into the oversampler's internal-rate
+        // buffer, and only the downsampler runs. JUCE's processSamplesDown()
+        // reads the block that processSamplesUp() returns, which is the same
+        // buffer every time, so upsample once here to find it. The
+        // up-filters' state is never used on the way down.
+        juce::AudioBuffer<float> silence (1, maxBlock);
+        silence.clear();
+        internalBlock = oversampling->processSamplesUp (juce::dsp::AudioBlock<const float> (silence));
     }
     else
     {
         oversampling.reset();
+        internalBlock = {};
     }
 
     violin.prepare (getInternalSampleRate());
     sympathetic.prepare (hostRate);
-    body.prepare (hostRate, maxBlock, settings.body);
+    body.prepare (hostRate, settings.body);
     output.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
     reset();
@@ -59,13 +69,7 @@ void ViolinEngine::setSettings (const EngineSettings& s)
     violin.setSettings (s.performance);
     output.setSettings (s.output);
     body.setQuality (s.bodyQuality);
-    body.setModalBody (s.body);
-    requestedBody.store (s.body);
-}
-
-void ViolinEngine::updateConvolutionBody()
-{
-    body.loadConvolutionBody (requestedBody.load());
+    body.setBody (s.body);
 }
 
 int ViolinEngine::getLatencySamples() const
@@ -89,9 +93,7 @@ void ViolinEngine::renderString (int start, int numSamples)
 
     float* channels[] = { hostSamples };
     juce::dsp::AudioBlock<float> hostBlock (channels, 1, static_cast<size_t> (numSamples));
-    hostBlock.clear();
-    auto internal = oversampling->processSamplesUp (hostBlock);
-    violin.render (internal.getChannelPointer (0), static_cast<int> (internal.getNumSamples()));
+    violin.render (internalBlock.getChannelPointer (0), numSamples * getOversamplingFactor());
     oversampling->processSamplesDown (hostBlock);
 }
 
