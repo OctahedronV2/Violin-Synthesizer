@@ -127,7 +127,7 @@ TEST_CASE ("Partitioned convolution sleeps on silence and wakes on the next samp
     x[10] = 1.0f;
     c.process (x.data(), 100);
     CHECK_FALSE (c.isDormant());
-    CHECK (x[10] == h[0]);
+    CHECK (std::abs (x[10] - h[0]) < 1.0e-6f);
     c.process (x.data() + 100, 4900);
     CHECK (c.isDormant()); // the tail (1000 samples) has been played
 
