@@ -85,6 +85,7 @@ void PartitionedConvolution::prepare (int blockSize,
     for (auto& slot : slots)
     {
         slot.pre.resize (n);
+        slot.nextPre.resize (n);
         slot.overlap.resize (static_cast<std::size_t> (B));
         slot.out.resize (n);
     }
@@ -131,6 +132,7 @@ void PartitionedConvolution::clearState()
         slot.pre.clear();
         slot.overlap.clear();
         slot.out.clear();
+        slot.nextValid = false;
     }
     current = 0;
     inputPos = 0;
@@ -157,6 +159,7 @@ void PartitionedConvolution::beginCrossfade (int filter)
     // the full product of the previous block and its history with this filter.
     auto& slot = slots[1 - active];
     slot.filter = filter;
+    slot.nextValid = false;
     scratch.clear();
     for (int k = 0; k < P; ++k)
         pffft_zconvolve_accumulate (setup, segment (k + 1), partition (filter, k), scratch.data(), 1.0f);
@@ -175,10 +178,34 @@ void PartitionedConvolution::startBlock()
         if (s != active && fadePos < 0)
             continue;
         auto& slot = slots[s];
-        slot.pre.clear();
-        for (int k = 1; k < P; ++k)
-            pffft_zconvolve_accumulate (setup, segment (k), partition (slot.filter, k), slot.pre.data(), 1.0f);
+        if (slot.nextValid)
+        {
+            // Partitions 2.. were summed during the last block; add the block that just finished.
+            std::memcpy (slot.pre.data(), slot.nextPre.data(), static_cast<std::size_t> (N) * sizeof (float));
+            if (P > 1)
+                pffft_zconvolve_accumulate (setup, segment (1), partition (slot.filter, 1), slot.pre.data(), 1.0f);
+        }
+        else
+        {
+            slot.pre.clear();
+            for (int k = 1; k < P; ++k)
+                pffft_zconvolve_accumulate (setup, segment (k), partition (slot.filter, k), slot.pre.data(), 1.0f);
+        }
+        slot.nextPre.clear();
+        slot.nextDone = 2;
+        slot.nextValid = true;
     }
+}
+
+void PartitionedConvolution::buildNextPre (Slot& slot, int upTo)
+{
+    // The next block's partition k meets the block that is k - 1 blocks old now.
+    for (; slot.nextDone < std::min (upTo, P); ++slot.nextDone)
+        pffft_zconvolve_accumulate (setup,
+                                    segment (slot.nextDone - 1),
+                                    partition (slot.filter, slot.nextDone),
+                                    slot.nextPre.data(),
+                                    1.0f);
 }
 
 void PartitionedConvolution::convolveCurrent (Slot& slot)
@@ -254,6 +281,12 @@ void PartitionedConvolution::process (float* samples, int numSamples)
         inputPos += n;
         done += n;
 
+        // Spread the next block's sum over this block's calls, in proportion.
+        const auto upTo = 2 + static_cast<int> (static_cast<long long> (P - 2) * inputPos / B);
+        for (int s = 0; s < 2; ++s)
+            if (s == active || fadePos >= 0)
+                buildNextPre (slots[s], upTo);
+
         if (inputPos == B)
         {
             for (int s = 0; s < 2; ++s)
@@ -269,6 +302,7 @@ void PartitionedConvolution::process (float* samples, int numSamples)
 
         if (fadePos >= fadeLength)
         {
+            slots[active].nextValid = false;
             active = 1 - active;
             fadePos = -1;
         }

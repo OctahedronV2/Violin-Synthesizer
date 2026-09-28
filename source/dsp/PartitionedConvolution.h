@@ -39,7 +39,9 @@ private:
 // is transformed and multiplied with the first partition; the older blocks'
 // products with the later partitions are summed once per block. So the output
 // has no latency whatever the host block size, and small host blocks cost one
-// extra FFT pair each rather than more partitions.
+// extra FFT pair each rather than more partitions. The older blocks' sum
+// for the next block is built up a little on every call, so a host block of
+// a few samples never carries a whole block's work.
 //
 // Switching to another impulse response crossfades over `crossfadeSamples`,
 // starting on the next block boundary; both filters share the input history,
@@ -81,6 +83,9 @@ private:
     {
         int filter = 0;
         AlignedFloats pre; // older blocks' products, summed once per block
+        AlignedFloats nextPre; // the same for the next block, built up during this one
+        int nextDone = 2; // partitions 2.. already in nextPre
+        bool nextValid = false; // nextPre was built for `filter`
         AlignedFloats overlap; // second half of the last full block's output
         AlignedFloats out; // time-domain result of the current partial block
     };
@@ -88,6 +93,7 @@ private:
     const float* partition (int filter, int k) const;
     float* segment (int blocksAgo);
     void startBlock();
+    void buildNextPre (Slot& slot, int upTo);
     void beginCrossfade (int filter);
     void convolveCurrent (Slot& slot);
     void clearState();

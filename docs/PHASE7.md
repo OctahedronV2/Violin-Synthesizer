@@ -147,7 +147,7 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 
 **Status (body and idle PR):** done, without trimming.
 
-- `source/dsp/PartitionedConvolution.cpp`: uniform partitions of about 2.7 ms (128 samples at 44.1/48 kHz, 256 at 88.2/96, 512 above), on PFFFT, vendored in `third_party/pffft`. Every host call transforms its partial block, so the body has **zero latency** at any buffer size, and a small buffer costs one extra FFT pair instead of more partitions. Non-uniform partitions weren't needed for the targets.
+- `source/dsp/PartitionedConvolution.cpp`: uniform partitions of about 2.7 ms (128 samples at 44.1/48 kHz, 256 at 88.2/96, 512 above), on PFFFT, vendored in `third_party/pffft`. Every host call transforms its partial block, so the body has **zero latency** at any buffer size, and a small buffer costs one extra FFT pair instead of more partitions. The sum over older blocks for the next partition is built up a little on every call, so no single tiny host block carries it: at a 4-sample buffer the slowest call dropped from 4.4 µs to 0.7 µs (of 83 µs). Non-uniform partitions weren't needed for the targets.
 - All four bodies are resampled (the way JUCE did) and transformed in `prepare()`. A body change is a 50 ms crossfade on the audio thread, with no loading or allocation; both bodies share the input history, so the new one starts with its full tail. The first note after `prepare()` now goes through the body; JUCE's background load played it dry for the first few blocks.
 - Output nulls with `main` to −120 dB below the peak (float rounding).
 - One note with the measured body now costs the same as the light body. Before and after, 48 kHz, one note with vibrato unless noted, Linux VM:
