@@ -10,6 +10,16 @@
 
 namespace violinsynth::engine
 {
+// The bowed guitar's pickup selector: the neck humbucker, both, or the bridge one.
+enum class Pickup
+{
+    neck,
+    both,
+    bridge,
+};
+
+inline constexpr int numPickups = 3;
+
 struct PerformanceSettings
 {
     VoiceSettings voice;
@@ -19,6 +29,11 @@ struct PerformanceSettings
     Articulation articulation = Articulation::legato; // the Articulation parameter
     double velocityTop = 0.7; // dynamics at velocity 127; 1 is linear (docs/PHASE7.md)
     int octaveShift = 0; // octaves added to played notes (not keyswitches)
+
+    Instrument instrument = Instrument::violin;
+    // Bowed guitar only.
+    Pickup pickup = Pickup::neck;
+    double drone = 0.5; // 0..1: how firmly the flat bow catches the strings beside the played ones (0: not at all)
 };
 
 // Note velocity (0..1) to dynamics. Velocity 64 stays near dynamics 0.5; the
@@ -26,8 +41,10 @@ struct PerformanceSettings
 //   d = v (1 + b) top / (1 + b v),  with b = (1 - top) / (top - 0.5)
 double velocityToDynamics (double velocity, double top);
 
-// The four strings, the bow and the player: MIDI in, bridge force out, at
-// the internal (oversampled) rate.
+// The strings, the bow and the player: MIDI in, bridge force out (or, for
+// the bowed guitar, the pickup's signal), at the internal (oversampled) rate.
+// The instrument (PerformanceSettings::instrument) sets the strings, their
+// range and how they are heard; changing it silences the strings.
 //
 // MIDI mapping (see docs/PHASE4.md):
 //   velocity         dynamics (bow speed) of the note, through velocityToDynamics
@@ -44,10 +61,10 @@ double velocityToDynamics (double velocity, double top);
 class Violin
 {
 public:
-    static constexpr int numStrings = StringAllocator::numStrings;
-    // The violin's range, G3 to G7. Notes outside it (after the octave
-    // shift) are silent.
-    static constexpr int lowestNote = 55, highestNote = 103;
+    static constexpr int maxStrings = engine::maxStrings;
+    // The violin's range, G3 to G7. Notes outside the instrument's range
+    // (after the octave shift) are silent.
+    static constexpr int lowestNote = violinSpec.lowestNote, highestNote = violinSpec.highestNote;
     // Bow hair per stroke. A real bow has 62 cm, but the model bows a long
     // note faster than a player would, and every turn scratches, so it uses
     // more (docs/BOW_NOISE.md).
@@ -64,7 +81,11 @@ public:
     void handleMidi (const juce::MidiMessage& message);
     void render (float* out, int numSamples);
 
+    const InstrumentSpec& instrumentSpec() const { return *instrument; }
+    int numStrings() const { return instrument->numStrings; }
+
     // For tests and diagnostics.
+    bool stringDrones (int string) const { return drones[static_cast<std::size_t> (string)]; }
     int noteOnString (int string) const { return allocator.noteOnString (string); }
     double stringF0 (int string) const { return voices[static_cast<std::size_t> (string)].currentF0(); }
     double stringLevel (int string) const { return voices[static_cast<std::size_t> (string)].level(); }
@@ -76,9 +97,10 @@ public:
     }
     bool stringBowed (int string) const { return voices[static_cast<std::size_t> (string)].isBowed(); }
     int bowChangeCount() const { return bowChanges; }
-    std::array<bool, numStrings> openStrings() const
+    // The violin's four strings, for their sympathetic resonance.
+    std::array<bool, 4> openStrings() const
     {
-        std::array<bool, numStrings> open {};
+        std::array<bool, 4> open {};
         for (std::size_t s = 0; s < open.size(); ++s)
             open[s] = voices[s].isOpen();
         return open;
@@ -88,12 +110,23 @@ public:
 
 private:
     void apply (const StringActions& actions);
+    void setInstrument (Instrument i);
+    void setPickup (Pickup p);
+    void updateDrones (bool newStroke);
     void setArticulation (Articulation a);
     void startBowChange();
     NoteExpression expressionFor (int channel) const;
 
-    std::array<StringVoice, numStrings> voices;
+    std::array<StringVoice, maxStrings> voices;
     StringAllocator allocator;
+    const InstrumentSpec* instrument = &violinSpec;
+    Instrument currentInstrument = Instrument::violin;
+    Pickup currentPickup = Pickup::neck;
+    // Bowed guitar: strings the bow catches beside the played ones, and the
+    // bow's latest note, which they follow.
+    std::array<bool, maxStrings> drones {};
+    float droneVelocity = 0.5f;
+    int droneChannel = 1;
     PerformanceSettings settings;
     double fs = 192000.0;
     double time = 0.0; // seconds since prepare, for chord detection

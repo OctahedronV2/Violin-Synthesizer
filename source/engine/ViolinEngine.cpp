@@ -47,6 +47,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
     violin.prepare (getInternalSampleRate());
     sympathetic.prepare (hostRate);
     body.prepare (hostRate, settings.body);
+    amp.prepare (getInternalSampleRate(), hostRate);
     output.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
     reset();
@@ -57,6 +58,7 @@ void ViolinEngine::reset()
     violin.reset();
     sympathetic.reset();
     body.reset();
+    amp.reset();
     output.reset();
     sordino = settings.output.sordino;
     if (oversampling != nullptr)
@@ -70,6 +72,7 @@ void ViolinEngine::setSettings (const EngineSettings& s)
     output.setSettings (s.output);
     body.setQuality (s.bodyQuality);
     body.setBody (s.body);
+    amp.setSettings (s.drive, s.performance.pickup);
 }
 
 int ViolinEngine::getLatencySamples() const
@@ -88,12 +91,16 @@ void ViolinEngine::renderString (int start, int numSamples)
     if (oversampling == nullptr)
     {
         violin.render (hostSamples, numSamples);
+        if (guitar())
+            amp.processPreamp (hostSamples, numSamples);
         return;
     }
 
     float* channels[] = { hostSamples };
     juce::dsp::AudioBlock<float> hostBlock (channels, 1, static_cast<size_t> (numSamples));
     violin.render (internalBlock.getChannelPointer (0), numSamples * getOversamplingFactor());
+    if (guitar())
+        amp.processPreamp (internalBlock.getChannelPointer (0), numSamples * getOversamplingFactor());
     oversampling->processSamplesDown (hostBlock);
 }
 
@@ -131,9 +138,17 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         output.setSettings (outputSettings);
 
         float* samples = mono.getWritePointer (0);
-        sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
-        output.processPreBody (samples, chunkLength);
-        body.process (samples, chunkLength);
+        if (guitar())
+        {
+            output.processPreBody (samples, chunkLength);
+            amp.processCabinet (samples, chunkLength);
+        }
+        else
+        {
+            sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
+            output.processPreBody (samples, chunkLength);
+            body.process (samples, chunkLength);
+        }
 
         auto* left = buffer.getWritePointer (0, chunkStart);
         auto* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1, chunkStart) : nullptr;

@@ -57,8 +57,23 @@ public:
     static constexpr double minBowSpeed = 0.08; // m/s at dynamics 0
     static constexpr double maxBowSpeed = 0.6; // m/s at dynamics 1
 
+    // Allocates for the lowest string of any instrument, then configures the
+    // violin's string `stringIndex`. Not real-time safe.
     void prepare (double internalSampleRate, int stringIndex);
+    // Becomes string `stringIndex` of `instrument`, silent. Real-time safe.
+    void configure (const InstrumentSpec& instrument, int stringIndex);
     void reset();
+
+    // Bowed guitar: the pickup's coils, in metres from the bridge (none: no pickup).
+    void setPickup (const std::array<double, dsp::BowedString::maxCoils>& coilMetres, int numCoils);
+    // Bowed guitar: an open string the flat bow catches beside the played
+    // ones. It sounds at `weight` of the bow force, with no vibrato or bend.
+    void setDrone (bool drone, double weight = 1.0)
+    {
+        droning = drone;
+        droneWeight = drone ? weight : 1.0;
+    }
+    bool isDrone() const { return droning; }
 
     // Actions from the allocator.
     void start (int note, float velocity, Articulation a = Articulation::legato); // new stroke or pluck
@@ -141,6 +156,9 @@ private:
     Damping damping = Damping::bowed;
     double fs = 192000.0;
     const StringSpec* spec = &strings[0];
+    const InstrumentSpec* instrument = &violinSpec;
+    bool droning = false;
+    double droneWeight = 1.0;
 
     Stage stage = Stage::open;
     int currentNote = -1;

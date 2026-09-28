@@ -16,18 +16,24 @@ void StringAllocator::reset()
     lastNoteOnTime = -1.0e9;
 }
 
-bool StringAllocator::canPlay (int string, int note)
+void StringAllocator::setInstrument (const InstrumentSpec& spec)
 {
-    const auto open = strings[static_cast<std::size_t> (string)].openMidiNote;
+    instrument = &spec;
+    reset();
+}
+
+bool StringAllocator::canPlay (int string, int note) const
+{
+    const auto open = instrument->string (string).openMidiNote;
     return note >= open && note <= open + maxReachSemitones;
 }
 
-int StringAllocator::usualString (int note)
+int StringAllocator::usualString (int note) const
 {
-    for (int s = numStrings - 1; s >= 0; --s)
+    for (int s = numStrings() - 1; s >= 0; --s)
         if (canPlay (s, note))
             return s;
-    return 0; // below the G string: play on G (pitch is clamped by the voice)
+    return 0; // below the lowest string: play on it (pitch is clamped by the voice)
 }
 
 int StringAllocator::findHeld (int note, int channel) const
@@ -133,7 +139,7 @@ void StringAllocator::legatoTo (int newIndex, int fromIndex, StringActions& acti
     auto& target = held[static_cast<std::size_t> (newIndex)];
     auto& from = held[static_cast<std::size_t> (fromIndex)];
     const auto fromString = from.string;
-    const auto open = strings[static_cast<std::size_t> (fromString)].openMidiNote;
+    const auto open = instrument->string (fromString).openMidiNote;
 
     // Stay on the current string for natural steps, otherwise use the usual string.
     auto string = usualString (target.note);
@@ -197,7 +203,7 @@ void StringAllocator::startChordNote (int newIndex, double time, StringActions& 
                [this] (int a, int b)
                { return held[static_cast<std::size_t> (a)].note > held[static_cast<std::size_t> (b)].note; });
 
-    std::array<bool, numStrings> taken {};
+    std::array<bool, maxStrings> taken {};
     for (int i = 0; i < heldCount; ++i)
     {
         const auto& h = held[static_cast<std::size_t> (i)];
@@ -211,7 +217,7 @@ void StringAllocator::startChordNote (int newIndex, double time, StringActions& 
     {
         const auto& h = held[static_cast<std::size_t> (chord[static_cast<std::size_t> (k)])];
         int choice = -1;
-        for (int s = numStrings - 1; s >= 0 && choice < 0; --s)
+        for (int s = numStrings() - 1; s >= 0 && choice < 0; --s)
             if (! taken[static_cast<std::size_t> (s)] && canPlay (s, h.note))
                 choice = s;
         assigned[static_cast<std::size_t> (k)] = choice;

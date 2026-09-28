@@ -2,6 +2,7 @@ set(VIOLINSYNTH_SOURCES
     dsp/BowedString.cpp
     dsp/PartitionedConvolution.cpp
     engine/Body.cpp
+    engine/GuitarAmp.cpp
     engine/StringAllocator.cpp
     engine/OutputChain.cpp
     engine/ViolinEngine.cpp

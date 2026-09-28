@@ -35,6 +35,10 @@ inline const juce::ParameterID articulation { "articulation", 1 };
 inline const juce::ParameterID velocityRange { "velocityRange", 2 };
 inline const juce::ParameterID octave { "octave", 2 };
 inline const juce::ParameterID imperfection { "imperfection", 3 };
+inline const juce::ParameterID instrument { "instrument", 4 };
+inline const juce::ParameterID pickup { "pickup", 4 };
+inline const juce::ParameterID drive { "drive", 4 };
+inline const juce::ParameterID drone { "drone", 4 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -52,6 +56,7 @@ public:
     explicit Reader (juce::AudioProcessorValueTreeState& state);
     engine::EngineSettings read() const;
     int octaveShift() const; // octaves added to played notes
+    engine::Instrument instrumentChoice() const;
 
 private:
     std::atomic<float>* bowPosition;
@@ -79,5 +84,9 @@ private:
     std::atomic<float>* velocityRange;
     std::atomic<float>* octave;
     std::atomic<float>* imperfection;
+    std::atomic<float>* instrument;
+    std::atomic<float>* pickup;
+    std::atomic<float>* drive;
+    std::atomic<float>* drone;
 };
 } // namespace violinsynth::params

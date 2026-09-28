@@ -71,6 +71,14 @@ juce::StringArray bodyNames()
     return names;
 }
 
+juce::StringArray instrumentNames()
+{
+    juce::StringArray names;
+    for (const auto* name : engine::instrumentNames)
+        names.add (name);
+    return names;
+}
+
 juce::StringArray articulationNames()
 {
     juce::StringArray names;
@@ -136,6 +144,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // (docs/CLEAN_BOWING.md).
     layout.add (floatParam (id::imperfection, "Imperfection", Range { 0.0f, 1.0f }, 0.0f, Format::percent));
 
+    // Bowed guitar (docs/BOWED_GUITAR.md): the instrument, and its pickup,
+    // amplifier drive and how firmly the flat bow catches neighbouring strings.
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::instrument, "Instrument", instrumentNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::pickup,
+                                                              "Pickup",
+                                                              juce::StringArray { "Neck", "Both", "Bridge" },
+                                                              0));
+    layout.add (floatParam (id::drive, "Drive", Range { 0.0f, 1.0f }, 0.3f, Format::percent));
+    layout.add (floatParam (id::drone, "Drone", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
+
     return layout;
 }
 
@@ -164,8 +182,18 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       articulation (state.getRawParameterValue (id::articulation.getParamID())),
       velocityRange (state.getRawParameterValue (id::velocityRange.getParamID())),
       octave (state.getRawParameterValue (id::octave.getParamID())),
-      imperfection (state.getRawParameterValue (id::imperfection.getParamID()))
+      imperfection (state.getRawParameterValue (id::imperfection.getParamID())),
+      instrument (state.getRawParameterValue (id::instrument.getParamID())),
+      pickup (state.getRawParameterValue (id::pickup.getParamID())),
+      drive (state.getRawParameterValue (id::drive.getParamID())),
+      drone (state.getRawParameterValue (id::drone.getParamID()))
 {
+}
+
+engine::Instrument Reader::instrumentChoice() const
+{
+    return static_cast<engine::Instrument> (
+        juce::jlimit (0, engine::numInstruments - 1, juce::roundToInt (instrument->load())));
 }
 
 int Reader::octaveShift() const
@@ -197,6 +225,11 @@ engine::EngineSettings Reader::read() const
         juce::jlimit (0, engine::numArticulations - 1, static_cast<int> (articulation->load())));
     s.performance.velocityTop = velocityRange->load();
     s.performance.octaveShift = octaveShift();
+    s.performance.instrument = instrumentChoice();
+    s.performance.pickup
+        = static_cast<engine::Pickup> (juce::jlimit (0, engine::numPickups - 1, juce::roundToInt (pickup->load())));
+    s.performance.drone = drone->load();
+    s.drive = drive->load();
 
     s.body = static_cast<int> (body->load());
     s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;

@@ -214,6 +214,13 @@ TEST_CASE ("Editor screenshot", "[.screenshot]")
 {
     juce::ScopedJuceInitialiser_GUI juce;
     ViolinSynthProcessor processor;
+    // EDITOR_INSTRUMENT=1: the bowed guitar's editor, to editor-guitar.png.
+    const bool guitar = juce::SystemStats::getEnvironmentVariable ("EDITOR_INSTRUMENT", "0") == "1";
+    if (guitar)
+    {
+        auto* instrument = processor.getParameters().getParameter (violinsynth::params::id::instrument.getParamID());
+        instrument->setValueNotifyingHost (instrument->convertTo0to1 (1.0f));
+    }
 
     // Play a double stop so the string display has something to show.
     processor.setRateAndBufferSizeDetails (48000.0, 512);
@@ -232,7 +239,8 @@ TEST_CASE ("Editor screenshot", "[.screenshot]")
 
     std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditorAndMakeActive() };
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds());
-    juce::FileOutputStream stream (juce::File::getCurrentWorkingDirectory().getChildFile ("editor.png"));
+    juce::FileOutputStream stream (
+        juce::File::getCurrentWorkingDirectory().getChildFile (guitar ? "editor-guitar.png" : "editor.png"));
     stream.setPosition (0);
     stream.truncate();
     juce::PNGImageFormat().writeImageToStream (image, stream);

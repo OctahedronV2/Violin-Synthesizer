@@ -27,9 +27,28 @@ void BowedString::prepare (double internalSampleRate, double lowestF0)
     nutLine.prepare (maxDelay);
     torsionBridgeLine.prepare (maxDelay);
     torsionNutLine.prepare (maxDelay);
-    tauLogLowest = std::log2 (lowestF0);
     tauTable.assign (tauTableSize, -1.0);
+    setLowestF0 (lowestF0);
     reset();
+}
+
+void BowedString::setLowestF0 (double f0)
+{
+    tauLogLowest = std::log2 (f0);
+    std::fill (tauTable.begin(), tauTable.end(), -1.0);
+    lastF0 = -1.0;
+}
+
+void BowedString::setPickup (const std::array<double, maxCoils>& coilMetres,
+                             int count,
+                             double openLength,
+                             double openF0)
+{
+    numCoils = std::clamp (count, 0, maxCoils);
+    for (int c = 0; c < numCoils; ++c)
+        coils[static_cast<std::size_t> (c)] = coilMetres[static_cast<std::size_t> (c)] / openLength;
+    pickupScale = 1.0 / openF0;
+    lastPickup = 0.0;
 }
 
 void BowedString::reset()
@@ -43,6 +62,7 @@ void BowedString::reset()
     sticking = false;
     lastVelocity = 0.0;
     fingerVelocity = fingerHold = 0.0;
+    lastPickup = 0.0;
     slipOnset = false;
     sinceSlip = lastSlipInterval = 0.0;
 }
@@ -132,6 +152,28 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
         friction.impedance = contactImpedance;
     }
     const auto vtH = tFromBridge + tFromNut;
+
+    // The pickup: each coil hears the wave on its way from the bow to the end
+    // of the string on its side and the wave reflected back from that end
+    // (inverted), so its velocity is their difference. The loss filter's
+    // small extra delay and damping are left out of the reflected wave.
+    if (numCoils > 0)
+    {
+        double sum = 0.0;
+        const auto half = 0.5 * period;
+        const auto clampDelay = [maxDelay] (double d) { return std::clamp (d, 1.0, maxDelay); };
+        for (int c = 0; c < numCoils; ++c)
+        {
+            const auto p = std::min (coils[static_cast<std::size_t> (c)] * f0 * pickupScale, 0.99);
+            if (p < beta)
+                sum += bridgeLine.readLinear (clampDelay ((beta - p) * half))
+                    - bridgeLine.readLinear (clampDelay ((beta + p) * half - tau));
+            else
+                sum += nutLine.readLinear (clampDelay ((p - beta) * half))
+                    - nutLine.readLinear (clampDelay ((2.0 - beta - p) * half));
+        }
+        lastPickup = sum / numCoils;
+    }
 
     auto result = solveJunction (vBow, vH + vtH, force, friction, sticking);
     if (fingerHold > 0.0)

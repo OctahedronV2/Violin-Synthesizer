@@ -45,7 +45,7 @@ struct StringActions
     const StringAction* end() const { return items.data() + count; }
 };
 
-// Assigns MIDI notes to the four violin strings.
+// Assigns MIDI notes to the instrument's strings (the violin's four, or a guitar's six).
 //
 // A string plays one note at a time and only notes at or above its open
 // pitch. Chords (notes starting within the chord window) are spread over
@@ -58,11 +58,13 @@ struct StringActions
 class StringAllocator
 {
 public:
-    static constexpr int numStrings = static_cast<int> (strings.size());
     static constexpr int maxHeld = 16;
     static constexpr int maxReachSemitones = 36; // highest note above the open string
 
     void reset();
+    // The strings to play on (the violin's by default). Forgets held notes.
+    void setInstrument (const InstrumentSpec& spec);
+    int numStrings() const { return instrument->numStrings; }
     void setMode (PlayMode m) { mode = m; }
     void setChordWindow (double seconds) { chordWindow = seconds; }
     // With slurs off (détaché, staccato, pizzicato ...), a note that would
@@ -79,8 +81,8 @@ public:
     int channelOnString (int string) const;
     int soundingCount() const;
 
-    static bool canPlay (int string, int note);
-    static int usualString (int note); // highest string that can play the note
+    bool canPlay (int string, int note) const;
+    int usualString (int note) const; // highest string that can play the note
 
 private:
     struct Held
@@ -100,6 +102,7 @@ private:
     void startChordNote (int newIndex, double time, StringActions& actions);
     void legatoTo (int newIndex, int fromIndex, StringActions& actions);
 
+    const InstrumentSpec* instrument = &violinSpec;
     PlayMode mode = PlayMode::automatic;
     bool slursEnabled = true;
     double chordWindow = 0.04;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/StringData.h"
+
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <functional>
@@ -85,8 +87,9 @@ private:
     float x = 0.0f, y = 0.0f; // normalised 0..1
 };
 
-// The four strings, each showing the note held on it (where the finger
-// stops the string), how loud it is sounding and how fast the bow moves.
+// The instrument's strings (the violin's four or the guitar's six), each
+// showing the note held on it (where the finger stops the string), how loud
+// it is sounding and how fast the bow moves.
 class StringDisplay final : public juce::Component, private juce::Timer
 {
 public:
@@ -98,9 +101,10 @@ private:
     void timerCallback() override;
 
     ViolinSynthProcessor& processor;
-    std::array<int, 4> notes { -1, -1, -1, -1 };
-    std::array<float, 4> levels {};
-    std::array<float, 4> speeds {};
+    engine::Instrument instrument = engine::Instrument::violin;
+    std::array<int, engine::maxStrings> notes { -1, -1, -1, -1, -1, -1 };
+    std::array<float, engine::maxStrings> levels {};
+    std::array<float, engine::maxStrings> speeds {};
 };
 
 // Preset name with previous/next, a categorised menu, save and delete.

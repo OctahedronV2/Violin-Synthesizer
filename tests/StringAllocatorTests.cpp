@@ -33,13 +33,38 @@ Summary summarise (const StringActions& actions)
 
 TEST_CASE ("Single notes go to the highest string that can play them", "[allocator]")
 {
-    CHECK (StringAllocator::usualString (55) == G);
-    CHECK (StringAllocator::usualString (61) == G);
-    CHECK (StringAllocator::usualString (62) == D);
-    CHECK (StringAllocator::usualString (69) == A);
-    CHECK (StringAllocator::usualString (76) == E);
-    CHECK (StringAllocator::usualString (100) == E);
-    CHECK (StringAllocator::usualString (40) == G); // below the violin's range
+    const StringAllocator violin;
+    CHECK (violin.usualString (55) == G);
+    CHECK (violin.usualString (61) == G);
+    CHECK (violin.usualString (62) == D);
+    CHECK (violin.usualString (69) == A);
+    CHECK (violin.usualString (76) == E);
+    CHECK (violin.usualString (100) == E);
+    CHECK (violin.usualString (40) == G); // below the violin's range
+}
+
+TEST_CASE ("The bowed guitar's notes go to the highest of its six strings that can play them", "[allocator]")
+{
+    StringAllocator guitar;
+    guitar.setInstrument (bowedGuitarSpec);
+    CHECK (guitar.numStrings() == 6);
+    CHECK (guitar.usualString (40) == 0); // low E
+    CHECK (guitar.usualString (44) == 0);
+    CHECK (guitar.usualString (45) == 1); // A
+    CHECK (guitar.usualString (58) == 3); // G string, below the B
+    CHECK (guitar.usualString (59) == 4); // B
+    CHECK (guitar.usualString (64) == 5); // top E
+    CHECK (guitar.usualString (86) == 5);
+
+    // An E minor chord spreads over the strings like a guitarist's shape.
+    const auto actions = guitar.noteOn (52, 1, 0.5f, 0.0);
+    guitar.noteOn (55, 1, 0.5f, 0.01);
+    guitar.noteOn (59, 1, 0.5f, 0.02);
+    CHECK (actions.count == 1);
+    CHECK (guitar.noteOnString (5) == -1);
+    CHECK (guitar.noteOnString (4) == 59);
+    CHECK (guitar.noteOnString (3) == 55);
+    CHECK (guitar.noteOnString (2) == 52);
 }
 
 TEST_CASE ("A separate note starts a new stroke on its usual string", "[allocator]")
