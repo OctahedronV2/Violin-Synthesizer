@@ -25,7 +25,7 @@ Add the `all-platforms` label. That starts a run with just Linux and macOS (Wind
 ## Why it is faster
 
 - **Windows only by default.** Linux and macOS ran alongside Windows, so this saves runner time more than waiting time.
-- **Compile cache.** All builds go through [sccache](https://github.com/mozilla/sccache), stored in the GitHub Actions cache. JUCE and unchanged source files are not recompiled, which was most of the Windows job. Each build job prints its cache hit rate at the end.
+- **Compile cache.** All builds go through [sccache](https://github.com/mozilla/sccache), stored in the GitHub Actions cache. JUCE and unchanged source files are not recompiled. Each build job prints its cache hit rate at the end.
 - **Ninja on Windows.** Needed for sccache, and it keeps all four cores busy. Each build job also prints its slowest build steps, to guide further tuning.
 - **No link-time optimisation on pull requests.** With it, every link (plugin, standalone, tests, benchmark) redoes code generation for all of JUCE: about 4 of the 6 build minutes on Windows, and the compile cache can't help. Without it the synth needs about 9% more instructions (measured with the Callgrind benchmark), so pull request builds work the same but use a little more CPU. Builds of `main`, tags and runs started by hand keep it, and so does the Callgrind job, so the CPU check still compares like with like. Take downloads for CPU measurements from a `main` build. Locally, `-DVIOLINSYNTH_ENABLE_LTO=OFF` does the same.
 - **Path filters.** Jobs whose files did not change are skipped.
