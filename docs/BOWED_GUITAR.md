@@ -99,13 +99,13 @@ Jake asked for the sound Ramin Djawadi got from a bowed guitar. Interviews descr
 
 **The body** is a measured filter from a Godin guitar's under-saddle piezo pickup to a microphone in front of it ("Sweep guitare_dc" by pe_mace, Freesound 696487, CC0). The piezo reads the force the strings put on the saddle, so this is the same bridge force → sound transfer as the violin bodies. It shows a guitar's air resonance at 98 Hz and top resonances at 190 and 246 Hz. `research/scripts/export_guitar_body.py` trims it to the violin bodies' 200 ms and writes `resources/bodies/acoustic-guitar.wav`. It is convolved like the violin bodies, whatever the Quality setting; it has no modal version.
 
-**Matching a recording.** The acoustic's tone was fitted to a recording of an acoustic guitar played with a bow ("Guitar_bow_playing_stereo" by leonseptavaux, Freesound 346484, CC BY). The recording is not shipped. It plays E3–G#4, the same register as the demo. The comparison is the long-term spectrum in octave bands. With the electric's string losses, the acoustic was 10.8 dB (RMS, 250 Hz–8 kHz) brighter than the recording. Bowing further from the bridge (a Bow Position scale of 1.9) and damping 4 kHz more (0.4 s) each helped only a little. Damping from 2 kHz (0.15 s), with the bow at × 1.7, brought the misfit to 2.4 dB. That matches how a guitar top absorbs a string's upper harmonics:
+**Matching a recording.** The acoustic's tone was fitted to a recording of an acoustic guitar played with a bow ("Guitar_bow_playing_stereo" by leonseptavaux, Freesound 346484, CC BY). The recording is not shipped. It plays E3–G#4, the same register as the demo. The comparison is the long-term spectrum in octave bands. With the electric's string losses and bow position, the acoustic's spectrum was 12.1 dB (RMS, 250 Hz–8 kHz) off the recording, far too bright. Damping from 2 kHz (0.15 s), with the bow at × 1.7, brought the misfit to 2.2 dB. That matches how a guitar top absorbs a string's upper harmonics:
 
 | Octave band (Hz) | 250 | 500 | 1k | 2k | 4k | 8k |
 | --- | --- | --- | --- | --- | --- | --- |
 | Recording | 0 | −4.7 | −10.3 | −15.2 | −22.6 | −34.8 |
-| First model | −4.3 | −5.2 | 0 | −1.6 | −11.6 | −18.3 |
-| Final model | 0 | −4.2 | −8.8 | −15.8 | −22.6 | −29.2 |
+| First model | −1.4 | −4.9 | −0.2 | 0 | −7.6 | −16.9 |
+| Final model | 0 | −6.6 | −11.0 | −16.8 | −23.9 | −30.4 |
 
 At default settings the acoustic settles into Helmholtz motion 96% of the time, and 3 of 28 notes have a scratchy moment (`[.guitarscratch]`). The electric has 5 of 28.
 
