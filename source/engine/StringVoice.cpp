@@ -54,8 +54,37 @@ constexpr double staccatoBiteSeconds = 0.02; // ... decaying with this time cons
 constexpr double spiccatoContact = 0.06; // bow on the string per bounce, at full dynamics
 constexpr double tremoloRateHz = 13.0; // strokes per second
 constexpr double tremoloJitter = 0.12;
-constexpr double pluckBeta = 0.25; // plucked over the end of the fingerboard
-constexpr double pluckVelocity = 4.0; // m/s peak at full velocity
+
+// Pizzicato (docs/PIZZICATO.md). A fingertip grips the string over the end of
+// the fingerboard, draws it aside and lets go as the string rolls off it.
+// The finger stays the same distance from the bridge whatever note is
+// stopped, so the shorter the string, the nearer its middle the pluck lands.
+constexpr double scaleLength = 0.328; // m, open violin string
+constexpr double pluckDistance = 0.07; // m from the bridge
+constexpr double pluckDistanceSpread = 0.008; // m, from one pluck to the next at full Humanise
+constexpr double maxPluckBeta = 0.42;
+constexpr double pluckDrawSeconds = 0.0025; // the finger drawing the string aside
+constexpr double fingerHold = 0.9; // how firmly the fingertip holds the string
+constexpr double pluckDisplacement = 0.0017; // m, how far the string is drawn at full velocity
+constexpr double pluckReleaseSoft = 0.0002; // s, the string rolling off the fingertip: softest pluck ...
+constexpr double pluckReleaseHard = 0.00005; // ... and hardest
+// The string swings both sideways (horizontal) and towards the top plate
+// (vertical). The bridge rocks easily sideways, so the horizontal swing sounds
+// loud and gives its energy away fast; the vertical one rings on. Together
+// they give the fast, then slow decay of real plucked notes.
+constexpr double pluckAngle = 0.5; // rad from the top plate, a typical pluck
+constexpr double pluckAngleSpread = 0.2; // rad, from one pluck to the next at full Humanise
+constexpr double verticalGain = 0.9; // how strongly the vertical swing drives the bridge
+constexpr double verticalTuning = 1.0004; // it sees a stiffer bridge: 0.7 cents sharp
+// Decay, fitted to recordings (T60 at the fundamental and at 4 kHz). An open
+// string rings for seconds. A stopping fingertip takes a fixed share of the
+// energy each period (T60 = k / f0), so higher notes die sooner, and it damps
+// the horizontal swing most: the string can roll across the soft fingertip,
+// but is pressed vertically into the hard fingerboard.
+constexpr dsp::LossSpec openVerticalLoss { 6.0, 1.5, 4000.0 };
+constexpr dsp::LossSpec openHorizontalLoss { 3.5, 0.1, 4000.0 };
+constexpr double stoppedVerticalK = 700.0, stoppedVerticalHigh = 0.25;
+constexpr double stoppedHorizontalK = 120.0, stoppedHorizontalHigh = 0.08;
 
 double onePoleCoeff (double seconds, double rate)
 {
@@ -69,6 +98,7 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
     spec = &strings[static_cast<std::size_t> (stringIndex)];
     // Allow a semitone of bend below the open string.
     string.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
+    vertical.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
     player.prepare (fs, midiToHz (spec->openMidiNote - 1.5));
     bowedParams = string.getParams();
     bowedParams.friction.impedance = spec->impedance;
@@ -89,6 +119,8 @@ void StringVoice::prepare (double internalSampleRate, int stringIndex)
 void StringVoice::reset()
 {
     string.reset();
+    vertical.reset();
+    verticalActive = false;
     player.reset();
     damping = Damping::bowed;
     string.setParams (bowedParams);
@@ -143,7 +175,10 @@ void StringVoice::setDamping (Damping d)
             break;
         case Damping::plucked:
             p.tuning = dsp::Tuning::fundamental;
-            p.loss = { 1.0, 0.08, 4000.0 };
+            p.torsion.speedRatio = 0.0; // the fingertip rolls with the string
+            p.loss = pluckLoss;
+            vertical.setParams (p);
+            p.loss = pluckLossHorizontal;
             break;
         case Damping::shortRing:
             p.loss = { 0.4, 0.1, 4000.0 };
@@ -151,14 +186,34 @@ void StringVoice::setDamping (Damping d)
         case Damping::damped:
             p.tuning = dsp::Tuning::fundamental;
             p.loss = { 0.08, 0.03, 4000.0 };
+            vertical.setParams (p);
             break;
     }
     string.setParams (p);
+    if (d != Damping::plucked && d != Damping::damped && verticalActive)
+    {
+        // A plucked note's vertical swing dies away under the new stroke.
+        auto quiet = bowedParams;
+        quiet.tuning = dsp::Tuning::fundamental;
+        quiet.loss = { 0.08, 0.03, 4000.0 };
+        vertical.setParams (quiet);
+    }
 }
 
 void StringVoice::setArticulation (Articulation a)
 {
     noteArticulation = a;
+    if (a == Articulation::pizzicato)
+    {
+        const auto f0 = midiToHz (std::max (currentNote, spec->openMidiNote));
+        const auto stopped
+            = [f0] (double k, double high) { return dsp::LossSpec { std::clamp (k / f0, 0.3, 3.0), high, 4000.0 }; };
+        const bool open = currentNote == spec->openMidiNote;
+        pluckLoss = open ? openVerticalLoss : stopped (stoppedVerticalK, stoppedVerticalHigh);
+        pluckLossHorizontal = open ? openHorizontalLoss : stopped (stoppedHorizontalK, stoppedHorizontalHigh);
+        if (damping == Damping::plucked)
+            damping = Damping::bowed; // apply this note's loss
+    }
     setDamping (a == Articulation::pizzicato       ? Damping::plucked
                     : a == Articulation::harmonics ? Damping::harmonic
                     : a == Articulation::sulTasto  ? Damping::soft
@@ -172,8 +227,10 @@ bool StringVoice::drawsBow() const
 
 void StringVoice::start (int note, float velocity, Articulation a)
 {
-    setArticulation (a);
+    string.setFinger (0.0, 0.0);
+    vertical.setFinger (0.0, 0.0);
     setTarget (note, false);
+    setArticulation (a);
     dynamicsTarget = std::clamp (static_cast<double> (velocity), 0.0, 1.0);
     dynamics = dynamicsTarget;
     dynamicsCoeff = smoothingCoeff;
@@ -200,13 +257,7 @@ void StringVoice::start (int note, float velocity, Articulation a)
             break;
         case Articulation::pizzicato:
             stage = Stage::plucked;
-            pluckPosition = 0.0;
-            // A raised-cosine pulse a fraction of the period long (harder plucks are
-            // shorter and brighter); a pulse near the period would cancel itself.
-            pluckLength
-                = std::max (1.0, std::min (0.25 - 0.15 * dynamics, 0.0015 * midiToHz (note)) * fs / midiToHz (note));
-            pluckAmplitude = pluckVelocity * (0.2 + 0.8 * dynamics);
-            beta = pluckBeta;
+            pluckPosition = -1.0; // chosen on the first sample, with the Humanise setting
             break;
         case Articulation::legato:
         case Articulation::detache:
@@ -221,6 +272,8 @@ void StringVoice::start (int note, float velocity, Articulation a)
 void StringVoice::legato (int note, float velocity, Articulation a)
 {
     const bool sounding = isBowed() && stage != Stage::release;
+    string.setFinger (0.0, 0.0);
+    vertical.setFinger (0.0, 0.0);
     setArticulation (a);
     setTarget (note, sounding);
     dynamicsTarget = std::clamp (static_cast<double> (velocity), 0.0, 1.0);
@@ -241,6 +294,8 @@ void StringVoice::release()
     if (stage == Stage::plucked)
     {
         // The finger lifts off the string and damps it.
+        string.setFinger (0.0, 0.0);
+        vertical.setFinger (0.0, 0.0);
         setDamping (Damping::damped);
         stage = Stage::ringing;
         return;
@@ -261,6 +316,51 @@ void StringVoice::release()
         stage = Stage::release;
         envelopePosition = 0.0;
     }
+}
+
+void StringVoice::pluck (const VoiceSettings& settings)
+{
+    if (pluckPosition < 0.0)
+    {
+        // Where and how this pluck lands: no two are quite the same.
+        const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
+        const auto length = scaleLength * midiToHz (spec->openMidiNote) / f0Now;
+        const auto distance = pluckDistance + pluckDistanceSpread * humanise * nextNoise();
+        pluckBeta = std::clamp (distance / length, 0.05, maxPluckBeta);
+        beta = betaTarget = pluckBeta;
+        pluckAmplitude = pluckDisplacement * (0.15 + 0.85 * dynamics) * (1.0 + 0.1 * humanise * nextNoise());
+        pluckDraw = pluckDrawSeconds * fs;
+        pluckRelease = (pluckReleaseSoft + (pluckReleaseHard - pluckReleaseSoft) * dynamics)
+            * (1.0 + 0.2 * humanise * nextNoise()) * fs;
+        const auto angle = pluckAngle + pluckAngleSpread * humanise * nextNoise();
+        pluckHorizontal = std::cos (angle);
+        pluckVertical = std::sin (angle);
+        if (! verticalActive)
+            vertical.reset();
+        verticalActive = true;
+        verticalLevel = 1.0;
+        pluckPosition = 0.0;
+    }
+    if (pluckPosition > pluckDraw + pluckRelease + 1.0)
+        return; // the string is free
+
+    // The fingertip draws the string aside (a raised-cosine velocity, so the
+    // string barely sounds while it moves), then lets go.
+    const auto draw = pluckPosition / pluckDraw;
+    auto velocity = 0.0, hold = 0.0;
+    if (draw < 1.0)
+    {
+        velocity = pluckAmplitude / pluckDraw * fs * (1.0 - std::cos (2.0 * std::numbers::pi * draw));
+        hold = fingerHold;
+    }
+    else
+    {
+        const auto rolled = (pluckPosition - pluckDraw) / pluckRelease;
+        hold = rolled < 1.0 ? fingerHold * (0.5 + 0.5 * std::cos (std::numbers::pi * rolled)) : 0.0;
+    }
+    string.setFinger (velocity * pluckHorizontal, hold);
+    vertical.setFinger (velocity * pluckVertical, hold);
+    pluckPosition += 1.0;
 }
 
 double StringVoice::envelopeShape() const
@@ -340,13 +440,10 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         case Articulation::harmonics:
             betaTarget = 0.13;
             break;
-        case Articulation::pizzicato:
-            betaTarget = pluckBeta;
-            break;
         default:
             break;
     }
-    betaTarget = std::clamp (betaTarget, betaFloor, 0.3);
+    betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
     // (or CC1) across the string's clean window, unless the articulation
@@ -488,7 +585,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
 
     const auto& friction = string.getParams().friction;
-    double speed = 0.0, force = 0.0, excitation = 0.0;
+    double speed = 0.0, force = 0.0;
 
     const auto f0 = f0Now;
     f0Now *= f0Ratio;
@@ -497,12 +594,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
 
     strokeSeconds += dt;
 
-    if (stage == Stage::plucked && pluckPosition < pluckLength)
-    {
-        // Raised-cosine velocity pulse at the plucking point.
-        excitation = pluckAmplitude * 0.5 * (1.0 - std::cos (2.0 * std::numbers::pi * pluckPosition / pluckLength));
-        pluckPosition += 1.0;
-    }
+    if (stage == Stage::plucked)
+        pluck (settings);
 
     if (isBowed())
     {
@@ -590,11 +683,18 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         force = forceGain * fMax * fraction;
     }
 
-    const auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0,
-                                   b,
-                                   context.direction * speed,
-                                   force,
-                                   excitation);
+    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0, b, context.direction * speed, force);
+    if (verticalActive)
+    {
+        const auto v = verticalGain * vertical.process (f0 * verticalTuning, b, 0.0, 0.0);
+        y += v;
+        verticalLevel = std::max (std::abs (v), verticalLevel * peakDecay);
+        if (damping != Damping::plucked && verticalLevel < silenceThreshold)
+        {
+            vertical.reset();
+            verticalActive = false;
+        }
+    }
     if (isBowed())
         player.listen (y, string.slipStarted());
     lastSpeed = std::abs (speed);
@@ -608,6 +708,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         {
             // Finger lifted: the string becomes an undamped open string again.
             string.reset();
+            vertical.reset();
+            verticalActive = false;
             player.reset();
             setDamping (Damping::bowed);
             noteArticulation = Articulation::legato;

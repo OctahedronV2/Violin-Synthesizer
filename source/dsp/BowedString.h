@@ -54,6 +54,17 @@ public:
     // injected at the bow point (m/s). Returns the transverse bridge force (N).
     double process (double f0, double beta, double vBow, double force, double excitation = 0.0);
 
+    // A finger holding the string at the bow point (pizzicato). The string
+    // there takes `hold` (0..1) of the way from its free velocity to the
+    // finger's: a fingertip pressed on the string holds it almost rigidly and
+    // lets go as it rolls off (docs/PIZZICATO.md). hold = R / (R + 2Z) for a
+    // fingertip of mechanical resistance R. 0 lets go.
+    void setFinger (double velocity, double hold)
+    {
+        fingerVelocity = velocity;
+        fingerHold = hold;
+    }
+
     double stringVelocity() const { return lastVelocity; }
     bool isSticking() const { return sticking; }
     // Samples between the last two slip onsets (the string letting go of the
@@ -91,6 +102,7 @@ private:
     double lastVelocity = 0.0;
     bool slipOnset = false;
     double sinceSlip = 0.0, lastSlipInterval = 0.0;
+    double fingerVelocity = 0.0, fingerHold = 0.0;
     double torsionReflection = -1.0, contactImpedance = 0.0, transverseShare = 1.0;
 };
 } // namespace violinsynth::dsp

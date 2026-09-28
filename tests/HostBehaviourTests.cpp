@@ -152,9 +152,11 @@ TEST_CASE ("Reported latency matches the delay through the engine", "[host]")
 {
     // A plucked note starts sharply. Once the reported latency is taken off,
     // it must start at the same moment at every sample rate, so a host's delay
-    // compensation lines it up with other tracks. The measured bodies start
-    // about 1 ms later than the modal ones: that is the leading part of the
-    // impulse responses, the same at every rate, not processing latency.
+    // compensation lines it up with other tracks. The pluck lands when the
+    // finger lets go of the string, 2.5 ms after the note starts
+    // (docs/PIZZICATO.md). The measured bodies start about 1 ms later than the
+    // modal ones: that is the leading part of the impulse responses, the same
+    // at every rate, not processing latency.
     juce::ScopedJuceInitialiser_GUI juce;
 
     for (const auto modal : { true, false })
@@ -176,7 +178,7 @@ TEST_CASE ("Reported latency matches the delay through the engine", "[host]")
             UNSCOPED_INFO ("rate " << rate << (modal ? " modal" : " convolution") << ": latency " << latency
                                    << " samples, onset " << onset * 1000.0 << " ms");
             REQUIRE (onset >= 0.0);
-            CHECK (onset < 0.002);
+            CHECK (onset < 0.0035);
             onsets.push_back (onset);
         }
 

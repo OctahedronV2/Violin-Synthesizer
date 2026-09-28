@@ -25,6 +25,9 @@ python scripts/fetch_cnsm.py --recordings          # CNSM dataset, CC BY 4.0 (65
 python scripts/radiation_from_cnsm.py              # radiation balance from 84 min of recordings (~6 min)
 python scripts/render_measured_bodies.py           # renders through the measured bodies
 python scripts/estimate_body_from_recordings.py <files> --name <name>   # any other recordings
+
+# Pizzicato against recordings (docs/PIZZICATO.md)
+python scripts/measure_pizzicato.py [<render folder>]   # Iowa pizzicato runs, 105 MB download
 ```
 
 Third-party data and attribution: [data/SOURCES.md](data/SOURCES.md).

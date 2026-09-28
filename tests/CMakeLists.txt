@@ -12,7 +12,8 @@ set(VIOLINSYNTH_TEST_SOURCES
     KeyboardInputTests.cpp
     SoundCheckTests.cpp
     StringAllocatorTests.cpp
-    StringDspTests.cpp)
+    StringDspTests.cpp
+    PizzicatoTests.cpp)
 
 add_executable(ViolinSynthTests ${VIOLINSYNTH_TEST_SOURCES})
 

@@ -42,6 +42,7 @@ void BowedString::reset()
     lastF0 = -1.0;
     sticking = false;
     lastVelocity = 0.0;
+    fingerVelocity = fingerHold = 0.0;
     slipOnset = false;
     sinceSlip = lastSlipInterval = 0.0;
 }
@@ -132,7 +133,9 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
     }
     const auto vtH = tFromBridge + tFromNut;
 
-    const auto result = solveJunction (vBow, vH + vtH, force, friction, sticking);
+    auto result = solveJunction (vBow, vH + vtH, force, friction, sticking);
+    if (fingerHold > 0.0)
+        result.velocity += fingerHold * (fingerVelocity - result.velocity);
     sinceSlip += 1.0;
     slipOnset = sticking && ! result.sticking;
     if (slipOnset)
