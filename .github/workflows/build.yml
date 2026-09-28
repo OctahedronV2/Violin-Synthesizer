@@ -1,21 +1,40 @@
 name: Build
 
-# The repository is public, so GitHub-hosted runners are free: every push
-# builds and tests Linux, macOS and Windows. Each push runs once (branch
-# pushes also report on their PRs); pull requests from forks, which have no
-# push run here, run via pull_request. A newer push to a branch cancels its
-# older run, and Markdown-only changes skip CI.
+# What runs when (docs/CI.md has the full picture):
+# - Pull requests and pushes to main build and test on Windows only, the
+#   platform the plugin is tried on. Linux and macOS builds run when started by
+#   hand (Actions > Build > Run workflow), for version tags, and on pull
+#   requests with the "all-platforms" label.
+# - Each job runs only when files it covers changed (the "changes" job), so a
+#   research-only change skips the C++ builds and a C++ change skips pytest.
+# - Compiles go through sccache, stored in the GitHub Actions cache, so JUCE
+#   and unchanged sources are not rebuilt on every run.
+# A newer push to a pull request cancels its older run, and Markdown-only
+# changes skip CI.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
     paths-ignore: ["**.md"]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths-ignore: ["**.md"]
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to build
+        type: choice
+        options: [all, windows]
+        default: all
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Adding a label starts a run of its own; keep it from cancelling the run
+  # for the latest push.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && format('-label-{0}', github.event.label.name) || '' }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
@@ -25,10 +44,118 @@ env:
   VST3_SDK_TAG: v3.8.1_build_84
   ARTEFACTS: build/ViolinSynth_artefacts/Release
   PRODUCT_NAME: Violin Synthesizer
+  # The label that adds Linux and macOS to a pull request's builds.
+  ALL_PLATFORMS_LABEL: all-platforms
+  SCCACHE_GHA_ENABLED: "true"
 
 jobs:
+  changes:
+    name: Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      cpp: ${{ steps.plan.outputs.cpp }}
+      bench: ${{ steps.plan.outputs.bench }}
+      research: ${{ steps.plan.outputs.research }}
+      format: ${{ steps.plan.outputs.format }}
+      platforms: ${{ steps.plan.outputs.platforms }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Which areas a job covers. The workflow file is in every list, so a CI
+      # change re-runs everything.
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cpp:
+              - .github/workflows/build.yml
+              - CMakeLists.txt
+              - cmake/**
+              - source/**
+              - tests/**
+              - resources/**
+              - third_party/**
+            bench:
+              - .github/workflows/build.yml
+              - CMakeLists.txt
+              - cmake/**
+              - source/**
+              - tests/CMakeLists.txt
+              - tests/bench/**
+              - resources/**
+              - third_party/**
+              - docs/benchmarks/**
+            research:
+              - .github/workflows/build.yml
+              - research/**
+            format:
+              - .github/workflows/build.yml
+              - .clang-format
+              - "**/*.h"
+              - "**/*.cpp"
+
+      - name: Decide what runs
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          REF: ${{ github.ref }}
+          ADDED_LABEL: ${{ github.event.label.name }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          DISPATCH_PLATFORMS: ${{ inputs.platforms }}
+          CPP: ${{ steps.filter.outputs.cpp }}
+          BENCH: ${{ steps.filter.outputs.bench }}
+          RESEARCH: ${{ steps.filter.outputs.research }}
+          FORMAT: ${{ steps.filter.outputs.format }}
+        run: |
+          all_platforms=false
+          case "$EVENT" in
+            workflow_dispatch)
+              # A run started by hand checks everything.
+              CPP=true BENCH=true RESEARCH=true FORMAT=true
+              [ "$DISPATCH_PLATFORMS" = all ] && all_platforms=true
+              ;;
+            push)
+              if [[ "$REF" == refs/tags/* ]]; then
+                CPP=true BENCH=true RESEARCH=true FORMAT=true all_platforms=true
+              fi
+              ;;
+            pull_request)
+              if echo "$PR_LABELS" | grep -q "\"$ALL_PLATFORMS_LABEL\""; then
+                all_platforms=true
+              fi
+              if [ "$ACTION" = labeled ]; then
+                if [ "$ADDED_LABEL" = "$ALL_PLATFORMS_LABEL" ]; then
+                  # The push before the label already checked Windows and the
+                  # Linux-only jobs; this run adds the other platforms.
+                  BENCH=false RESEARCH=false FORMAT=false
+                else
+                  CPP=false BENCH=false RESEARCH=false FORMAT=false all_platforms=false
+                fi
+              fi
+              ;;
+          esac
+
+          platforms='{"name":"Windows","os":"windows-2022"}'
+          if [ "$all_platforms" = true ]; then
+            platforms+=',{"name":"Linux","os":"ubuntu-24.04"},{"name":"macOS","os":"macos-15"}'
+            if [ "$ACTION" = labeled ]; then
+              platforms='{"name":"Linux","os":"ubuntu-24.04"},{"name":"macOS","os":"macos-15"}'
+            fi
+          fi
+          [ "$CPP" = true ] || platforms=''
+
+          {
+            echo "cpp=$CPP"
+            echo "bench=$BENCH"
+            echo "research=$RESEARCH"
+            echo "format=$FORMAT"
+            echo "platforms=[$platforms]"
+          } | tee -a "$GITHUB_OUTPUT"
+
   format:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.format == 'true'
     name: clang-format
     runs-on: ubuntu-24.04
     steps:
@@ -39,7 +166,8 @@ jobs:
           git ls-files '*.h' '*.cpp' | xargs clang-format-18 --dry-run --Werror
 
   research:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.research == 'true'
     name: Research model tests
     runs-on: ubuntu-24.04
     defaults:
@@ -58,12 +186,14 @@ jobs:
         run: python -m pytest -q
 
   rtsan:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' && github.event.action != 'labeled'
     name: RealtimeSanitizer
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+      - uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install Clang 20 and dependencies
         run: |
@@ -80,6 +210,7 @@ jobs:
         run: |
           cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20 \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DVIOLINSYNTH_ENABLE_RTSAN=ON
 
       - name: Build tests
@@ -90,21 +221,64 @@ jobs:
       - name: Tests under RealtimeSanitizer
         run: "$BUILD_DIR/tests/ViolinSynthTests"
 
+      - name: Compile cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  # docs/PHASE7.md, step 7.0. Instruction counts are stable on shared runners
+  # where timings are not, so this is the CPU regression check. It builds only
+  # the benchmark, and only when code it measures (or the baseline) changed.
+  callgrind:
+    needs: changes
+    if: needs.changes.outputs.bench == 'true'
+    name: Benchmark (instruction counts)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build valgrind \
+            libasound2-dev libjack-jackd2-dev ladspa-sdk \
+            libfontconfig1-dev libfreetype-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev libxi-dev \
+            libglu1-mesa-dev mesa-common-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Build the benchmark
+        run: cmake --build "$BUILD_DIR" --target ViolinSynthBench --parallel 4
+
+      - name: Instruction counts against the baseline
+        run: |
+          mkdir -p callgrind
+          valgrind --tool=callgrind --instr-atstart=no --callgrind-out-file=callgrind/callgrind.out.%p \
+            "$BUILD_DIR/tests/ViolinSynthBench" --ci --seconds 1 --json callgrind/bench.json > callgrind/run.log 2>&1 \
+            || { cat callgrind/run.log; exit 1; }
+          python3 tests/bench/instructions.py callgrind
+
+      - name: Compile cache statistics
+        if: always()
+        run: sccache --show-stats
+
   build:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.platforms != '[]'
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Linux
-            os: ubuntu-24.04
-          - name: macOS
-            os: macos-15
-          - name: Windows
-            os: windows-2022
+        include: ${{ fromJSON(needs.changes.outputs.platforms) }}
 
     defaults:
       run:
@@ -112,13 +286,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      # Ninja instead of the Visual Studio generator, so sccache can cache
+      # MSVC's compiles and all four cores stay busy.
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            ninja-build xvfb valgrind \
+            ninja-build xvfb \
             libasound2-dev libjack-jackd2-dev ladspa-sdk \
             libfontconfig1-dev libfreetype-dev \
             libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
@@ -129,36 +312,43 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install ninja || true
 
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: ninja --version || choco install ninja --no-progress -y
+
       - name: Configure
         run: |
+          args=(-G Ninja -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
           case "$RUNNER_OS" in
-            Linux)   args=(-G Ninja) ;;
-            macOS)   args=(-G Ninja "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64") ;;
-            Windows) args=(-A x64) ;;
+            macOS)   args+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64") ;;
+            Windows) args+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl) ;;
           esac
           cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE="$BUILD_TYPE" "${args[@]}"
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel 4
 
+      # Where the build time went, to guide further CI tuning.
+      - name: Slowest build steps
+        run: |
+          py=python3; [ "$RUNNER_OS" = Windows ] && py=python
+          "$py" - "$BUILD_DIR/.ninja_log" <<'EOF'
+          import sys
+          rows = [l.split("\t") for l in open(sys.argv[1]) if not l.startswith("#")]
+          rows = sorted(((int(r[1]) - int(r[0])) / 1000, r[3]) for r in rows if len(r) >= 4)[-12:]
+          for secs, path in reversed(rows):
+              print(f"{secs:7.1f}s  {path}")
+          EOF
+
       - name: Unit tests
         run: ctest --test-dir "$BUILD_DIR" --build-config "$BUILD_TYPE" --output-on-failure
 
-      # docs/PHASE7.md, step 7.0. Timings on shared runners are only a rough
-      # guide, so this step never fails; the Callgrind step below is the check.
+      # Timings on shared runners are only a rough guide, so this step never
+      # fails; the Callgrind job is the check.
       - name: Benchmarks (timings, for information)
         run: |
           bench=$(find "$BUILD_DIR/tests" -name 'ViolinSynthBench' -o -name 'ViolinSynthBench.exe' | head -n 1)
           "$bench" --ci --seconds 2
-
-      - name: Benchmarks (instruction counts against the baseline)
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p callgrind
-          valgrind --tool=callgrind --instr-atstart=no --callgrind-out-file=callgrind/callgrind.out.%p \
-            "$BUILD_DIR/tests/ViolinSynthBench" --ci --seconds 1 --json callgrind/bench.json > callgrind/run.log 2>&1 \
-            || { cat callgrind/run.log; exit 1; }
-          python3 tests/bench/instructions.py callgrind
 
       - name: Ad-hoc sign macOS bundles
         if: runner.os == 'macOS'
@@ -187,21 +377,35 @@ jobs:
           $runner "$exe" --strictness-level 10 --validate-in-process \
             --validate "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3"
 
-      - name: Steinberg VST3 validator (extensive)
+      # The validator only changes with the SDK tag, so it is built once per
+      # platform and kept in the Actions cache.
+      - name: Restore the Steinberg VST3 validator
+        id: validator-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/vst3-validator
+          key: vst3-validator-${{ runner.os }}-${{ env.VST3_SDK_TAG }}
+
+      - name: Build the Steinberg VST3 validator
+        if: steps.validator-cache.outputs.cache-hit != 'true'
         run: |
-          # Only the SDK parts the validator needs; it builds in under a minute.
+          # Only the SDK parts the validator needs.
           git clone -q --depth 1 --branch "$VST3_SDK_TAG" https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
           git -C "$RUNNER_TEMP/vst3sdk" submodule update -q --init --depth 1 base pluginterfaces public.sdk cmake
 
-          case "$RUNNER_OS" in
-            Windows) args=(-A x64) ;;
-            *)       args=(-G Ninja -DCMAKE_BUILD_TYPE=Release) ;;
-          esac
+          args=(-G Ninja -DCMAKE_BUILD_TYPE=Release)
+          if [ "$RUNNER_OS" = Windows ]; then args+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl); fi
           cmake -S "$RUNNER_TEMP/vst3sdk" -B "$RUNNER_TEMP/vst3sdk-build" "${args[@]}" \
             -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF \
             -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_RUN_VST_VALIDATOR=OFF > /dev/null
           cmake --build "$RUNNER_TEMP/vst3sdk-build" --config Release --target validator --parallel 4 > /dev/null
           validator=$(find "$RUNNER_TEMP/vst3sdk-build/bin" -type f \( -name validator -o -name validator.exe \) | head -n 1)
+          mkdir -p ~/vst3-validator
+          cp "$validator" ~/vst3-validator/
+
+      - name: Steinberg VST3 validator (extensive)
+        run: |
+          validator=$(find ~/vst3-validator -type f \( -name validator -o -name validator.exe \) | head -n 1)
 
           runner=""
           if [ "$RUNNER_OS" = "Linux" ]; then runner="xvfb-run -a"; fi
@@ -238,7 +442,7 @@ jobs:
               (cd VST3 && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynth-VST3-$suffix.zip" "$PRODUCT_NAME.vst3")
               (cd Standalone && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynth-Standalone-$suffix.zip" "$PRODUCT_NAME.exe")
               # The benchmark, to run on the reference PC (docs/PHASE7.md, step 7.0).
-              (cd "$GITHUB_WORKSPACE/$BUILD_DIR/tests/$BUILD_TYPE" && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynthBench-$suffix.zip" ViolinSynthBench.exe)
+              (cd "$GITHUB_WORKSPACE/$BUILD_DIR/tests" && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynthBench-$suffix.zip" ViolinSynthBench.exe)
               ;;
           esac
           ls -la "$GITHUB_WORKSPACE/dist"
@@ -249,3 +453,7 @@ jobs:
           name: ViolinSynth-${{ matrix.name }}
           path: dist/*.zip
           if-no-files-found: error
+
+      - name: Compile cache statistics
+        if: always()
+        run: sccache --show-stats
