@@ -16,10 +16,10 @@ using engine::Instrument;
 
 namespace
 {
-engine::EngineSettings guitarSettings()
+engine::EngineSettings guitarSettings (Instrument instrument = Instrument::bowedGuitar)
 {
     auto s = plainSettings();
-    s.performance.instrument = Instrument::bowedGuitar;
+    s.performance.instrument = instrument;
     s.performance.drone = 0.0;
     s.drive = 0.0;
     return s;
@@ -54,38 +54,69 @@ double measuredPitch (const std::vector<double>& x, double from, double to, doub
 
 } // namespace
 
-TEST_CASE ("Every string of the bowed guitar plays in tune", "[guitar]")
+TEST_CASE ("Every string of the bowed guitars plays in tune", "[guitar]")
 {
-    engine::ViolinEngine e;
-    e.setSettings (guitarSettings());
-    e.prepare (fs, block);
-
-    // Open strings, and a fretted note on each.
-    for (const auto note : { 40, 45, 50, 55, 59, 64, 47, 57, 69, 76 })
+    for (const auto instrument : { Instrument::bowedGuitar, Instrument::bowedAcousticGuitar })
     {
-        e.reset();
-        const auto out = run (e, 1.6, { { 0.0, on (note, 1, 0.7f) }, { 1.5, off (note) } });
-        const auto expected = engine::midiToHz (note);
-        const auto cents = 1200.0 * std::log2 (measuredPitch (out, 0.6, 1.4, expected) / expected);
-        INFO ("note " << note << ": " << cents << " cents");
-        CHECK (std::abs (cents) < 6.0);
-        CHECK (rms (out, 0.6, 1.4) > 0.01);
+        engine::ViolinEngine e;
+        e.setSettings (guitarSettings (instrument));
+        e.prepare (fs, block);
+
+        // Open strings, and a fretted note on each.
+        for (const auto note : { 40, 45, 50, 55, 59, 64, 47, 57, 69, 76 })
+        {
+            e.reset();
+            const auto out = run (e, 1.6, { { 0.0, on (note, 1, 0.7f) }, { 1.5, off (note) } });
+            const auto expected = engine::midiToHz (note);
+            const auto cents = 1200.0 * std::log2 (measuredPitch (out, 0.6, 1.4, expected) / expected);
+            INFO (engine::instrumentNames[static_cast<std::size_t> (instrument)] << ", note " << note << ": " << cents
+                                                                                 << " cents");
+            CHECK (std::abs (cents) < 6.0);
+            CHECK (rms (out, 0.6, 1.4) > 0.01);
+        }
     }
 }
 
-TEST_CASE ("The bowed guitar's range runs from its low E to the 22nd fret", "[guitar]")
+TEST_CASE ("The bowed guitars' range runs from the low E to the top fret", "[guitar]")
 {
-    engine::ViolinEngine e;
-    e.setSettings (guitarSettings());
-    e.prepare (fs, block);
-
-    // 39 (below the low E) and 87 are silent; the violin could not play 40 at all.
-    for (const auto& [note, sounds] : { std::pair { 39, false }, { 40, true }, { 86, true }, { 87, false } })
+    // The electric has 22 frets, the acoustic 20. Below the low E is silent;
+    // the violin could not play 40 at all.
+    for (const auto& [instrument, top] :
+         { std::pair { Instrument::bowedGuitar, 86 }, std::pair { Instrument::bowedAcousticGuitar, 84 } })
     {
-        e.reset();
-        const auto out = run (e, 0.6, { { 0.0, on (note, 1, 0.7f) } });
-        INFO ("note " << note);
-        CHECK ((rms (out, 0.3, 0.6) > 1.0e-3) == sounds);
+        engine::ViolinEngine e;
+        e.setSettings (guitarSettings (instrument));
+        e.prepare (fs, block);
+
+        for (const auto& [note, sounds] : { std::pair { 39, false }, { 40, true }, { top, true }, { top + 1, false } })
+        {
+            e.reset();
+            const auto out = run (e, 0.6, { { 0.0, on (note, 1, 0.7f) } });
+            INFO (engine::instrumentNames[static_cast<std::size_t> (instrument)] << ", note " << note);
+            CHECK ((rms (out, 0.3, 0.6) > 1.0e-3) == sounds);
+        }
+    }
+}
+
+TEST_CASE ("The bowed acoustic guitar sounds through its body, not the amp", "[guitar]")
+{
+    // Pickup and Drive belong to the electric: they leave the acoustic untouched.
+    std::vector<double> reference;
+    for (const auto& [pickup, drive] : { std::pair { engine::Pickup::neck, 0.0 }, { engine::Pickup::bridge, 1.0 } })
+    {
+        auto s = guitarSettings (Instrument::bowedAcousticGuitar);
+        s.performance.pickup = pickup;
+        s.drive = drive;
+        engine::ViolinEngine e;
+        e.setSettings (s);
+        e.prepare (fs, block);
+        CHECK (e.getViolin().numStrings() == 6);
+        const auto out = run (e, 0.8, { { 0.0, on (52, 1, 0.7f) } });
+        CHECK (rms (out, 0.4, 0.8) > 1.0e-3);
+        if (reference.empty())
+            reference = out;
+        else
+            CHECK (out == reference);
     }
 }
 
@@ -392,7 +423,7 @@ void measureNote (engine::EngineSettings s, int note, float velocity, NoteStats&
 // pressures, with the violin for comparison (docs/BOWED_GUITAR.md).
 TEST_CASE ("Print how cleanly the bowed guitar speaks", "[.guitarscratch]")
 {
-    for (const auto instrument : { Instrument::violin, Instrument::bowedGuitar })
+    for (const auto instrument : { Instrument::violin, Instrument::bowedGuitar, Instrument::bowedAcousticGuitar })
         for (const auto pressure : { 0.2, 0.5, 0.8 })
         {
             NoteStats stats;
@@ -406,8 +437,8 @@ TEST_CASE ("Print how cleanly the bowed guitar speaks", "[.guitarscratch]")
                     s.performance.voice.bowPressure = pressure;
                     measureNote (s, note, velocity, stats);
                 }
-            const auto label = juce::String (instrument == Instrument::violin ? "violin" : "guitar") + ", pressure "
-                + juce::String (pressure, 1);
+            const auto label = juce::String (engine::instrumentNames[static_cast<std::size_t> (instrument)])
+                + ", pressure " + juce::String (pressure, 1);
             stats.print (label.toRawUTF8());
         }
 }
@@ -417,22 +448,25 @@ TEST_CASE ("Print how cleanly the bowed guitar speaks", "[.guitarscratch]")
 // its window in StringData.h was set from.
 TEST_CASE ("Print each bowed guitar string across its force window", "[.guitarstrings]")
 {
-    for (int string = 0; string < engine::bowedGuitarSpec.numStrings; ++string)
-        for (const auto pressure : { 0.0, 0.25, 0.5, 0.75, 1.0 })
-        {
-            const auto& spec = engine::bowedGuitarSpec.string (string);
-            NoteStats stats;
-            for (const auto fret : { 0, 3, 5, 7, 10 })
-                for (const auto velocity : { 0.5f, 0.8f })
-                {
-                    auto s = guitarSettings();
-                    s.performance.voice.bowPressure = pressure;
-                    measureNote (s, spec.openMidiNote + fret, velocity, stats);
-                }
-            const auto fraction = spec.forceWindowLow + (spec.playerWindowHigh - spec.forceWindowLow) * pressure;
-            const auto label = juce::String (spec.name) + " string, force " + juce::String (fraction, 2) + " F_max";
-            stats.print (label.toRawUTF8());
-        }
+    for (const auto instrument : { Instrument::bowedGuitar, Instrument::bowedAcousticGuitar })
+        for (int string = 0; string < engine::instrumentSpec (instrument).numStrings; ++string)
+            for (const auto pressure : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+            {
+                const auto& spec = engine::instrumentSpec (instrument).string (string);
+                NoteStats stats;
+                for (const auto fret : { 0, 3, 5, 7, 10 })
+                    for (const auto velocity : { 0.5f, 0.8f })
+                    {
+                        auto s = guitarSettings();
+                        s.performance.instrument = instrument;
+                        s.performance.voice.bowPressure = pressure;
+                        measureNote (s, spec.openMidiNote + fret, velocity, stats);
+                    }
+                const auto fraction = spec.forceWindowLow + (spec.playerWindowHigh - spec.forceWindowLow) * pressure;
+                const auto label = juce::String (engine::instrumentNames[static_cast<std::size_t> (instrument)]) + ", "
+                    + spec.name + " string, force " + juce::String (fraction, 2) + " F_max";
+                stats.print (label.toRawUTF8());
+            }
 }
 
 // Diagnostics, not run by default: `ViolinSynthTests "[.guitardrones]"` prints

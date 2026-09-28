@@ -4,7 +4,7 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phases 0–6 implemented.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. It comes with 30 level-matched factory presets and a resizable editor. It also plays a **bowed electric guitar**, as Jimmy Page did: six steel strings under a flat bridge, humbucking pickups and a valve amp ([docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md)). See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md), [docs/PHASE5.md](docs/PHASE5.md) and [docs/PHASE6.md](docs/PHASE6.md).
+> **Status: Phases 0–6 implemented.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. It comes with 32 level-matched factory presets and a resizable editor. It also plays two bowed guitars ([docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md)). The **electric**, as Jimmy Page played it, has six steel strings under a flat bridge, humbucking pickups and a valve amp. The **acoustic**, as Ramin Djawadi played it, sounds through a measured guitar body. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md), [docs/PHASE5.md](docs/PHASE5.md) and [docs/PHASE6.md](docs/PHASE6.md).
 
 ![The editor](docs/editor.png)
 
@@ -68,7 +68,7 @@ Things to try:
 - **MPE controllers:** turn on **Play → MPE** for per-note bend, pressure (vibrato) and slide (bow position).
 - **Articulations:** pick one under **Articulation**, or use keyswitches. MIDI notes 24–33 (C2–A2 in FL Studio's note names) select legato, détaché, staccato, spiccato, tremolo, pizzicato, harmonics, sul ponticello, sul tasto and con sordino. Drag [docs/demo/articulations.mid](docs/demo/articulations.mid) onto the plugin's track to hear them all. Details are in [docs/PHASE5.md](docs/PHASE5.md).
 - **Change the violin:** under **Body & Output → Body**, choose one of four measured instruments. **Quality → Light** uses less CPU.
-- **Play a bowed guitar:** set **Instrument** to **Bowed guitar**, or load a preset from the **Bowed Guitar** category. **Pickup**, **Drive** and **Drone** (how firmly the flat bow catches the neighbouring strings) replace the body controls. See [docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md).
+- **Play a bowed guitar:** set **Instrument** to **Electric guitar** or **Acoustic guitar**, or load a preset from the **Bowed Guitar** category. On the electric, **Pickup**, **Drive** and **Drone** replace the body controls. Drone sets how firmly the flat bow catches the neighbouring strings. The acoustic keeps only **Drone**. See [docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md).
 - **Shape the sound:**
   - Drag the **bow pad**: left/right moves the bow between the bridge (bright, glassy) and the fingerboard (soft), and up/down changes its pressure on the string.
   - **Mute** adds a practice-style sordino.

@@ -100,7 +100,8 @@ public:
                       &addKnob (id::velocityRange, "Vel Range"),
                       &addKnob (id::mpeBendRange, "MPE Bend") };
 
-        // Instrument, body (violin) or pickup and amp (bowed guitar), and output
+        // Instrument, body (violin), pickup and amp (electric guitar) or drones
+        // (acoustic guitar), and output
         auto& instrumentChoice = addChoice (id::instrument, "Instrument");
         auto& mute = addKnob (id::sordino, "Mute");
         auto& width = addKnob (id::width, "Width");
@@ -109,7 +110,10 @@ public:
         violinChoices = { &instrumentChoice, &addChoice (id::body, "Body"), &addChoice (id::bodyQuality, "Quality") };
         violinKnobs = { &mute, &width, &room, &gain };
         guitarChoices = { &instrumentChoice, &addChoice (id::pickup, "Pickup") };
-        guitarKnobs = { &addKnob (id::drive, "Drive"), &addKnob (id::drone, "Drone"), &width, &room, &gain };
+        auto& drone = addKnob (id::drone, "Drone");
+        guitarKnobs = { &addKnob (id::drive, "Drive"), &drone, &width, &room, &gain };
+        acousticChoices = { &instrumentChoice };
+        acousticKnobs = { &drone, &width, &room, &gain };
 
         credits.setFont (juce::FontOptions { 11.0f });
         credits.setJustificationType (juce::Justification::centredRight);
@@ -141,10 +145,12 @@ public:
         g.drawText ("Octavio", header.removeFromTop (28), juce::Justification::centredLeft);
         g.setColour (colours::dimText);
         g.setFont (juce::FontOptions { 12.5f });
-        g.drawText (juce::String ("v" JucePlugin_VersionString "  |  physically modelled ")
-                        + (shownInstrument == engine::Instrument::bowedGuitar ? "bowed guitar" : "violin"),
-                    header,
-                    juce::Justification::centredLeft);
+        g.drawText (
+            juce::String ("v" JucePlugin_VersionString "  |  physically modelled ")
+                + (engine::isGuitar (shownInstrument) ? "bowed " : "")
+                + juce::String (engine::instrumentNames[static_cast<std::size_t> (shownInstrument)]).toLowerCase(),
+            header,
+            juce::Justification::centredLeft);
 
         for (const auto& [title, bounds] : panels)
         {
@@ -227,8 +233,9 @@ public:
             bottom.removeFromLeft (gap);
             auto play = addPanel ("Play", bottom.removeFromLeft ((bottom.getWidth() - gap) / 2));
             bottom.removeFromLeft (gap);
-            const bool guitar = shownInstrument == engine::Instrument::bowedGuitar;
-            auto body = addPanel (guitar ? "Amp & Output" : "Body & Output", bottom);
+            const bool electric = shownInstrument == engine::Instrument::bowedGuitar;
+            const bool acoustic = shownInstrument == engine::Instrument::bowedAcousticGuitar;
+            auto body = addPanel (electric ? "Amp & Output" : acoustic ? "Bow & Output" : "Body & Output", bottom);
 
             const auto rowHeight = (pitch.getHeight() - rowGap) / 2;
             layoutKnobRow ({ pitchKnobs.begin(), pitchKnobs.begin() + 3 }, pitch.removeFromTop (rowHeight));
@@ -236,30 +243,31 @@ public:
 
             layoutOptionsAndKnobs (playChoices, playToggles, playKnobs, play);
             // Only the current instrument's controls show.
-            for (auto* c : guitar ? violinChoices : guitarChoices)
-            {
-                c->label.setVisible (false);
-                c->box.setVisible (false);
-            }
-            for (auto* k : guitar ? violinKnobs : guitarKnobs)
-            {
-                k->label.setVisible (false);
-                k->slider.setVisible (false);
-            }
-            for (auto* c : guitar ? guitarChoices : violinChoices)
+            const auto& shownChoices = electric ? guitarChoices : acoustic ? acousticChoices : violinChoices;
+            const auto& shownKnobs = electric ? guitarKnobs : acoustic ? acousticKnobs : violinKnobs;
+            for (const auto* set : { &violinChoices, &guitarChoices, &acousticChoices })
+                for (auto* c : *set)
+                {
+                    c->label.setVisible (false);
+                    c->box.setVisible (false);
+                }
+            for (const auto* set : { &violinKnobs, &guitarKnobs, &acousticKnobs })
+                for (auto* k : *set)
+                {
+                    k->label.setVisible (false);
+                    k->slider.setVisible (false);
+                }
+            for (auto* c : shownChoices)
             {
                 c->label.setVisible (true);
                 c->box.setVisible (true);
             }
-            for (auto* k : guitar ? guitarKnobs : violinKnobs)
+            for (auto* k : shownKnobs)
             {
                 k->label.setVisible (true);
                 k->slider.setVisible (true);
             }
-            layoutOptionsAndKnobs (guitar ? guitarChoices : violinChoices,
-                                   {},
-                                   guitar ? guitarKnobs : violinKnobs,
-                                   body);
+            layoutOptionsAndKnobs (shownChoices, {}, shownKnobs, body);
         }
     }
 
@@ -478,8 +486,10 @@ private:
         keyboard.setAvailableRange (spec.lowestNote, spec.highestNote);
         keyboard.setLowestVisibleKey (spec.lowestNote);
         credits.setText (instrument == engine::Instrument::bowedGuitar
-                             ? "Bowed guitar: six modelled steel strings, humbucking pickups, valve amplifier and 4x12 "
-                               "cabinet"
+                             ? "Bowed electric guitar: six modelled steel strings, humbucking pickups, valve amplifier "
+                               "and 4x12 cabinet"
+                             : instrument == engine::Instrument::bowedAcousticGuitar
+                             ? "Bowed acoustic guitar: measured guitar body by pe_mace on Freesound (CC0)"
                              : "Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and "
                                "University of Iowa Musical Instrument Samples",
                          juce::dontSendNotification);
@@ -516,8 +526,8 @@ private:
     std::vector<std::unique_ptr<Knob>> knobs;
     std::vector<std::unique_ptr<Choice>> choices;
     std::vector<std::unique_ptr<Toggle>> toggles;
-    std::vector<Knob*> bowKnobs, pitchKnobs, playKnobs, violinKnobs, guitarKnobs;
-    std::vector<Choice*> playChoices, violinChoices, guitarChoices;
+    std::vector<Knob*> bowKnobs, pitchKnobs, playKnobs, violinKnobs, guitarKnobs, acousticKnobs;
+    std::vector<Choice*> playChoices, violinChoices, guitarChoices, acousticChoices;
     std::vector<Toggle*> playToggles;
 
     std::vector<std::pair<juce::String, juce::Rectangle<int>>> panels;

@@ -91,7 +91,7 @@ public:
 
     bool isBowed() const { return stage == Stage::attack || stage == Stage::sustain || stage == Stage::release; }
     // Whether the note uses up bow hair (long strokes; not tremolo or short strokes).
-    bool drawsBow() const;
+    bool drawsBow() const { return isBowed() && slurs (noteArticulation); }
     bool isSilent() const { return stage == Stage::open && silentSeconds > silenceSeconds; }
     bool isOpen() const { return stage == Stage::open; }
     int note() const { return currentNote; }

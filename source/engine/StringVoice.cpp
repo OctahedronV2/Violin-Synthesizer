@@ -264,11 +264,6 @@ void StringVoice::setArticulation (Articulation a)
                                                    : Damping::bowed);
 }
 
-bool StringVoice::drawsBow() const
-{
-    return isBowed() && slurs (noteArticulation);
-}
-
 void StringVoice::start (int note, float velocity, Articulation a)
 {
     string.setFinger (0.0, 0.0);

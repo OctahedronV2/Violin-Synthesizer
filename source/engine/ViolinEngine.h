@@ -73,7 +73,9 @@ public:
 
 private:
     void renderString (int start, int numSamples);
-    bool guitar() const { return settings.performance.instrument == Instrument::bowedGuitar; }
+    // The electric guitar is heard through its amp, the others through a body.
+    bool amplified() const { return settings.performance.instrument == Instrument::bowedGuitar; }
+    bool acoustic() const { return settings.performance.instrument == Instrument::bowedAcousticGuitar; }
 
     double hostRate = 48000.0;
     int maxBlock = 512;

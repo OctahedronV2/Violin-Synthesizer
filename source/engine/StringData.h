@@ -55,16 +55,32 @@ inline constexpr std::array<StringSpec, 6> guitarStrings { {
     { "e", 64, 0.169, 0.20, 0.65, 0.50 },
 } };
 
+// The same tuning on a steel-string acoustic (a light 12-53 phosphor bronze
+// set on a 650 mm scale, as on a Yamaha dreadnought). The strings are heavier
+// than the electric's, so their impedance is higher.
+inline constexpr std::array<StringSpec, 6> acousticGuitarStrings { {
+    { "E", 40, 0.95, 0.56, 0.85, 0.66 },
+    { "A", 45, 0.91, 0.55, 0.85, 0.70 },
+    { "D", 50, 0.73, 0.58, 0.90, 0.75 },
+    { "G", 55, 0.55, 0.55, 0.85, 0.70 },
+    { "B", 59, 0.32, 0.45, 0.80, 0.60 },
+    { "e", 64, 0.24, 0.38, 0.75, 0.52 },
+} };
+
 inline constexpr int maxStrings = 6;
 
 enum class Instrument
 {
     violin,
-    bowedGuitar,
+    bowedGuitar, // electric
+    bowedAcousticGuitar,
 };
 
-inline constexpr int numInstruments = 2;
-inline constexpr std::array<const char*, numInstruments> instrumentNames { "Violin", "Bowed guitar" };
+inline constexpr int numInstruments = 3;
+// Every one is bowed, so the names leave that out.
+inline constexpr std::array<const char*, numInstruments> instrumentNames { "Violin",
+                                                                           "Electric guitar",
+                                                                           "Acoustic guitar" };
 
 // Everything about an instrument that the strings and the player need
 // (the start of the InstrumentSpec planned for Octastra, docs/OCTASTRA_DESIGN.md).
@@ -127,9 +143,46 @@ inline constexpr InstrumentSpec bowedGuitarSpec {
     true,
 };
 
+// A steel-string acoustic played with a violin bow, as Ramin Djawadi bowed a
+// Yamaha acoustic in his scores. The same flat bridge and frets as the
+// electric, but heard through a wooden body: the strings drive the bridge,
+// which drives the top, so the body takes more of their energy, the upper
+// harmonics most (fitted to a recording, docs/BOWED_GUITAR.md). The top is in
+// the bow's way near the bridge, so the bow plays nearer the soundhole: 0.19
+// of the string at the default Bow Position.
+inline constexpr InstrumentSpec bowedAcousticGuitarSpec {
+    acousticGuitarStrings.data(),
+    static_cast<int> (acousticGuitarStrings.size()),
+    40,
+    84,
+    0.650,
+    0.12,
+    2.0,
+    dsp::LossSpec { 3.0, 0.15, 2000.0 },
+    1.7,
+    true,
+    false,
+    true,
+    true,
+};
+
 inline const InstrumentSpec& instrumentSpec (Instrument i)
 {
-    return i == Instrument::bowedGuitar ? bowedGuitarSpec : violinSpec;
+    switch (i)
+    {
+        case Instrument::bowedGuitar:
+            return bowedGuitarSpec;
+        case Instrument::bowedAcousticGuitar:
+            return bowedAcousticGuitarSpec;
+        default:
+            return violinSpec;
+    }
+}
+
+// Whether the instrument is one of the guitars (six strings, fretted, drones).
+inline bool isGuitar (Instrument i)
+{
+    return i == Instrument::bowedGuitar || i == Instrument::bowedAcousticGuitar;
 }
 
 // Lowest open string of any instrument: delay lines are sized for it.

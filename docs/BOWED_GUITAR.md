@@ -1,8 +1,12 @@
 # Bowed guitar
 
-A user tester asked for a bowed guitar. Octavio now has an **Instrument** setting: Violin (the default, unchanged) or **Bowed guitar**, an electric guitar played with a violin bow the way Jimmy Page did in the late sixties. It is physically modelled with the violin's own strings, bow and player, plus a pickup and an amplifier in place of the violin's body.
+A user tester asked for a bowed guitar. Octavio now has an **Instrument** setting with three choices, all played with a violin bow:
 
-![The editor with the bowed guitar selected](editor-guitar.png)
+- **Violin**: the default, unchanged.
+- **Electric guitar**: played the way Jimmy Page did in the late sixties. The violin's strings, bow and player are modelled as before, but a pickup and an amplifier take the place of the violin's body.
+- **Acoustic guitar**: a steel-string acoustic, as Ramin Djawadi bowed a Yamaha acoustic in his scores. It is heard through a measured guitar body; see [The bowed acoustic guitar](#the-bowed-acoustic-guitar).
+
+![The editor with the bowed electric guitar selected](editor-guitar.png)
 
 ## Where it lives, and why
 
@@ -69,18 +73,47 @@ The low E string is the weak spot: its notes settle cleanly but four in ten have
 
 | Control | Where | What it does |
 | --- | --- | --- |
-| Instrument | Body & Output (Amp & Output) | Violin or Bowed guitar. Changing it silences the strings. |
+| Instrument | Body & Output (Amp & Output, Bow & Output) | Violin, Electric guitar or Acoustic guitar. Changing it silences the strings. |
 | Pickup | Amp & Output | Neck (round, full), Both (bright, hollow) or Bridge (thin, cutting) |
 | Drive | Amp & Output | Clean amp at 0, heavily overdriven at 100% |
-| Drone | Amp & Output | 0: the bow is tilted onto the played strings only. Above 0: the flat bow also sounds the open strings it lies on, more firmly as it rises. |
+| Drone | Amp & Output, Bow & Output | 0: the bow is tilted onto the played strings only. Above 0: the flat bow also sounds the open strings it lies on, more firmly as it rises. |
 
 All four are automatable. The guitar reuses every other control: Bow Position and Pressure, articulations and keyswitches (pizzicato becomes a fingerpicked electric guitar), vibrato, glide (which only affects bends now: frets step), room and width. When the guitar is selected, the body controls and Mute make way for the amp controls.
 
 Three presets are in a new **Bowed Guitar** category: **Bowed Guitar** (neck pickup, warm amp), **Heavy Bowed Guitar** (bridge pickup, 80% drive, slow swells, big room) and **Bowed Drone Wash** (both pickups, full drones, every note its own string). They are level-matched with the violin presets.
 
+## The bowed acoustic guitar
+
+Jake asked for the sound Ramin Djawadi got from a bowed guitar. Interviews describe it as a Yamaha steel-string acoustic played with a violin bow. The acoustic shares the electric's flat bridge, frets, drones and player. These things differ:
+
+| Part | Electric | Acoustic |
+| --- | --- | --- |
+| Strings | light 10–46 steel, 628 mm | light 12–53 phosphor bronze, 650 mm (a Yamaha dreadnought): Z from 0.95 kg/s (low E) to 0.24 kg/s |
+| Force windows | 0.20–0.65 F_max | 0.38–0.75 F_max: the heavier strings need more weight before they settle into Helmholtz motion |
+| Losses while bowed | T60 6 s, 1.2 s at 4 kHz | T60 3 s, 0.15 s at 2 kHz: the bridge sits on a thin top that soaks up the strings' high frequencies, and they die much faster than on a solid body |
+| Bow position | 0.16 of the string at the default Bow Position (× 1.45) | 0.19 (× 1.7): the top is in the bow's way near the bridge, so an acoustic is bowed nearer the soundhole |
+| Output | pickup → amp → cabinet | bridge force → measured guitar body, as the violin's bridge force goes through its body |
+| Range | E2–D6 (22 frets) | E2–C6 (20 frets) |
+
+![The editor with the bowed acoustic guitar selected](editor-acoustic.png)
+
+**The body** is a measured filter from a Godin guitar's under-saddle piezo pickup to a microphone in front of it ("Sweep guitare_dc" by pe_mace, Freesound 696487, CC0). The piezo reads the force the strings put on the saddle, so this is the same bridge force → sound transfer as the violin bodies. It shows a guitar's air resonance at 98 Hz and top resonances at 190 and 246 Hz. `research/scripts/export_guitar_body.py` trims it to the violin bodies' 200 ms and writes `resources/bodies/acoustic-guitar.wav`. It is convolved like the violin bodies, whatever the Quality setting; it has no modal version.
+
+**Matching a recording.** The acoustic's tone was fitted to a recording of an acoustic guitar played with a bow ("Guitar_bow_playing_stereo" by leonseptavaux, Freesound 346484, CC BY). The recording is not shipped. It plays E3–G#4, the same register as the demo. The comparison is the long-term spectrum in octave bands. With the electric's string losses, the acoustic was 10.8 dB (RMS, 250 Hz–8 kHz) brighter than the recording. Bowing further from the bridge (a Bow Position scale of 1.9) and damping 4 kHz more (0.4 s) each helped only a little. Damping from 2 kHz (0.15 s), with the bow at × 1.7, brought the misfit to 2.4 dB. That matches how a guitar top absorbs a string's upper harmonics:
+
+| Octave band (Hz) | 250 | 500 | 1k | 2k | 4k | 8k |
+| --- | --- | --- | --- | --- | --- | --- |
+| Recording | 0 | −4.7 | −10.3 | −15.2 | −22.6 | −34.8 |
+| First model | −4.3 | −5.2 | 0 | −1.6 | −11.6 | −18.3 |
+| Final model | 0 | −4.2 | −8.8 | −15.8 | −22.6 | −29.2 |
+
+At default settings the acoustic settles into Helmholtz motion 96% of the time, and 3 of 28 notes have a scratchy moment (`[.guitarscratch]`). The electric has 5 of 28.
+
+Two presets: **Bowed Acoustic** (light drones, a small room) and **Cinematic Bowed Acoustic** (slow swells, more drone, a big hall).
+
 ## Listening
 
-`/mnt/project-files/showcase/bowed-guitar/` in the project has a 44-second piece in E minor (`bowed-guitar-demo.mid`, written by `make_guitar_demo.py`) rendered through each preset, plus the Bowed Guitar preset with Drone at 0 to hear what the flat bow adds. Render your own with:
+`/mnt/project-files/showcase/bowed-guitar/` in the project has a 44-second piece in E minor (`bowed-guitar-demo.mid`, written by `make_guitar_demo.py`) rendered through each electric preset and through Bowed Acoustic. There is also the Bowed Guitar preset with Drone at 0, to hear what the flat bow adds, and a 30-second lament in D minor (`bowed-acoustic-lament.mid`, written by `make_acoustic_demo.py`) through both acoustic presets. Render your own with:
 
 ```
 RENDER_MIDI=piece.mid RENDER_OUT=out.wav RENDER_PRESET="Heavy Bowed Guitar" RENDER_PARAMS="octave=2" \
@@ -89,7 +122,7 @@ RENDER_MIDI=piece.mid RENDER_OUT=out.wav RENDER_PRESET="Heavy Bowed Guitar" REND
 
 ## Tests
 
-- `[guitar]`: every string plays in tune (open and fretted, within 6 cents), the range, the flat bow's drones following the played strings, switching instrument, and pickup/drive level matching.
+- `[guitar]`: on both guitars, every string plays in tune (open and fretted, within 6 cents) and the range is right. Also: the flat bow's drones follow the played strings, switching instrument works, the pickup and drive levels match, and Pickup and Drive leave the acoustic untouched.
 - `[allocator]`: notes and an E minor shape spread over six strings.
 - The violin's golden sound check, level-matched presets and every other test pass unchanged: the violin renders exactly as before.
 - Diagnostics: `[.guitarlevels]`, `[.guitarscratch]`, `[.guitarstrings]`, `[.guitardrones]`, `[.rendermidi]`.
@@ -99,4 +132,5 @@ RENDER_MIDI=piece.mid RENDER_OUT=out.wav RENDER_PRESET="Heavy Bowed Guitar" REND
 - A tape echo (Page used an Echoplex); Room stands in for it for now.
 - A wah and a fuzz pedal.
 - Palm muting and a tremolo arm.
-- Measured data: there is no body to measure, but the pickup and amp are textbook values, not fitted to recordings of a bowed Les Paul.
+- Measured data for the electric: there is no body to measure, but the pickup and amp are textbook values, not fitted to recordings of a bowed Les Paul.
+- The acoustic's body is a Godin, not a Yamaha. A tap or sweep measurement of a Yamaha dreadnought's bridge would be closer to Djawadi's instrument.

@@ -38,7 +38,7 @@ TEST_CASE ("Factory presets are complete and valid", "[presets]")
     Fixture f;
     const auto& list = presets::factoryPresets();
     CHECK (list.size() >= 20);
-    CHECK (list.size() <= 30);
+    CHECK (list.size() <= 40);
 
     std::set<std::string> names;
     for (const auto& preset : list)

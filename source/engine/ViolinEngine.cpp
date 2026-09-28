@@ -46,7 +46,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
 
     violin.prepare (getInternalSampleRate());
     sympathetic.prepare (hostRate);
-    body.prepare (hostRate, settings.body);
+    body.prepare (hostRate, acoustic() ? Body::guitarBody : settings.body);
     amp.prepare (getInternalSampleRate(), hostRate);
     output.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
@@ -71,7 +71,7 @@ void ViolinEngine::setSettings (const EngineSettings& s)
     violin.setSettings (s.performance);
     output.setSettings (s.output);
     body.setQuality (s.bodyQuality);
-    body.setBody (s.body);
+    body.setBody (acoustic() ? Body::guitarBody : s.body);
     amp.setSettings (s.drive, s.performance.pickup);
 }
 
@@ -91,7 +91,7 @@ void ViolinEngine::renderString (int start, int numSamples)
     if (oversampling == nullptr)
     {
         violin.render (hostSamples, numSamples);
-        if (guitar())
+        if (amplified())
             amp.processPreamp (hostSamples, numSamples);
         return;
     }
@@ -99,7 +99,7 @@ void ViolinEngine::renderString (int start, int numSamples)
     float* channels[] = { hostSamples };
     juce::dsp::AudioBlock<float> hostBlock (channels, 1, static_cast<size_t> (numSamples));
     violin.render (internalBlock.getChannelPointer (0), numSamples * getOversamplingFactor());
-    if (guitar())
+    if (amplified())
         amp.processPreamp (internalBlock.getChannelPointer (0), numSamples * getOversamplingFactor());
     oversampling->processSamplesDown (hostBlock);
 }
@@ -138,10 +138,16 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         output.setSettings (outputSettings);
 
         float* samples = mono.getWritePointer (0);
-        if (guitar())
+        if (amplified())
         {
             output.processPreBody (samples, chunkLength);
             amp.processCabinet (samples, chunkLength);
+        }
+        else if (acoustic())
+        {
+            // No sympathetic strings: the flat bow's drones stand in for them.
+            output.processPreBody (samples, chunkLength);
+            body.process (samples, chunkLength);
         }
         else
         {

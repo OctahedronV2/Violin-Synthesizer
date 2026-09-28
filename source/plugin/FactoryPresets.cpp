@@ -7,7 +7,7 @@ namespace
 // Choice indices (see Parameters.cpp).
 constexpr float klimke = 1.0f, stoppani = 2.0f, iowa = 3.0f;
 constexpr float monoLegato = 1.0f, poly = 2.0f;
-constexpr float bowedGuitar = 1.0f;
+constexpr float bowedGuitar = 1.0f, bowedAcousticGuitar = 2.0f;
 constexpr float bothPickups = 1.0f, bridgePickup = 2.0f;
 constexpr float detache = 1.0f, staccato = 2.0f, spiccato = 3.0f, tremolo = 4.0f, pizzicato = 5.0f, harmonics = 6.0f,
                 ponticello = 7.0f, tasto = 8.0f, sordino = 9.0f;
@@ -142,6 +142,15 @@ const std::vector<FactoryPreset>& factoryPresets()
           { { "instrument", bowedGuitar }, { "pickup", bothPickups }, { "drive", 0.5f }, { "drone", 1.0f },
             { "playMode", poly }, { "attack", 0.45f }, { "release", 1.0f }, { "vibratoDepth", 8.0f },
             { "room", 0.65f }, { "width", 0.9f }, { "outputGain", -0.8f } } },
+        { "Bowed Acoustic", "Bowed Guitar",
+          "A steel-string acoustic played with a violin bow: woody and breathy, the open strings humming along.",
+          { { "instrument", bowedAcousticGuitar }, { "drone", 0.3f }, { "attack", 0.2f }, { "release", 0.5f },
+            { "vibratoDepth", 15.0f }, { "vibratoDelay", 0.35f }, { "room", 0.35f }, { "width", 0.6f } } },
+        { "Cinematic Bowed Acoustic", "Bowed Guitar",
+          "Dark, slow swells on a bowed acoustic in a big hall, in the style of modern fantasy TV scores.",
+          { { "instrument", bowedAcousticGuitar }, { "drone", 0.6f }, { "bowPosition", 0.14f }, { "attack", 0.45f },
+            { "release", 1.0f }, { "vibratoDepth", 20.0f }, { "vibratoDelay", 0.5f }, { "room", 0.6f },
+            { "width", 0.8f }, { "outputGain", 0.8f } } },
     };
     // clang-format on
     return list;
