@@ -123,6 +123,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (
         std::make_unique<juce::AudioParameterChoice> (id::articulation, "Articulation", articulationNames(), 0));
 
+    // Keyboard response (Phase 7): how loud velocity 127 plays, and an octave
+    // shift for typing keyboards that start below the violin's range.
+    layout.add (floatParam (id::velocityRange, "Velocity Range", Range { 0.6f, 1.0f }, 0.7f, Format::percent));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::octave,
+                                                              "Octave",
+                                                              juce::StringArray { "-2", "-1", "0", "+1", "+2" },
+                                                              octaveChoiceOffset));
+
     return layout;
 }
 
@@ -148,7 +156,9 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       autoBowChange (state.getRawParameterValue (id::autoBowChange.getParamID())),
       mpe (state.getRawParameterValue (id::mpe.getParamID())),
       mpeBendRange (state.getRawParameterValue (id::mpeBendRange.getParamID())),
-      articulation (state.getRawParameterValue (id::articulation.getParamID()))
+      articulation (state.getRawParameterValue (id::articulation.getParamID())),
+      velocityRange (state.getRawParameterValue (id::velocityRange.getParamID())),
+      octave (state.getRawParameterValue (id::octave.getParamID()))
 {
 }
 
@@ -173,6 +183,8 @@ engine::EngineSettings Reader::read() const
     s.performance.mpeBendRangeSemitones = mpeBendRange->load();
     s.performance.articulation = static_cast<engine::Articulation> (
         juce::jlimit (0, engine::numArticulations - 1, static_cast<int> (articulation->load())));
+    s.performance.velocityTop = velocityRange->load();
+    s.performance.octaveShift = juce::jlimit (-2, 2, juce::roundToInt (octave->load()) - octaveChoiceOffset);
 
     s.body = static_cast<int> (body->load());
     s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;

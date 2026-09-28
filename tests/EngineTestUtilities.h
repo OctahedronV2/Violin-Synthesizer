@@ -24,6 +24,7 @@ inline engine::EngineSettings plainSettings()
     s.performance.voice.resonance = 0.0;
     s.output.room = 0.0f;
     s.output.width = 0.0f;
+    s.performance.velocityTop = 1.0; // the model tests are calibrated on linear velocity
     s.bodyQuality = engine::Body::Quality::modal;
     return s;
 }
