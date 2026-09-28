@@ -107,7 +107,7 @@ private:
         bowed,
         harmonic, // light finger on a node: upper partials fade fast
         soft, // sul tasto: stands in for the wide, soft bow contact over the fingerboard
-        plucked, // pizzicato: free vibration, soft finger
+        plucked, // pizzicato: free vibration in two directions, damped by the stopping finger
         shortRing, // after a spiccato bounce
         damped, // finger lifted after pizzicato, or bow stopped after staccato
     };
@@ -130,8 +130,12 @@ private:
     void setTarget (int note, bool glide);
     void setDamping (Damping d);
     void setArticulation (Articulation a);
+    void pluck (const VoiceSettings& settings);
 
-    dsp::BowedString string;
+    dsp::BowedString string; // bowed, or the horizontal swing of a plucked string
+    dsp::BowedString vertical; // a plucked string's vertical swing
+    bool verticalActive = false;
+    double verticalLevel = 0.0;
     dsp::BowController player;
     dsp::StringParams bowedParams;
     Damping damping = Damping::bowed;
@@ -165,6 +169,12 @@ private:
     double stopAt = 0.0; // staccato: when the bow starts to stop
     double biteLevel = 0.0, biteDecay = 0.0; // staccato onset force
     double tremoloPhase = 0.0, tremoloRate = 13.0, tremoloSign = 1.0;
-    double pluckPosition = 0.0, pluckLength = 1.0, pluckAmplitude = 0.0;
+    // Pizzicato: samples since the pluck started (< 0 before the first), the
+    // finger's draw and release in samples, how far it draws the string (m),
+    // where it plucks, the share of the pluck in each direction, and the loss
+    // of each swing for this note.
+    double pluckPosition = 0.0, pluckDraw = 1.0, pluckRelease = 1.0, pluckAmplitude = 0.0, pluckBeta = 0.25;
+    double pluckHorizontal = 1.0, pluckVertical = 0.0;
+    dsp::LossSpec pluckLoss, pluckLossHorizontal; // vertical, horizontal
 };
 } // namespace violinsynth::engine

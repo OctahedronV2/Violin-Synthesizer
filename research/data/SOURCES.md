@@ -26,8 +26,8 @@ Third-party data used by the research prototype, and the files derived from it. 
 
 - **Terms:** the site states the recordings "may be downloaded and used for any projects, without restrictions".
 - **Recording:** Nicolai Tambovsky violin (1998), played by Leonid Iogansen. Anechoic chamber, Earthworks QTC40 microphone at 5 feet.
-- **Contents used:** 36 arco chromatic runs (mono, 16-bit/44.1 kHz) at pp, mf and ff on all four strings.
-- **Not committed:** the recordings. `scripts/fetch_iowa.py` downloads them (110 MB) to `research/external/iowa/`, which is git-ignored.
+- **Contents used:** 36 arco chromatic runs (mono, 16-bit/44.1 kHz) at pp, mf and ff on all four strings, and the 37 pizzicato runs for the pluck model (docs/PIZZICATO.md).
+- **Not committed:** the recordings. `scripts/fetch_iowa.py` downloads the arco runs (110 MB) to `research/external/iowa/`, and `scripts/measure_pizzicato.py` the pizzicato runs (105 MB) to `research/external/iowa_pizz/`; both folders are git-ignored.
 - **Derived files in this repository:**
   - `data/body_iowa_violin.json`: estimated body response and fitted modes;
   - `data/body_iowa_violin_48k.wav`: minimum-phase body filter;
