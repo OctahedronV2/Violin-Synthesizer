@@ -6,6 +6,7 @@ set(VIOLINSYNTH_TEST_SOURCES
     BowNoiseTests.cpp
     BodyConvolutionTests.cpp
     PresetTests.cpp
+    KeyboardInputTests.cpp
     SoundCheckTests.cpp
     StringAllocatorTests.cpp
     StringDspTests.cpp)
