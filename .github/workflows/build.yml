@@ -316,9 +316,15 @@ jobs:
         if: runner.os == 'Windows'
         run: ninja --version || choco install ninja --no-progress -y
 
+      # Link-time optimisation makes every link redo code generation for all
+      # of JUCE (about 4 of the 6 build minutes on Windows, and the compile
+      # cache can't help with it), so pull requests build without it. Builds
+      # of main, tags and runs started by hand keep it, like a release.
       - name: Configure
+        env:
+          LTO: ${{ github.event_name == 'pull_request' && 'OFF' || 'ON' }}
         run: |
-          args=(-G Ninja -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
+          args=(-G Ninja -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DVIOLINSYNTH_ENABLE_LTO="$LTO")
           case "$RUNNER_OS" in
             macOS)   args+=("-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64") ;;
             Windows) args+=(-DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl) ;;
