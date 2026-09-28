@@ -23,6 +23,12 @@ void showParameterMenu (juce::Component& control, const std::vector<juce::Ranged
 // Stops clicks on the component or any of its children taking keyboard focus.
 void stopClicksTakingFocus (juce::Component&);
 
+// Note names as the host's piano roll shows them. Hosts number middle C
+// (MIDI note 60) differently: C5 in FL Studio; C3 in Ableton Live, Cubase,
+// Nuendo, Logic, GarageBand, Bitwig and Studio One; C4 elsewhere.
+int hostMiddleCOctave();
+juce::String noteName (int midiNote);
+
 // A control whose right-click (or Ctrl-click on macOS) opens the parameter
 // menu instead of moving the control.
 template <typename Base>

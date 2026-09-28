@@ -45,6 +45,9 @@ class Violin
 {
 public:
     static constexpr int numStrings = StringAllocator::numStrings;
+    // The violin's range, G3 to G7. Notes outside it (after the octave
+    // shift) are silent.
+    static constexpr int lowestNote = 55, highestNote = 103;
     // Bow hair per stroke. A real bow has 62 cm, but the model bows a long
     // note faster than a player would, and every turn scratches, so it uses
     // more (docs/BOW_NOISE.md).
@@ -114,6 +117,8 @@ private:
 
     // The note each held key is sounding, by channel and key, so that a key
     // is released correctly if the octave shift changes while it is held.
+    // -1: not held; outOfRange: held but silent.
+    static constexpr std::int8_t outOfRange = -2;
     std::array<std::array<std::int8_t, 128>, 17> soundingNote {};
 };
 } // namespace violinsynth::engine

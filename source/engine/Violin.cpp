@@ -140,18 +140,25 @@ void Violin::handleMidi (const juce::MidiMessage& m)
     {
         if (member)
             channelExpression[static_cast<std::size_t> (channel)].pressure = 0.0; // MPE: pressure starts at zero
-        const auto note = std::clamp (m.getNoteNumber() + 12 * settings.octaveShift, 0, 127);
-        soundingNote[static_cast<std::size_t> (channel)][static_cast<std::size_t> (m.getNoteNumber())]
-            = static_cast<std::int8_t> (note);
+        const auto note = m.getNoteNumber() + 12 * settings.octaveShift;
+        auto& held = soundingNote[static_cast<std::size_t> (channel)][static_cast<std::size_t> (m.getNoteNumber())];
+        if (note < lowestNote || note > highestNote)
+        {
+            held = outOfRange;
+            return;
+        }
+        held = static_cast<std::int8_t> (note);
         const auto dynamics = velocityToDynamics (m.getFloatVelocity(), settings.velocityTop);
         apply (allocator.noteOn (note, channel, static_cast<float> (dynamics), time));
     }
     else if (m.isNoteOff())
     {
         auto& held = soundingNote[static_cast<std::size_t> (channel)][static_cast<std::size_t> (m.getNoteNumber())];
-        const auto note
-            = held >= 0 ? static_cast<int> (held) : std::clamp (m.getNoteNumber() + 12 * settings.octaveShift, 0, 127);
+        const auto note = held >= 0 ? static_cast<int> (held) : m.getNoteNumber() + 12 * settings.octaveShift;
+        const auto wasSilent = held == outOfRange;
         held = -1;
+        if (wasSilent || note < lowestNote || note > highestNote)
+            return;
         apply (allocator.noteOff (note, channel));
     }
     else if (m.isPitchWheel())

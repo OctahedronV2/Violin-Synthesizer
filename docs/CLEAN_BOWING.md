@@ -103,6 +103,22 @@ constant force, were noisier too. Lesson for measuring: scale tests mostly
 re-bow strings that are already ringing and skip the first 100 ms, so starts
 on a still string need their own test.
 
+### A string locked to the bow (v1.0.1)
+
+Near the bridge with a firm bow, the twisting string can lock onto the bow:
+it sticks and travels with the hair, with no slip at all, and stays silent for
+as long as the note is held. The twist damps even a steady twist at each
+end, so the string never builds up enough pull to break free. Bright Soloist
+(bow position 0.075, pressure 0.65) lost most of its G string and the low A
+string to it; at the default bow position it took a pressure above 0.7 on
+the A string. Holding the steady twist fixed it too, but brightened every
+note by about 10 dB, so instead the player reacts: a string that sticks for
+two periods without letting go (Helmholtz motion sticks for less than one)
+gets 0.3 of the force, and less the longer it holds. Once it slips, the
+full force keeps it in Helmholtz motion. Only a very soft note right at the
+bridge (0.05 or less) with pressure above 0.8 still stays quiet. The test "A
+firm bow near the bridge never locks the string silent" checks it.
+
 ## The Imperfection knob
 
 Imperfection (0 to 100%, default 0, automatable, in the Play panel) scales all

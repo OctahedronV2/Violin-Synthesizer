@@ -11,6 +11,8 @@ ViolinSynthProcessor::ViolinSynthProcessor()
 {
     // Loading a convolution body allocates, so body changes are applied on
     // the message thread. The timer also shows the host's notes on the keyboard.
+    for (auto& channel : clickedKeys)
+        channel.fill (-1);
     keyboardState.addListener (this);
     startTimerHz (20);
 }
@@ -37,21 +39,43 @@ void ViolinSynthProcessor::KeyEventQueue::popAll (Fn&& fn)
     scope.forEach ([&] (int index) { fn (events[static_cast<std::size_t> (index)]); });
 }
 
+// The on-screen keyboard shows the notes that sound, so a key clicked on it is
+// sent an Octave setting lower, and the host's notes are shown that much higher.
 void ViolinSynthProcessor::handleNoteOn (juce::MidiKeyboardState*, int channel, int note, float velocity)
 {
-    if (! showingHostNotes)
-        keysToAudio.push ({ channel, note, std::max (velocity, 1.0f / 127.0f) });
+    if (showingHostNotes)
+        return;
+    const auto sent = note - 12 * reader.octaveShift();
+    if (sent < 0 || sent > 127 || engine::isKeyswitch (sent))
+        return; // at Octave +2 the lowest keys would land on keyswitches
+    clickedKeys[static_cast<std::size_t> (channel - 1)][static_cast<std::size_t> (note)]
+        = static_cast<std::int8_t> (sent);
+    keysToAudio.push ({ channel, sent, std::max (velocity, 1.0f / 127.0f) });
 }
 
 void ViolinSynthProcessor::handleNoteOff (juce::MidiKeyboardState*, int channel, int note, float)
 {
-    if (! showingHostNotes)
-        keysToAudio.push ({ channel, note, 0.0f });
+    if (showingHostNotes)
+        return;
+    auto& sent = clickedKeys[static_cast<std::size_t> (channel - 1)][static_cast<std::size_t> (note)];
+    if (sent >= 0)
+        keysToAudio.push ({ channel, sent, 0.0f });
+    sent = -1;
 }
 
 void ViolinSynthProcessor::updateKeyboardState()
 {
     showingHostNotes = true;
+    // Host notes held across an Octave change would otherwise stay lit.
+    if (const auto shift = reader.octaveShift(); shift != displayedOctaveShift)
+    {
+        displayedOctaveShift = shift;
+        keyboardState.allNotesOff (0);
+        for (int channel = 1; channel <= 16; ++channel)
+            for (auto& key : clickedKeys[static_cast<std::size_t> (channel - 1)])
+                if (const auto sent = std::exchange (key, std::int8_t { -1 }); sent >= 0)
+                    keysToAudio.push ({ channel, sent, 0.0f });
+    }
     keysToDisplay.popAll (
         [this] (const KeyEvent& e)
         {
@@ -94,16 +118,20 @@ void ViolinSynthProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 {
     juce::ScopedNoDenormals noDenormals;
 
-    // Host notes are shown on the on-screen keyboard; its notes join the host's.
+    // Host notes are shown on the on-screen keyboard where they sound; its notes join the host's.
+    const auto shown = [shift = 12 * reader.octaveShift()] (const juce::MidiMessage& m)
+    { return engine::isKeyswitch (m.getNoteNumber()) ? -1 : m.getNoteNumber() + shift; };
     for (const auto metadata : midiMessages)
     {
         if (metadata.numBytes > 3)
             continue; // SysEx: copying it into a MidiMessage would allocate
         const auto m = metadata.getMessage();
+        if ((m.isNoteOn() || m.isNoteOff()) && (shown (m) < 0 || shown (m) > 127))
+            continue;
         if (m.isNoteOn())
-            keysToDisplay.push ({ m.getChannel(), m.getNoteNumber(), m.getFloatVelocity() });
+            keysToDisplay.push ({ m.getChannel(), shown (m), m.getFloatVelocity() });
         else if (m.isNoteOff())
-            keysToDisplay.push ({ m.getChannel(), m.getNoteNumber(), 0.0f });
+            keysToDisplay.push ({ m.getChannel(), shown (m), 0.0f });
         else if (m.isAllNotesOff() || m.isAllSoundOff())
             keysToDisplay.push ({ m.getChannel(), -1, 0.0f });
     }

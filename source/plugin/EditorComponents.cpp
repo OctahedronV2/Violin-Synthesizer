@@ -45,6 +45,23 @@ void stopClicksTakingFocus (juce::Component& c)
         stopClicksTakingFocus (*child);
 }
 
+int hostMiddleCOctave()
+{
+    const juce::PluginHostType host;
+    if (host.isFruityLoops())
+        return 5;
+    if (host.isAbletonLive() || host.isCubase() || host.isNuendo() || host.isLogic() || host.isGarageBand()
+        || host.isBitwigStudio() || host.isStudioOne())
+        return 3;
+    return 4;
+}
+
+juce::String noteName (int midiNote)
+{
+    static const auto middleC = hostMiddleCOctave();
+    return juce::MidiMessage::getMidiNoteName (midiNote, true, true, middleC);
+}
+
 void showParameterMenu (juce::Component& control, juce::RangedAudioParameter& parameter)
 {
     if (auto* context = hostContextFor (control))
@@ -247,7 +264,7 @@ void StringDisplay::timerCallback()
         for (int s = 0; s < 4; ++s)
             if (notes[static_cast<std::size_t> (s)] >= 0)
                 playing.add (juce::String (engine::strings[static_cast<std::size_t> (s)].name) + " string "
-                             + juce::MidiMessage::getMidiNoteName (notes[static_cast<std::size_t> (s)], true, true, 4));
+                             + noteName (notes[static_cast<std::size_t> (s)]));
         setDescription (playing.isEmpty() ? "No notes playing" : "Playing: " + playing.joinIntoString (", "));
         repaint();
     }
@@ -304,8 +321,7 @@ void StringDisplay::paint (juce::Graphics& g)
             g.fillEllipse (juce::Rectangle<float> (11.0f, 11.0f).withCentre ({ fingerX, centreY }));
 
             g.setFont (juce::FontOptions { 13.0f, juce::Font::bold });
-            const auto label
-                = semitones == 0.0f ? juce::String ("open") : juce::MidiMessage::getMidiNoteName (note, true, true, 4);
+            const auto label = semitones == 0.0f ? juce::String ("open") : noteName (note);
             const auto labelArea
                 = juce::Rectangle<float> (60.0f, 16.0f)
                       .withCentre (

@@ -43,6 +43,15 @@ constexpr double torsionMakeup = (1.0 + torsionImpedanceRatio) / torsionImpedanc
 // on average (up to 1.8). The string is tuned 1.4 cents sharp, which also
 // takes out the 0.55 cents the bowed model was already flat.
 constexpr double torsionTuning = 1.000809;
+// Near the bridge with a firm bow, the twisting string can also lock onto the
+// bow: it sticks and travels with the hair, silent, however long the note is
+// held (v1.0.1: Bright Soloist's G and A strings went dead). In Helmholtz
+// motion the string sticks for less than a period, so sticking this long
+// means it has locked. A player feels the string grab and eases the weight
+// until it lets go; once it is sounding, the full weight holds it there.
+// The weight falls to lockedEase after lockedPeriods, and on from there.
+constexpr double lockedPeriods = 2.0;
+constexpr double lockedEase = 0.3;
 
 // Articulations (docs/PHASE5.md)
 constexpr double detacheMaxAttack = 0.04;
@@ -136,6 +145,7 @@ void StringVoice::reset()
     forceFraction = 0.48;
     lastSpeed = 0.0;
     peakLevel = 0.0;
+    stuckSamples = 0.0;
     controlJump = true;
     betaFloor = std::max (0.02, 1.2 * string.minBeta (midiToHz (spec->openMidiNote + 14)));
 }
@@ -685,6 +695,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         // The player's weight corrects the force, within the model's clean range.
         const auto fraction = std::min (forceFraction * player.weight(), std::max (maxForceFraction, forceFraction));
         force = forceGain * fMax * fraction;
+        if (const auto locked = stuckSamples / (lockedPeriods * fs / f0); locked > 1.0)
+            force *= std::pow (lockedEase, locked); // easing further the longer it holds
     }
 
     auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0, b, context.direction * speed, force);
@@ -701,6 +713,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     if (isBowed())
         player.listen (y, string.slipStarted());
+    stuckSamples = isBowed() && speed != 0.0 && string.isSticking() ? stuckSamples + 1.0 : 0.0;
     lastSpeed = std::abs (speed);
     lastF0 = f0;
     peakLevel = std::max (std::abs (y), peakLevel * peakDecay);

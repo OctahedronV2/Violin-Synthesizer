@@ -121,6 +121,9 @@ private:
     KeyEventQueue keysToAudio; // on-screen keyboard -> audio thread
     KeyEventQueue keysToDisplay; // host notes -> keyboard state
     bool showingHostNotes = false; // message thread: set while the host's notes update keyboardState
+    // Message thread: the note sent for each held on-screen key, or -1.
+    std::array<std::array<std::int8_t, 128>, 16> clickedKeys {};
+    int displayedOctaveShift = params::defaultOctaveShift; // message thread
     juce::MidiBuffer mergedMidi; // host MIDI plus on-screen notes, preallocated
     engine::ViolinEngine engine;
     std::atomic<int> activeArticulation { 0 };

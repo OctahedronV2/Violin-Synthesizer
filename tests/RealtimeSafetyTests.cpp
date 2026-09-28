@@ -135,7 +135,7 @@ TEST_CASE ("Notes from the host light up the on-screen keyboard", "[realtime][ke
     Player player { processor };
 
     juce::MidiBuffer midi;
-    midi.addEvent (juce::MidiMessage::noteOn (1, 72, 0.6f), 10);
+    midi.addEvent (juce::MidiMessage::noteOn (1, 60, 0.6f), 10); // plays C5 at the default Octave +1
     player.play (midi);
     processor.updateKeyboardState(); // the timer, on the message thread
     CHECK (processor.getKeyboardState().isNoteOn (1, 72));
@@ -146,7 +146,7 @@ TEST_CASE ("Notes from the host light up the on-screen keyboard", "[realtime][ke
     CHECK (processor.getStringState (engine::Violin::numStrings - 2).note.load() == 72);
 
     midi.clear();
-    midi.addEvent (juce::MidiMessage::noteOff (1, 72), 0);
+    midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
     player.play (midi);
     processor.updateKeyboardState();
     CHECK_FALSE (processor.getKeyboardState().isNoteOn (1, 72));

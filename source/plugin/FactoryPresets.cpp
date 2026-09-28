@@ -113,7 +113,7 @@ const std::vector<FactoryPreset>& factoryPresets()
         { "Slow Swells", "Character",
           "Long swelling attacks and releases for pads and textures.",
           { { "attack", 0.45f }, { "release", 0.8f }, { "vibratoDelay", 0.6f }, { "bowPressure", 0.45f },
-            { "room", 0.45f }, { "width", 0.7f }, { "outputGain", 1.5f } } },
+            { "room", 0.45f }, { "width", 0.7f }, { "outputGain", -0.8f } } },
 
         // Expressive
         { "MPE Expressive", "Expressive",
