@@ -24,12 +24,21 @@ option(VIOLINSYNTH_ENABLE_RTSAN "Build with RealtimeSanitizer (Clang 20 or later
 # Link-time optimisation in Release builds. It makes each plugin, test and
 # benchmark link redo code generation for all of JUCE, which is most of a CI
 # build, so pull request builds turn it off (docs/CI.md).
+# Configure only the offline renderer (tools/render): no plugin, no tests.
+# For quick sound tweaks, where only the DSP needs recompiling.
+option(VIOLINSYNTH_RENDER_ONLY "Build only the offline renderer" OFF)
 option(VIOLINSYNTH_ENABLE_LTO "Link-time optimisation in Release builds" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dependencies)
 include(CompilerWarnings)
 include(Sanitizers)
+
+if(VIOLINSYNTH_RENDER_ONLY)
+    add_subdirectory(source)
+    add_subdirectory(tools/render)
+    return()
+endif()
 
 # ---------------------------------------------------------------------------
 # Plugin
