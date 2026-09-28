@@ -103,6 +103,19 @@ TEST_CASE ("Loading a preset sets every parameter", "[presets]")
     CHECK (f.manager.getCurrentIndex() == pizz - 1);
 }
 
+TEST_CASE ("Every factory preset plays an octave up", "[presets][keyboard]")
+{
+    // Typing keyboards start an octave below the violin (v1.0.1).
+    Fixture f;
+    f.set ("octave", 0.0f);
+    for (int i = 0; i < f.manager.getNumFactoryPresets(); ++i)
+    {
+        REQUIRE (f.manager.load (i));
+        CAPTURE (f.manager.getCurrentName());
+        CHECK (f.value ("octave") == static_cast<float> (params::octaveChoiceOffset + 1));
+    }
+}
+
 TEST_CASE ("User presets save, load and delete", "[presets]")
 {
     Fixture f;
@@ -181,6 +194,7 @@ double phraseLevelDb (ViolinSynthProcessor& processor, float velocity)
     constexpr int block = 256;
     auto settings = params::Reader (processor.getParameters()).read();
     settings.bodyQuality = engine::Body::Quality::modal; // no background IR loading in tests
+    settings.performance.octaveShift = 0; // the phrase is written where it sounds
 
     engine::ViolinEngine e;
     e.setSettings (settings);

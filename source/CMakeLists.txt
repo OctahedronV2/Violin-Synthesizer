@@ -10,6 +10,7 @@ set(VIOLINSYNTH_SOURCES
     engine/Violin.cpp
     plugin/EditorComponents.cpp
     plugin/FactoryPresets.cpp
+    plugin/HostKeyboardFocus.cpp
     plugin/LookAndFeel.cpp
     plugin/Parameters.cpp
     plugin/PluginEditor.cpp

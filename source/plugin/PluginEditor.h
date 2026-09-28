@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugin/EditorComponents.h"
+#include "plugin/HostKeyboardFocus.h"
 #include "plugin/LookAndFeel.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -25,6 +26,7 @@ public:
     ~ViolinSynthEditor() override;
 
     void resized() override;
+    void parentHierarchyChanged() override { hostFocus.editorParentChanged(); }
 
 private:
     class Content;
@@ -32,6 +34,7 @@ private:
     ViolinLookAndFeel lookAndFeel;
     juce::TooltipWindow tooltips { this, 600 };
     std::unique_ptr<Content> content;
+    HostKeyboardFocus hostFocus { *this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ViolinSynthEditor)
 };

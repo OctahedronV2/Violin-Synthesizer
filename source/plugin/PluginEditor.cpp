@@ -113,9 +113,9 @@ public:
         credits.setJustificationType (juce::Justification::centredRight);
         addAndMakeVisible (credits);
 
-        // G3 is the lowest note on a violin.
-        keyboard.setAvailableRange (55, 103);
-        keyboard.setLowestVisibleKey (55);
+        // The violin's range, G3 to G7, where the notes sound (after the Octave setting).
+        keyboard.setAvailableRange (engine::Violin::lowestNote, engine::Violin::highestNote);
+        keyboard.setLowestVisibleKey (engine::Violin::lowestNote);
         keyboard.setOctaveForMiddleC (4); // C4 = middle C, as in the rest of the editor
         keyboard.setTitle ("Keyboard");
         keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, colours::accent);
@@ -488,8 +488,8 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     // Clicking the editor must not take the keyboard away from the host
     // (FL Studio's typing keyboard, Ableton's computer MIDI keyboard), so no
     // control grabs focus on a click. Text boxes still take it while a value
-    // is typed, and Tab still reaches every control. This runs last: the
-    // look and feel rebuilds the controls' text boxes, and setResizable()
+    // is typed; hostFocus hands the keyboard back afterwards. This runs last:
+    // the look and feel rebuilds the controls' text boxes, and setResizable()
     // adds the resize corner.
     stopClicksTakingFocus (*this);
 }

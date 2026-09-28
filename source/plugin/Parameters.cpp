@@ -129,7 +129,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::octave,
                                                               "Octave",
                                                               juce::StringArray { "-2", "-1", "0", "+1", "+2" },
-                                                              octaveChoiceOffset));
+                                                              octaveChoiceOffset + defaultOctaveShift));
 
     // Clean bowing: 0 plays like a professional, keeping the string free of
     // scratch; higher values let the unassisted model's errors back in
@@ -168,6 +168,11 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
 {
 }
 
+int Reader::octaveShift() const
+{
+    return juce::jlimit (-2, 2, juce::roundToInt (octave->load()) - octaveChoiceOffset);
+}
+
 engine::EngineSettings Reader::read() const
 {
     engine::EngineSettings s;
@@ -191,7 +196,7 @@ engine::EngineSettings Reader::read() const
     s.performance.articulation = static_cast<engine::Articulation> (
         juce::jlimit (0, engine::numArticulations - 1, static_cast<int> (articulation->load())));
     s.performance.velocityTop = velocityRange->load();
-    s.performance.octaveShift = juce::jlimit (-2, 2, juce::roundToInt (octave->load()) - octaveChoiceOffset);
+    s.performance.octaveShift = octaveShift();
 
     s.body = static_cast<int> (body->load());
     s.bodyQuality = bodyQuality->load() < 0.5f ? engine::Body::Quality::convolution : engine::Body::Quality::modal;

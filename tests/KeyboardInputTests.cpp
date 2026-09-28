@@ -104,6 +104,72 @@ TEST_CASE ("Changing the octave while a key is held releases the right note", "[
         CHECK (e.getViolin().noteOnString (string) == -1);
 }
 
+TEST_CASE ("Notes outside the violin's range are silent", "[keyboard]")
+{
+    auto s = plainSettings();
+    engine::ViolinEngine e;
+    e.setSettings (s);
+    e.prepare (fs, block);
+
+    auto sounding = [&e]
+    {
+        int n = 0;
+        for (int string = 0; string < 4; ++string)
+            n += e.getViolin().noteOnString (string) >= 0 ? 1 : 0;
+        return n;
+    };
+
+    // Just below G3 and just above G7: nothing plays, not a clamped G3 or G7.
+    for (auto note : { 54, 40, 104, 120 })
+    {
+        CAPTURE (note);
+        run (e, 0.2, { { 0.0, on (note) } });
+        CHECK (sounding() == 0);
+        run (e, 0.1, { { 0.0, off (note) } });
+    }
+
+    // G3 and G7 themselves play.
+    for (auto note : { 55, 103 })
+    {
+        CAPTURE (note);
+        run (e, 0.2, { { 0.0, on (note) } });
+        CHECK (sounding() == 1);
+        run (e, 0.5, { { 0.0, off (note) } });
+    }
+
+    // The range applies after the octave shift: F#2 is silent, G2 plays G3.
+    s.performance.octaveShift = 1;
+    e.setSettings (s);
+    run (e, 0.2, { { 0.0, on (42) } });
+    CHECK (sounding() == 0);
+    run (e, 0.2, { { 0.0, on (43) } });
+    CHECK (e.getViolin().noteOnString (G) == 55);
+
+    // Releasing the silent key after an octave change that would bring it
+    // into range doesn't touch the note that is playing.
+    s.performance.octaveShift = 2;
+    e.setSettings (s);
+    run (e, 0.2, { { 0.0, off (42) } });
+    CHECK (e.getViolin().noteOnString (G) == 55);
+}
+
+TEST_CASE ("The window around the editor doesn't take the host's keyboard", "[keyboard][editor]")
+{
+    // On Windows the plugin window's top component decides whether a click
+    // gives the window keyboard focus (v1.0.1: FL Studio lost its typing
+    // keyboard to the window, although no control took focus).
+    juce::ScopedJuceInitialiser_GUI juce;
+    ViolinSynthProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor { processor.createEditorAndMakeActive() };
+    juce::Component hostWrapper, outer;
+    outer.addChildComponent (hostWrapper);
+    hostWrapper.addAndMakeVisible (*editor);
+
+    CHECK_FALSE (hostWrapper.getMouseClickGrabsKeyboardFocus());
+    CHECK_FALSE (outer.getMouseClickGrabsKeyboardFocus());
+    hostWrapper.removeChildComponent (editor.get());
+}
+
 TEST_CASE ("Keyboard response is saved with the project", "[keyboard][state]")
 {
     juce::ScopedJuceInitialiser_GUI juce;

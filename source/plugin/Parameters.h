@@ -41,6 +41,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
+// The default, +1: typing keyboards (FL Studio, Ableton) start an octave below
+// the violin's range.
+inline constexpr int defaultOctaveShift = 1;
 
 // Reads the current parameter values into engine settings (audio thread safe).
 class Reader
@@ -48,6 +51,7 @@ class Reader
 public:
     explicit Reader (juce::AudioProcessorValueTreeState& state);
     engine::EngineSettings read() const;
+    int octaveShift() const; // octaves added to played notes
 
 private:
     std::atomic<float>* bowPosition;
