@@ -8,6 +8,69 @@
 
 namespace violinsynth
 {
+namespace
+{
+juce::AudioProcessorEditorHostContext* hostContextFor (juce::Component& control)
+{
+    if (auto* editor = control.findParentComponentOfClass<juce::AudioProcessorEditor>())
+        return editor->getHostContext();
+    return nullptr;
+}
+
+void resetToDefault (juce::RangedAudioParameter& p)
+{
+    p.beginChangeGesture();
+    p.setValueNotifyingHost (p.getDefaultValue());
+    p.endChangeGesture();
+}
+
+// Our own menu, for hosts that offer none (Standalone, AU, older hosts).
+juce::PopupMenu fallbackMenu (juce::RangedAudioParameter& p)
+{
+    juce::PopupMenu menu;
+    menu.addItem ("Reset to default", [&p] { resetToDefault (p); });
+    return menu;
+}
+
+void showAtMouse (juce::Component& control, juce::PopupMenu menu)
+{
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&control).withMousePosition());
+}
+} // namespace
+
+void stopClicksTakingFocus (juce::Component& c)
+{
+    c.setMouseClickGrabsKeyboardFocus (false);
+    for (auto* child : c.getChildren())
+        stopClicksTakingFocus (*child);
+}
+
+void showParameterMenu (juce::Component& control, juce::RangedAudioParameter& parameter)
+{
+    if (auto* context = hostContextFor (control))
+    {
+        if (auto menu = context->getContextMenuForParameter (&parameter))
+        {
+            auto* editor = control.findParentComponentOfClass<juce::AudioProcessorEditor>();
+            menu->showNativeMenu (editor->getMouseXYRelative());
+            return;
+        }
+    }
+    showAtMouse (control, fallbackMenu (parameter));
+}
+
+void showParameterMenu (juce::Component& control, const std::vector<juce::RangedAudioParameter*>& parameters)
+{
+    auto* context = hostContextFor (control);
+    juce::PopupMenu menu;
+    for (auto* p : parameters)
+    {
+        auto hostMenu = context != nullptr ? context->getContextMenuForParameter (p) : nullptr;
+        menu.addSubMenu (p->getName (64), hostMenu != nullptr ? hostMenu->getEquivalentPopupMenu() : fallbackMenu (*p));
+    }
+    showAtMouse (control, std::move (menu));
+}
+
 //==============================================================================
 BowPad::BowPad (juce::RangedAudioParameter& positionParam, juce::RangedAudioParameter& pressureParam)
     : position (positionParam),
@@ -99,6 +162,11 @@ void BowPad::setFromPoint (juce::Point<float> p)
 
 void BowPad::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+    {
+        showParameterMenu (*this, { &position, &pressure });
+        return;
+    }
     positionAttachment.beginGesture();
     pressureAttachment.beginGesture();
     setFromPoint (e.position);
@@ -106,11 +174,15 @@ void BowPad::mouseDown (const juce::MouseEvent& e)
 
 void BowPad::mouseDrag (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+        return;
     setFromPoint (e.position);
 }
 
-void BowPad::mouseUp (const juce::MouseEvent&)
+void BowPad::mouseUp (const juce::MouseEvent& e)
 {
+    if (e.mods.isPopupMenu())
+        return;
     positionAttachment.endGesture();
     pressureAttachment.endGesture();
 }

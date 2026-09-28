@@ -237,7 +237,7 @@ TEST_CASE ("Projects saved by Phase 6 still load and sound the same", "[host][st
     CHECK (restored.getPresetManager().getCurrentIndex() == phase6Preset);
     CHECK (restored.getPresetManager().isModified());
 
-    // Parameters added since Phase 6 keep their defaults, which must play as Phase 6 did.
+    // Parameters added since Phase 6 keep their defaults.
     ViolinSynthProcessor expected;
     for (auto* p : restored.getParameters().processor.getParameters())
     {

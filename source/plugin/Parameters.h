@@ -32,9 +32,14 @@ inline const juce::ParameterID autoBowChange { "autoBowChange", 1 };
 inline const juce::ParameterID mpe { "mpe", 1 };
 inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
 inline const juce::ParameterID articulation { "articulation", 1 };
+inline const juce::ParameterID velocityRange { "velocityRange", 2 };
+inline const juce::ParameterID octave { "octave", 2 };
 } // namespace id
 
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+
+// Choices of the Octave parameter; index 2 plays notes where they are.
+inline constexpr int octaveChoiceOffset = 2;
 
 // Reads the current parameter values into engine settings (audio thread safe).
 class Reader
@@ -66,5 +71,7 @@ private:
     std::atomic<float>* mpe;
     std::atomic<float>* mpeBendRange;
     std::atomic<float>* articulation;
+    std::atomic<float>* velocityRange;
+    std::atomic<float>* octave;
 };
 } // namespace violinsynth::params

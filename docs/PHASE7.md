@@ -102,6 +102,33 @@ Nothing is optimised until this exists, so every later step can show its gain.
 
 **On Jake's Windows 11 PC:** the same executable, run by hand, prints the CPU model and a table to paste into the PR. This gives the absolute numbers. The Windows CI job also prints wall-clock numbers, as a rough check between runs on Jake's PC.
 
+### Status: done
+
+- **`ViolinSynthBench`** (`tests/bench/Benchmark.cpp`) has 33 scenarios, covering all of those above. It prints the CPU model, then each scenario's mean CPU and its p99, p99.9 and worst block time as a percentage of the block's duration. `--json` saves the results, `--only` picks scenarios, and `--seconds` sets the length. Each Windows CI build uploads it as `ViolinSynthBench-Windows.zip` next to the plugin. To measure on the reference PC, unzip it and run `ViolinSynthBench.exe > bench.txt` from a command prompt with nothing else busy.
+- **Instruction counts in CI:** the Linux job runs 25 scenarios under Callgrind, one second each, and `tests/bench/instructions.py` compares them with `docs/benchmarks/baseline.json`. The counts are repeatable to the instruction. The job fails if a scenario needs more than 3% more instructions per output sample. `instructions.py --update` records a new baseline.
+- **Timings in CI:** every platform prints the timing table for the CI scenarios. It is for information only and never fails.
+- **The sound check** (`tests/SoundCheckTests.cpp`, tag `[soundcheck]`) runs with the unit tests. It renders six phrases (sustained vibrato, a slurred line, a four-note chord, nine articulations, MPE, and a long note with bow changes) and compares them with `tests/golden/soundcheck.json`. The tolerances are the ones above. Making vibrato 1 cent deeper and the output 0.15 dB louder fails 44 of its 187 checks. `"[.soundcheck-render]"` writes the phrases as WAV files for listening, and `"[.soundcheck-update]"` records a new reference when a change of sound is intended.
+
+**Baseline** (cloud VM, 2.1 GHz Xeon, 10 s per scenario, 48 kHz and 128 samples unless noted):
+
+| Scenario | CPU % | Worst block, % of its duration |
+|---|---|---|
+| Idle | 2.7 | 8 |
+| One note, vibrato (T1) | 4.9 | 10 |
+| Four-note chord (T2) | 13.5 | 30 |
+| MPE, four notes | 13.0 | 24 |
+| One note, 96 kHz | 7.0 | 16 |
+| One note, 32-sample buffer | 6.3 | 42 |
+| Four notes, 32-sample buffer (T4) | 14.3 | 152 |
+| One note, random buffer sizes | 4.8 | 163 |
+| 16 violins summed (T7) | 84 | 188 |
+| 60 violins summed | 320 | 530 |
+
+Two new findings:
+
+- **Blocks of a few samples are very expensive.** With random buffer sizes, the worst block took 1.6 times its own duration, and so did the worst four-note block at 32 samples. Fixed costs per block (the convolution, oversampler and settings) dominate when a block is only a few samples long. Some hosts send such blocks around loop points and automation. This is a real dropout risk. 7.1 and 7.3 address it, and T4 tracks it.
+- **Each violin costs about 5% of a core here.** 60 of them need about 3.2 cores, so Octastra's symphonic target depends on 7.2 and the 7.5 experiments.
+
 ## 7.1 Remove wasted work (low risk, sound unchanged)
 
 Each of these must null against the reference.
@@ -116,6 +143,12 @@ Each of these must null against the reference.
 | Skip the room reverb when **Room** is 0 and its tail is gone, and the width all-passes when **Width** is 0 | `OutputChain.cpp` | Up to 10% for dry presets |
 
 Bypassing on silence has to be seamless: a note must start on the very next sample with no click, and a tail must never be cut. Tests check both.
+
+**Status (body and idle PR):** done except two rows: skipping the 192 kHz string loop, and the skips for **Room** or **Width** at 0.
+
+- The sympathetic strings, the body (both forms) and the chain after the body each stop computing once their input has been below −200 dBFS for longer than their own tail, and start on the first sample of sound. The reverb never decays to zero in float (it settles near −140 dBFS), so the chain after the body ends its tail at −120 dBFS.
+- The open strings' tuning is computed in `prepare()`, and the upsampler is gone: the string renders straight into the oversampler's buffer. Both are bit-exact.
+- Idle after a note has rung out: **2.6% → 0.34%** (Linux VM, same method as the table above). What remains is the string loop and the downsampler, which wait for 7.2 because skipping them changes when a silent voice's control-rate updates fall.
 
 ## 7.2 Control-rate voice maths (largest gain)
 
@@ -139,6 +172,24 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 
 **Expected:** the measured body costs 2–4× less and becomes nearly as cheap as the light body. For Octastra, bodies run per body bus, not per player, so this matters for sections more than for players.
 
+**Status (body and idle PR):** done, without trimming.
+
+- `source/dsp/PartitionedConvolution.cpp`: uniform partitions of about 2.7 ms (128 samples at 44.1/48 kHz, 256 at 88.2/96, 512 above), on PFFFT, vendored in `third_party/pffft`. Every host call transforms its partial block, so the body has **zero latency** at any buffer size, and a small buffer costs one extra FFT pair instead of more partitions. The sum over older blocks for the next partition is built up a little on every call, so no single tiny host block carries it: at a 4-sample buffer the slowest call dropped from 4.4 µs to 0.7 µs (of 83 µs). Non-uniform partitions weren't needed for the targets.
+- All four bodies are resampled (the way JUCE did) and transformed in `prepare()`. A body change is a 50 ms crossfade on the audio thread, with no loading or allocation; both bodies share the input history, so the new one starts with its full tail. The first note after `prepare()` now goes through the body; JUCE's background load played it dry for the first few blocks.
+- Output nulls with `main` to −120 dB below the peak (float rounding).
+- One note with the measured body now costs the same as the light body. Before and after, 48 kHz, one note with vibrato unless noted, Linux VM:
+
+| Case | `main` | This PR |
+|---|---|---|
+| Idle, never played | 2.6% | 0.35% |
+| Idle, 5 s after a note | 2.6% | 0.34% |
+| One note, measured body | 5.0% | 4.0% |
+| One note, light body | 4.8% | 4.0% |
+| Four-note chord, measured body | 13.0% | 11.7% |
+| One note, 32-sample buffer | 6.2% | 4.2% |
+| One note, 1024-sample buffer | 4.3% | 4.1% |
+| One note, 96 kHz | 7.4% | 5.3% |
+
 ## 7.4 Real-time safety
 
 - **RealtimeSanitizer** (Clang 20's `-fsanitize=realtime`): mark `processBlock` as non-blocking and run the test suite in a CI job. It fails on any allocation, lock or system call reached from the audio thread.
@@ -150,7 +201,7 @@ The voice recomputes pitch, vibrato, bends, bow position, speed and force every 
 - **RealtimeSanitizer** runs the whole test suite in CI (the `RealtimeSanitizer` job, Clang 20, `-DVIOLINSYNTH_ENABLE_RTSAN=ON`). `ViolinSynthProcessor::processBlock` and `ViolinEngine::process` are marked `VIOLINSYNTH_NONBLOCKING` (`source/engine/Realtime.h`), so any allocation, lock or system call reached from them fails the job with a stack trace.
 - **Found and fixed:** the on-screen keyboard. `juce::MidiKeyboardState::processNextMidiBuffer` takes a lock on every block, shared with the editor's keyboard on the message thread. Notes now cross between the threads through two lock-free queues: the keyboard's notes go to the audio thread, and the host's notes come back to light up the keyboard on the processor's timer.
 - **Found and fixed:** SysEx from the host was copied into a `juce::MidiMessage`, which allocates for messages longer than 8 bytes. Only channel messages are copied now.
-- **Audited, no problem found:** the convolution IR swap (JUCE loads on its own thread and swaps without locking), preset loading and host state restores (message thread; the audio thread only reads the parameters' atomics), the parameter-to-settings copy each block (a plain struct copy), and the editor's meters (atomics). `RealtimeSafetyTests.cpp` plays through all of these while automating every parameter, switching bodies and presets, restoring state, opening and closing the editor, and sending SysEx; the sanitizer reports nothing.
+- **Audited, no problem found:** body changes (every body is prepared in `prepare`, and a change crossfades between them), preset loading and host state restores (message thread; the audio thread only reads the parameters' atomics), the parameter-to-settings copy each block (a plain struct copy), and the editor's meters (atomics). `RealtimeSafetyTests.cpp` plays through all of these while automating every parameter, switching bodies and presets, restoring state, opening and closing the editor, and sending SysEx; the sanitizer reports nothing.
 - **Denormals:** a test plays a note, lets it decay for 30 s and checks that late silence costs no more than twice the early silence. Without `ScopedNoDenormals` it fails: late silence costs about 3.8 times as much.
 
 ## 7.5 Experiments for Octastra
@@ -187,7 +238,7 @@ If SIMD passes, the violin itself gets it for chords, and it becomes the core of
 
 ### By hand, in real hosts
 
-A checklist, `docs/DAW_TESTS.md` (written in 7.6), with one row per host and format. Windows 11 is the main platform, and FL Studio, Reaper and Ableton Live must pass there. Jake runs those; the rest are best effort.
+A checklist, [DAW_TESTS.md](DAW_TESTS.md), with one row per host and format. Windows 11 is the main platform, and FL Studio, Reaper and Ableton Live must pass there. Jake runs those; the rest are best effort.
 
 | Host | OS | Formats | Priority |
 |---|---|---|---|
@@ -212,11 +263,31 @@ Checks in each host:
 - MPE, where the host supports it.
 - **16 instances playing** a four-part phrase. Record the host's CPU meter. This is the Octastra template workflow.
 
+## 7.K Playing and automating in FL Studio (done first)
+
+Jake asked for these when Phase 7 started. They shipped before the optimisation steps.
+
+| Problem | Cause | Fix |
+|---|---|---|
+| FL Studio's typing keyboard didn't play the plugin while its window was open | A click anywhere in the editor gave keyboard focus to a control (often the on-screen keyboard). The editor then kept the keys, and the on-screen keyboard used some of them itself, at full velocity. | No control takes keyboard focus on a click, and the on-screen keyboard has no computer-key mapping. The host keeps its keyboard. Text boxes still take focus while a value is typed, and Tab still reaches every control. |
+| Right-click did nothing, so FL's *Create automation clip* wasn't there | The controls ignored right-clicks (a knob even moved on a right-drag) | Right-click (Ctrl-click on macOS) on any knob, drop-down, switch or articulation button opens the host's menu for that parameter: in FL Studio, *Create automation clip*, *Link to controller* and so on. On the bow pad, it opens a menu with a submenu for position and one for pressure. Hosts that don't offer a menu (Standalone, AU) get a small menu with *Reset to default*. |
+| Velocity 100 (FL's typing keyboard) sounded scratchy; 64 sounded right | Velocity mapped straight to dynamics, so 100 bowed at 79% of the maximum | A velocity curve that leaves velocity 64 where it was and flattens above it. The new **Vel Range** knob (Play panel, default 70%) sets the dynamics at velocity 127. At 70%, velocity 100 now plays at 63% instead of 79%. 100% gives the old, linear response. |
+| Z on FL's typing keyboard plays C3 (FL calls it C4), below the violin's G3 | FL chooses the notes its typing keyboard sends; the plugin can't change that | The new **Octave** drop-down (Play panel, −2 to +2) shifts every played note. Keyswitches don't move. Set it to +1 and Z plays C4. Held notes are released correctly if it changes while they sound. |
+
+Both new controls are ordinary parameters, so they are saved with the project and can be automated. Every parameter is automatable, and a test checks this.
+
+**The factory presets were re-levelled** for the new velocity curve. They are within ±0.9 dB of *Default Violin* on the test phrase again. *Spiccato* is at the +12 dB limit of the gain control.
+
+**Tests** (`tests/KeyboardInputTests.cpp`, tag `[keyboard]`): the velocity curve and its effect on bow speed, the octave shift (keyswitches unaffected, release after a change), saving both controls with the project, every parameter automatable, no editor component taking focus on a click, and a right-click on every knob opening the menu without moving it. The engine's model tests keep the linear velocity response they were calibrated on.
+
+**Still to check in FL Studio on Windows** (not testable here): the typing keyboard plays with the editor open and after clicking controls, and right-click shows FL's menu with *Create automation clip*.
+
 ## Work order
 
 | Step | Content | Depends on |
 |---|---|---|
-| 7.0 | Benchmark suite, CI regression job, reference renders and sound check | — |
+| 7.K | Typing keyboard, right-click automation, velocity curve and octave shift in FL Studio | — (done first) |
+| 7.0 | Benchmark suite, CI regression job, reference renders and sound check (done) | — |
 | 7.1 | Remove wasted work | 7.0 |
 | 7.2 | Control-rate voice maths | 7.0, legato-stutter and bow-noise work merged |
 | 7.3 | Faster measured body | 7.0 |
@@ -241,3 +312,8 @@ Jake, 2026-09-27:
 - **Reference machine:** Jake's Windows 11 PC. FL Studio, Reaper and Ableton Live must pass there.
 - **Tolerances:** the "sounds the same" tolerances above are accepted, so the control-rate work (7.2) goes ahead. Output is not required to be bit-exact.
 - **FFT library:** PFFFT for the measured body (7.3).
+
+Jake, when Phase 7 started:
+
+- FL Studio's typing keyboard must play the plugin by default, and nearly every control must be automatable from FL's right-click menu.
+- Velocity 100 is too intense; velocity 64 sounds right (7.K).

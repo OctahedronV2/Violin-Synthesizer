@@ -74,6 +74,7 @@ public:
                                + " (MIDI note " + juce::String (engine::firstKeyswitch + a) + ")");
             button.setRadioGroupId (1);
             button.onClick = [this, a] { articulationAttachment.setValueAsCompleteGesture (static_cast<float> (a)); };
+            button.onParameterMenu = [this, &button] { showParameterMenu (button, parameter (id::articulation)); };
             addAndMakeVisible (button);
         }
         keyswitchHint.setText ("Keyswitches: C1 to A1 (C2 to A2 in FL Studio)", juce::dontSendNotification);
@@ -91,8 +92,10 @@ public:
         // Play
         playChoices = { &addChoice (id::playMode, "Mode") };
         playToggles = { &addToggle (id::autoBowChange, "Auto bow change"), &addToggle (id::mpe, "MPE") };
+        playChoices.push_back (&addChoice (id::octave, "Octave"));
         playKnobs = { &addKnob (id::resonance, "Resonance"),
                       &addKnob (id::humanise, "Humanise"),
+                      &addKnob (id::velocityRange, "Vel Range"),
                       &addKnob (id::mpeBendRange, "MPE Bend") };
 
         // Body and output
@@ -116,6 +119,10 @@ public:
         keyboard.setTitle ("Keyboard");
         keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, colours::accent);
         keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, colours::accent.withAlpha (0.3f));
+        keyboard.setVelocity (0.5f, true); // softer lower on the key
+        // The host's typing keyboard plays the violin: this one takes no keys.
+        keyboard.clearKeyMappings();
+        keyboard.setWantsKeyboardFocus (false);
         addAndMakeVisible (keyboard);
 
         timerCallback();
@@ -225,20 +232,20 @@ private:
     struct Knob
     {
         juce::Label label;
-        juce::Slider slider;
+        ParameterControl<juce::Slider> slider;
         std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
     };
 
     struct Choice
     {
         juce::Label label;
-        juce::ComboBox box;
+        ParameterControl<juce::ComboBox> box;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attachment;
     };
 
     struct Toggle
     {
-        juce::ToggleButton button;
+        ParameterControl<juce::ToggleButton> button;
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;
     };
 
@@ -248,6 +255,11 @@ private:
         return articulation == static_cast<int> (engine::Articulation::detache)
             ? juce::String (juce::CharPointer_UTF8 ("D\xc3\xa9tach\xc3\xa9"))
             : juce::String (engine::articulationNames[static_cast<std::size_t> (articulation)]);
+    }
+
+    juce::RangedAudioParameter& parameter (const juce::ParameterID& id)
+    {
+        return *processor.getParameters().getParameter (id.getParamID());
     }
 
     Knob& addKnob (const juce::ParameterID& id, const juce::String& text)
@@ -264,6 +276,7 @@ private:
             processor.getParameters()
                 .getParameter (id.getParamID())
                 ->convertFrom0to1 (processor.getParameters().getParameter (id.getParamID())->getDefaultValue()));
+        knob->slider.onParameterMenu = [&k = *knob, &p = parameter (id)] { showParameterMenu (k.slider, p); };
         knob->attachment
             = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (processor.getParameters(),
                                                                                       id.getParamID(),
@@ -283,6 +296,7 @@ private:
         if (auto* param
             = dynamic_cast<juce::AudioParameterChoice*> (processor.getParameters().getParameter (id.getParamID())))
             choice->box.addItemList (param->choices, 1);
+        choice->box.onParameterMenu = [&c = *choice, &p = parameter (id)] { showParameterMenu (c.box, p); };
         choice->attachment
             = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (processor.getParameters(),
                                                                                         id.getParamID(),
@@ -298,6 +312,7 @@ private:
         auto toggle = std::make_unique<Toggle>();
         toggle->button.setButtonText (text);
         toggle->button.setTitle (text);
+        toggle->button.onParameterMenu = [&t = *toggle, &p = parameter (id)] { showParameterMenu (t.button, p); };
         toggle->attachment
             = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (processor.getParameters(),
                                                                                       id.getParamID(),
@@ -439,7 +454,7 @@ private:
     PresetBar presetBar;
     juce::MidiKeyboardComponent keyboard;
     juce::ParameterAttachment articulationAttachment;
-    std::array<juce::TextButton, engine::numArticulations> articulationButtons;
+    std::array<ParameterControl<juce::TextButton>, engine::numArticulations> articulationButtons;
     juce::Label keyswitchHint, credits;
 
     std::vector<std::unique_ptr<Knob>> knobs;
@@ -468,6 +483,14 @@ ViolinSynthEditor::ViolinSynthEditor (ViolinSynthProcessor& owner)
     if (auto* sizeLimits = getConstrainer())
         sizeLimits->setFixedAspectRatio (static_cast<double> (baseWidth) / baseHeight);
     setSize (baseWidth, baseHeight);
+
+    // Clicking the editor must not take the keyboard away from the host
+    // (FL Studio's typing keyboard, Ableton's computer MIDI keyboard), so no
+    // control grabs focus on a click. Text boxes still take it while a value
+    // is typed, and Tab still reaches every control. This runs last: the
+    // look and feel rebuilds the controls' text boxes, and setResizable()
+    // adds the resize corner.
+    stopClicksTakingFocus (*this);
 }
 
 ViolinSynthEditor::~ViolinSynthEditor()
