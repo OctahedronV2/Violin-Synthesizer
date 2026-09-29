@@ -795,6 +795,16 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         betaTarget = std::clamp (betaTarget * far * std::pow (close / far, d), 0.035, 0.3);
         fractionTarget *= hg::param ("PD_LIGHT", 0.8) + (hg::param ("PD_HEAVY", 1.25) - hg::param ("PD_LIGHT", 0.8)) * d;
     }
+    if (hg::on (hg::weightBright) && isBowed() && damping == Damping::bowed)
+    {
+        // A heavier bow keeps the Helmholtz corner sharper: louder is brighter.
+        const auto want = instrument->loss.t60High * std::pow (hg::param ("WB_RANGE", 4.0), std::clamp (dynamics, 0.0, 1.0) - 0.5);
+        if (std::abs (want / bowedParams.loss.t60High - 1.0) > 0.03)
+        {
+            bowedParams.loss.t60High = want;
+            string.setParams (bowedParams);
+        }
+    }
     speedScale = 1.0;
     switch (noteArticulation)
     {
@@ -828,8 +838,9 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
 
     updateArm();
     updateTargets (settings, context);
-    if (stage == Stage::attack || stage == Stage::sustain)
-        player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
+    if ((stage == Stage::attack || stage == Stage::sustain)
+        && ! (hg::on (hg::settleHold) && std::min (strokeSeconds, secondsSinceNoteChange) < hg::param ("SETTLE_T", 0.12)))
+        player.adjust (controlInterval / fs, 1.0 - settings.imperfection, hg::on (hg::leanOut));
     f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
     player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning (f0Now) : f0Now));
     controlJump = jumpNote = false;

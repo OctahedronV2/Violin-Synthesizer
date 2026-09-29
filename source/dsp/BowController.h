@@ -109,7 +109,7 @@ public:
 
     // While the bow plays the string: moves the weight over `seconds`.
     // skill 1 applies the whole correction, 0 none (the unassisted model).
-    void adjust (double seconds, double skill)
+    void adjust (double seconds, double skill, bool leanIntoDoubleSlip = false)
     {
         const auto noise = scratch();
         // Two or so slips per period with little scratch: a steady double slip
@@ -117,7 +117,9 @@ public:
         // would lock it in, so the weight only drifts back to where it was.
         const bool doubleSlip = slips > doubleSlipLow && slips < doubleSlipHigh && noise < doubleSlipScratch;
 
-        if (noise > scratchThreshold && ! doubleSlip)
+        if (doubleSlip && leanIntoDoubleSlip)
+            logWeight += correctionRate * seconds; // HG: a player presses to bring the fundamental in
+        else if (noise > scratchThreshold && ! doubleSlip)
             logWeight -= correctionRate * seconds;
         else if (slips > multiSlipThreshold && noise <= scratchThreshold)
             logWeight += correctionRate * seconds;
