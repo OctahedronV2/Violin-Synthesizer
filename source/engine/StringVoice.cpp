@@ -80,7 +80,13 @@ constexpr double torsionMakeup = (1.0 + torsionImpedanceRatio) / torsionImpedanc
 // ... and lengthens each period a little: the note sounds 0.85 cents flatter
 // on average (up to 1.8). The string is tuned 1.4 cents sharp, which also
 // takes out the 0.55 cents the bowed model was already flat.
-constexpr double torsionTuning = 1.000809;
+// SCRATCH (final tune-up): measured on held notes it came out 1 cent sharp low
+// and 0.5 flat at the top, so the correction now follows the register.
+inline double torsionTuning (double f0)
+{
+    const auto semis = 12.0 * std::log2 (std::max (f0, 1.0) / 196.0);
+    return std::pow (2.0, (0.1 + 0.04 * semis) / 1200.0);
+}
 // Near the bridge with a firm bow, the twisting string can also lock onto the
 // bow: it sticks and travels with the hair, silent, however long the note is
 // held (v1.0.1: Bright Soloist's G and A strings went dead). In Helmholtz
@@ -282,7 +288,7 @@ void StringVoice::setTarget (int note, bool glide)
     if (authOn (1) && ! (fixOn (4) && glide))
     {
         noteVibRate = 1.0 + 0.06 * nextNoise();
-        noteVibDepth = 1.0 + 0.2 * nextNoise();
+        noteVibDepth = 1.0 + 0.12 * nextNoise(); // humanise adds its own depth drift
         vibratoPhase = 0.5 + 0.5 * nextNoise(); // the hand is wherever it was
     }
     // Take the new pitch, or start the glide, from the next sample.
@@ -617,7 +623,8 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     {
         // Blooms over 0.6 s, wider when louder, a little different on every note.
         const auto x = std::clamp (((fixOn (4) ? vibratoSeconds : secondsSinceNoteChange) - 0.2) / 0.6, 0.0, 1.0);
-        onsetShape = (0.5 - 0.5 * std::cos (std::numbers::pi * x)) * noteVibDepth * (0.75 + 0.5 * dynamics);
+        // SCRATCH (final tune-up): 0.8 brings the depth to the 16 cents measured on real players.
+        onsetShape = 0.8 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)) * noteVibDepth * (0.75 + 0.5 * dynamics);
     }
     const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
@@ -629,10 +636,10 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
     if (authOn (1) && ! instrument->fretted)
     {
-        // Rolling the finger back from the note: the swing leans flat, and the
-        // hand lingers at the top, so the heard pitch stays on the note.
+        // The hand lingers at the ends of the swing. It no longer leans flat: the
+        // flat finger landing already models the approach from below.
         const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
-        vibratoCents = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi) - 0.1);
+        vibratoCents = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
     }
     const auto landing = landingCents * std::exp (-secondsSinceNoteChange / 0.09);
     const auto bendCents = noteIntonationCents + landing + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
@@ -733,7 +740,7 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
     if (stage == Stage::attack || stage == Stage::sustain)
         player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
     f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
-    player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning : f0Now));
+    player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning (f0Now) : f0Now));
     controlJump = jumpNote = false;
     advanceControl (settings, controlInterval);
     updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
@@ -942,7 +949,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             * (string.isSticking() ? hairStick : 1.0);
     }
 
-    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0,
+    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning (f0) : f0,
                              b,
                              context.direction * speed,
                              force,
