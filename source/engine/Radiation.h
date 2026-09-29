@@ -25,6 +25,10 @@ class Radiation
 public:
     static constexpr float airGain = 0.004f;
     static constexpr double micPeaksDb = 10.0, micQ = 40.0, bodyQ = 20.0;
+    // Silent input for this long lets the filters rest (their tails are far
+    // below it by then), so an idle instrument costs nothing here.
+    static constexpr float silenceThreshold = 1.0e-10f;
+    static constexpr double dormantSeconds = 1.0;
 
     // Message thread; allocates.
     void prepare (double sampleRate, int maxBlockSize);
@@ -45,5 +49,7 @@ private:
     std::array<Biquad, 36> bodyPeaks;
     std::array<Biquad, 40> micPeaks;
     std::vector<float> air;
+    int quietRun = 0, dormantAfter = 1; // samples of silent input
+    bool dormant = false, airSilent = true;
 };
 } // namespace violinsynth::engine

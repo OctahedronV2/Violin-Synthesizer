@@ -7,6 +7,11 @@ namespace violinsynth::engine
 {
 namespace
 {
+bool isSilent (float x)
+{
+    return std::abs (x) <= Radiation::silenceThreshold;
+}
+
 // A fixed pseudo-random set, so every instance and every run sounds the same.
 struct Draw
 {
@@ -42,6 +47,7 @@ void setPeaks (std::array<Biquad, N>& filters,
 void Radiation::prepare (double sampleRate, int maxBlockSize)
 {
     fs = sampleRate;
+    dormantAfter = std::max (1, static_cast<int> (dormantSeconds * fs));
     air.assign (static_cast<std::size_t> (std::max (1, maxBlockSize)), 0.0f);
     airFilters[0].setHighPass (fs, 11000.0, 0.54);
     airFilters[1].setHighPass (fs, 11000.0, 1.31);
@@ -60,6 +66,8 @@ void Radiation::reset()
         f.reset();
     for (auto& f : micPeaks)
         f.reset();
+    quietRun = dormantAfter;
+    dormant = true;
 }
 
 void Radiation::setBodyPeaks (double depthDb)
@@ -72,6 +80,12 @@ void Radiation::setBodyPeaks (double depthDb)
 
 void Radiation::processPreBody (const float* samples, int numSamples)
 {
+    airSilent = std::all_of (samples, samples + numSamples, isSilent);
+    if (dormant && airSilent)
+    {
+        std::fill_n (air.begin(), numSamples, 0.0f);
+        return;
+    }
     for (int i = 0; i < numSamples; ++i)
         air[static_cast<std::size_t> (i)]
             = airFilters[2].process (airFilters[1].process (airFilters[0].process (samples[i])));
@@ -79,6 +93,11 @@ void Radiation::processPreBody (const float* samples, int numSamples)
 
 void Radiation::processPostBody (float* samples, int numSamples)
 {
+    const auto inputSilent = airSilent && std::all_of (samples, samples + numSamples, isSilent);
+    if (dormant && inputSilent)
+        return; // at rest: silence in, silence out
+    dormant = false;
+
     const bool peaks = bodyPeaksDb != 0.0;
     for (int i = 0; i < numSamples; ++i)
     {
@@ -90,5 +109,9 @@ void Radiation::processPostBody (float* samples, int numSamples)
             x = f.process (x);
         samples[i] = x;
     }
+
+    quietRun = inputSilent ? quietRun + numSamples : 0;
+    if (quietRun >= dormantAfter)
+        reset();
 }
 } // namespace violinsynth::engine
