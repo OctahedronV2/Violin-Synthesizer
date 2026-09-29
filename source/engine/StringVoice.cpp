@@ -276,7 +276,7 @@ void StringVoice::setTarget (int note, bool glide)
             // own intonation, and starts slightly flat.
             const auto g = (nextNoise() + nextNoise() + nextNoise()) * 0.577 * 1.73; // approx unit normal
             noteIntonationCents = sigma * g;
-            landingCents = -9.0 * (1.0 + 0.5 * nextNoise());
+            landingCents = -9.0 * (sigma / 8.0) * (1.0 + 0.5 * nextNoise());
         }
     }
     if (authOn (1) && ! (fixOn (4) && glide))
