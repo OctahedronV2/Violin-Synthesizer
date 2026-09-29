@@ -195,7 +195,7 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
     hairRandom = 0xc2b2ae35u * static_cast<std::uint32_t> (stringIndex + 1);
     tremorLowCoeff = std::exp (-2.0 * std::numbers::pi * tremorLowHz * controlInterval / fs);
     tremorHighCoeff = std::exp (-2.0 * std::numbers::pi * tremorHighHz * controlInterval / fs);
-    hairCoeff = std::exp (-2.0 * std::numbers::pi * hairNoiseHz / fs);
+    hairCoeff = std::exp (-2.0 * std::numbers::pi * hg::param ("HAIR_HZ", hairNoiseHz) / fs);
     // Both scaled to unit variance (uniform noise has variance 1/3).
     hairScale = 1.0 / std::sqrt ((1.0 - hairCoeff) / (3.0 * (1.0 + hairCoeff)));
     {
@@ -1061,7 +1061,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
         hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
         hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
-            * (string.isSticking() ? hairStick : 1.0);
+            * (string.isSticking() ? hairStick : 1.0)
+            * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (currentNote - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
     }
 
     if (hg::on (hg::wideBow))
