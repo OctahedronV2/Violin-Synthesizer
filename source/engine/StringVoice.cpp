@@ -1092,7 +1092,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         // catching (before the string settles into clean slip-stick), then mostly gone.
         static const double scratchA = hg::param ("AS_A", 0.0), scratchT = hg::param ("AS_T", 0.08);
         if (scratchA > 0.0)
-            hairVelocity *= 1.0 + scratchA * std::exp (-std::min (strokeSeconds, secondsSinceNoteChange) / scratchT);
+            hairVelocity *= 1.0 + scratchA * std::pow (10.0, -hg::param ("AS_SLOPE", 0.0) * (currentNote - 69) / 20.0)
+                                    * std::exp (-std::min (strokeSeconds, secondsSinceNoteChange) / scratchT);
         // HG: as the bow lifts, fewer hairs touch the string: the grain fades with the weight.
         static const bool hairLift = hg::param ("HAIR_LIFT", 0.0) > 0.5;
         if (hairLift && stage == Stage::release)
