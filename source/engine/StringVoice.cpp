@@ -827,7 +827,8 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     else if (stage == Stage::release)
     {
-        envelopePosition += dt / std::max (settings.releaseSeconds, 1.0e-3);
+        static const double relSec = std::getenv ("RELSEC") ? std::atof (std::getenv ("RELSEC")) : 0.0; // SCRATCH
+        envelopePosition += dt / std::max (relSec > 0.0 ? relSec : settings.releaseSeconds, 1.0e-3);
         if (envelopePosition >= 1.0)
             stage = Stage::ringing;
     }
@@ -870,6 +871,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
         auto forceGain = 1.0;
         speed = forceSpeed;
+        {
+            // SCRATCH (reference comparison): a released stroke lifts the bow while it
+            // still moves, so the string keeps its amplitude and rings on. RING 0..1 is
+            // how much of the bow speed is kept while the weight comes off.
+            static const double ring = std::getenv ("RING") ? std::atof (std::getenv ("RING")) : 0.0;
+            if (ring > 0.0 && stage == Stage::release && slurs (noteArticulation))
+                speed = nominal * (1.0 - (1.0 - ring) * (1.0 - envelopeShape() / std::max (releaseStartLevel, 1.0e-3)));
+        }
 
         switch (noteArticulation)
         {

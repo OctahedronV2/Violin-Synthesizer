@@ -176,6 +176,30 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 const auto g = static_cast<float> (std::getenv ("AIR_GAIN") ? std::atof (std::getenv ("AIR_GAIN")) : 0.02);
                 for (int i = 0; i < chunkLength; ++i)
                     samples[i] += g * air[static_cast<size_t> (i)];
+                if (std::getenv ("BODYFS"))
+                {
+                    // SCRATCH (reference comparison): peaks and dips of the whole radiated
+                    // power, which a hall's reverb keeps. Real violins measure 10-11 dB of
+                    // harmonic-to-harmonic spread, our bridge-admittance body 4.5 dB.
+                    static std::array<Biquad, 36> bq;
+                    static bool bqReady = false;
+                    if (! bqReady)
+                    {
+                        unsigned r = 777u;
+                        const auto rnd = [&r] { r = r * 1664525u + 1013904223u; return static_cast<double> (r >> 8) / 16777216.0; };
+                        const auto depth = std::atof (std::getenv ("BODYFS"));
+                        const auto q = std::getenv ("BODYQ") ? std::atof (std::getenv ("BODYQ")) : 20.0;
+                        for (size_t k = 0; k < bq.size(); ++k)
+                        {
+                            const auto f = 250.0 * std::pow (7000.0 / 250.0, (static_cast<double> (k) + rnd()) / static_cast<double> (bq.size()));
+                            bq[k].setPeak (hostRate, f, (k % 2 ? depth : -depth) * (0.6 + 0.8 * rnd()), q);
+                        }
+                        bqReady = true;
+                    }
+                    for (int i = 0; i < chunkLength; ++i)
+                        for (auto& b : bq)
+                            samples[i] = b.process (samples[i]);
+                }
                 if (std::getenv ("MICFS"))
                 {
                     // SCRATCH: the fine peaks and dips of the sound radiated toward one
