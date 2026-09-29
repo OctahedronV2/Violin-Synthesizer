@@ -1,4 +1,5 @@
 #include "engine/StringVoice.h"
+#include "engine/AuthVariant.h"
 
 #include <algorithm>
 #include <cmath>
@@ -256,6 +257,12 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
+    if (authVariant() == 1)
+    {
+        noteVibRate = 1.0 + 0.06 * nextNoise();
+        noteVibDepth = 1.0 + 0.2 * nextNoise();
+        vibratoPhase = 0.5 + 0.5 * nextNoise(); // the hand is wherever it was
+    }
     // Take the new pitch, or start the glide, from the next sample.
     controlJump = jumpNote = true;
     jumpGlides = glide;
@@ -510,7 +517,13 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     advanceGlide (settings, seconds);
     secondsSinceNoteChange += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-    vibratoPhase += settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * seconds;
+    auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise);
+    if (authVariant() == 1)
+    {
+        const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
+        rate *= noteVibRate * (0.8 + 0.25 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)));
+    }
+    vibratoPhase += rate * seconds;
     vibratoPhase -= std::floor (vibratoPhase);
 }
 
@@ -569,14 +582,28 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     const auto onset
         = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
-    const auto depth = (onset * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
+    auto onsetShape = onset;
+    if (authVariant() == 1)
+    {
+        // Blooms over 0.6 s, wider when louder, a little different on every note.
+        const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
+        onsetShape = (0.5 - 0.5 * std::cos (std::numbers::pi * x)) * noteVibDepth * (0.75 + 0.5 * dynamics);
+    }
+    const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
     if (droning)
         return std::exp (logF0); // an open string: nothing to bend it
     // A fretted string can only be pushed sharp: its vibrato bends up from the note.
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
-    const auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
+    auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
+    if (authVariant() == 1 && ! instrument->fretted)
+    {
+        // Rolling the finger back from the note: the swing leans flat, and the
+        // hand lingers at the top, so the heard pitch stays on the note.
+        const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
+        vibratoCents = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi) - 0.1);
+    }
     const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
         + fingerWanderCents * humanise * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
@@ -609,6 +636,21 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
         + tremorSpeed * humanise * speedTremor.band() * tremorScale;
+    if (authVariant() == 2 && isBowed() && noteArticulation != Articulation::spiccato
+        && noteArticulation != Articulation::staccato && noteArticulation != Articulation::tremolo)
+    {
+        // Note shaping: a small grip at the start of each stroke, then the bow
+        // opens into the note (a swell peaking near 0.8 s) and eases back.
+        const auto t = strokeSeconds;
+        const auto grip = 0.12 * std::exp (-t / 0.07);
+        // Within a slur each note still gets its own, smaller, swell.
+        const auto u = secondsSinceNoteChange;
+        const auto slurred = u < t - 0.01;
+        const auto swell = (slurred ? 0.14 : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
+        const auto shape = 1.0 + grip + swell;
+        armSpeedGain *= shape;
+        betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge
+    }
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting

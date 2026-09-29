@@ -1,4 +1,6 @@
 #include "engine/OutputChain.h"
+#include "engine/AuthVariant.h"
+#include <array>
 
 #include <algorithm>
 #include <cmath>
@@ -124,6 +126,57 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
         const auto side = 0.5f * width.getNextValue() * (a - b);
         left[i] = m + side;
         right[i] = m - side;
+    }
+
+    if (authVariant() == 4)
+    {
+        // SCRATCH: a violin radiates each frequency in its own direction, so two
+        // microphones hear different body peaks. As vibrato sweeps the partials
+        // across them, the left and right levels move against each other.
+        // Early reflections from a stage floor and nearby walls follow.
+        struct Dir
+        {
+            std::array<Biquad, 4> l, r;
+        };
+        static Dir dir;
+        static std::array<float, 8192> line {};
+        static int w = 0;
+        static Biquad reflLow;
+        static bool ready = false;
+        if (! ready)
+        {
+            const double fl[] = { 1150.0, 2100.0, 3300.0, 5200.0 }, fr[] = { 1500.0, 2650.0, 4100.0, 6400.0 };
+            const double g[] = { 5.0, -5.0, 5.0, -5.0 };
+            for (int k = 0; k < 4; ++k)
+            {
+                dir.l[static_cast<size_t> (k)].setPeak (fs, fl[k], g[k], 2.5);
+                dir.r[static_cast<size_t> (k)].setPeak (fs, fr[k], g[k], 2.5);
+            }
+            reflLow.setLowPass (fs, 5000.0);
+            ready = true;
+        }
+        const auto ms = [this] (double m) { return static_cast<int> (m * 0.001 * fs); };
+        const int tl[] = { ms (4.3), ms (11.7), ms (19.1), ms (27.9), ms (37.3) };
+        const int tr[] = { ms (5.9), ms (13.3), ms (17.2), ms (31.1), ms (41.7) };
+        const float gr[] = { 0.42f, 0.3f, 0.24f, 0.18f, 0.13f };
+        for (int i = 0; i < numSamples; ++i)
+        {
+            auto dl = left[i], dr = right[i];
+            for (auto& f : dir.l)
+                dl = f.process (dl);
+            for (auto& f : dir.r)
+                dr = f.process (dr);
+            line[static_cast<size_t> (w)] = reflLow.process (mono[i]);
+            float el = 0.0f, er = 0.0f;
+            for (int k = 0; k < 5; ++k)
+            {
+                el += gr[k] * line[static_cast<size_t> ((w - tl[k]) & 8191)];
+                er += gr[k] * line[static_cast<size_t> ((w - tr[k]) & 8191)];
+            }
+            w = (w + 1) & 8191;
+            left[i] = 0.8f * dl + 0.5f * el;
+            right[i] = 0.8f * dr + 0.5f * er;
+        }
     }
 
     float* channels[] = { left, right };

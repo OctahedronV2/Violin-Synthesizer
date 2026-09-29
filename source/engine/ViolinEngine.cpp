@@ -1,4 +1,7 @@
 #include "engine/ViolinEngine.h"
+#include "engine/AuthVariant.h"
+#include "engine/Filters.h"
+#include <array>
 
 #include <algorithm>
 #include <cmath>
@@ -153,7 +156,29 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         {
             sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
             output.processPreBody (samples, chunkLength);
-            body.process (samples, chunkLength);
+            if (authVariant() == 3)
+            {
+                // SCRATCH: the measured bodies stop at 10 kHz; above that the
+                // bridge still passes the string's own "air" (Iowa level).
+                static std::array<float, 16384> air {};
+                static std::array<Biquad, 3> hp;
+                static bool ready = false;
+                if (! ready)
+                {
+                    hp[0].setHighPass (hostRate, 11000.0, 0.54);
+                    hp[1].setHighPass (hostRate, 11000.0, 1.31);
+                    hp[2].setHighShelf (hostRate, 14000.0, -6.0);
+                    ready = true;
+                }
+                for (int i = 0; i < chunkLength; ++i)
+                    air[static_cast<size_t> (i)] = hp[2].process (hp[1].process (hp[0].process (samples[i])));
+                body.process (samples, chunkLength);
+                const auto g = static_cast<float> (std::getenv ("AIR_GAIN") ? std::atof (std::getenv ("AIR_GAIN")) : 0.02);
+                for (int i = 0; i < chunkLength; ++i)
+                    samples[i] += g * air[static_cast<size_t> (i)];
+            }
+            else
+                body.process (samples, chunkLength);
         }
 
         auto* left = buffer.getWritePointer (0, chunkStart);
