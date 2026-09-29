@@ -403,6 +403,8 @@ void StringVoice::start (int note, float velocity, Articulation a)
     strokeBite = true;
     if (hg::on (hg::proBowing) && slurs (a))
         attackSeconds = ringingString ? hg::param ("CHANGE_T", 0.03) : hg::param ("FRESH_T", 0.05);
+    else if (hg::on (hg::quickChange) && slurs (a) && ringingString)
+        attackSeconds = hg::param ("CHANGE_T", 0.02); // HG: a bow change on a sounding string is quick
 
     switch (a)
     {
