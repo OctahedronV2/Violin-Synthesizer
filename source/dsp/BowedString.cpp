@@ -1,5 +1,7 @@
 #include "dsp/BowedString.h"
 
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -21,6 +23,28 @@ constexpr int tauTableSize = 6 * 240 + 2;
 
 void BowedString::prepare (double internalSampleRate, double lowestF0)
 {
+    {
+        // Violin bridge admittance (s/kg): A0, CBR, B1-, B1+, a few higher
+        // plate modes, and the bridge hill (typical values from the literature).
+        struct M { double f, q, y; };
+        constexpr M table[bodyModes] { { 275, 15, 0.006 }, { 405, 25, 0.01 }, { 470, 35, 0.02 }, { 545, 35, 0.03 },
+                                       { 660, 30, 0.015 }, { 820, 30, 0.012 }, { 1050, 30, 0.01 }, { 1350, 25, 0.012 },
+                                       { 2500, 2.5, 0.04 }, { 3300, 4.0, 0.025 } };
+        const char* env = std::getenv ("HG");
+        bodyFeedback = env != nullptr && (std::atoi (env) & 512) != 0;
+        const char* c = std::getenv ("COUPLE");
+        const auto couple = c != nullptr ? std::atof (c) : 1.0;
+        for (int k = 0; k < bodyModes; ++k)
+        {
+            const auto w = 2.0 * 3.141592653589793 * table[k].f / internalSampleRate;
+            const auto alpha = std::sin (w) / (2.0 * table[k].q);
+            const auto a0 = 1.0 + alpha;
+            modes[static_cast<std::size_t> (k)].b0 = couple * table[k].y * alpha / a0;
+            modes[static_cast<std::size_t> (k)].a1 = -2.0 * std::cos (w) / a0;
+            modes[static_cast<std::size_t> (k)].a2 = (1.0 - alpha) / a0;
+        }
+    }
+
     fs = internalSampleRate;
     const auto maxDelay = fs / lowestF0 + 8.0;
     bridgeLine.prepare (maxDelay);
@@ -54,6 +78,9 @@ void BowedString::setPickup (const std::array<double, maxCoils>& coilMetres,
 void BowedString::reset()
 {
     bridgeLine.reset();
+    for (auto& m : modes)
+        m.x1 = m.x2 = m.y1 = m.y2 = 0.0;
+    lastForce = 0.0;
     nutLine.reset();
     torsionBridgeLine.reset();
     torsionNutLine.reset();
@@ -132,7 +159,20 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
     const auto yNut = nutLine.read (dNut);
 
     const auto reflected = loopFilter.process (yBridge);
-    const auto fromBridge = -reflected;
+    double bridgeVelocity = 0.0;
+    if (bodyFeedback)
+    {
+        for (auto& m : modes)
+        {
+            const auto y = m.b0 * (lastForce - m.x2) - m.a1 * m.y1 - m.a2 * m.y2;
+            m.x2 = m.x1;
+            m.x1 = lastForce;
+            m.y2 = m.y1;
+            m.y1 = y;
+            bridgeVelocity += y;
+        }
+    }
+    const auto fromBridge = -reflected + 2.0 * bridgeVelocity;
     const auto fromNut = -yNut;
     const auto vH = fromBridge + fromNut;
 
@@ -202,6 +242,7 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
     nutLine.write (fromBridge + injected);
 
     lastVelocity = twists ? vH + injected : result.velocity + excitation;
-    return params.friction.impedance * (yBridge + reflected);
+    lastForce = params.friction.impedance * (yBridge - fromBridge);
+    return lastForce;
 }
 } // namespace violinsynth::dsp

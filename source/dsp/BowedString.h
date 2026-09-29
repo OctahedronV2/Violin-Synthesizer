@@ -121,5 +121,14 @@ private:
     int numCoils = 0;
     double pickupScale = 0.0; // coil fraction at f0 = coil fraction of the open string * f0 * pickupScale
     double lastPickup = 0.0;
+
+    // HG experiment: the bridge moves. The body's admittance at the bridge
+    // (a bank of resonances) turns the string's force into bridge velocity,
+    // which feeds back into the string.
+    static constexpr int bodyModes = 10;
+    struct Mode { double b0 = 0.0, a1 = 0.0, a2 = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0; };
+    std::array<Mode, bodyModes> modes {};
+    bool bodyFeedback = false;
+    double lastForce = 0.0;
 };
 } // namespace violinsynth::dsp

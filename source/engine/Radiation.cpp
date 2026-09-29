@@ -122,7 +122,7 @@ void Radiation::processPostBody (float* samples, int numSamples)
         if (hg::on (hg::body))
             for (auto& f : hgEq)
                 x = f.process (x);
-        if (hg::on (hg::somber))
+        if (hg::on (hg::somber) && hg::param ("SOMBER_EQ", 1.0) > 0.5)
             for (auto& f : hgDark)
                 x = f.process (x);
         samples[i] = x;
