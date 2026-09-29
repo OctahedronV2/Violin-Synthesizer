@@ -401,8 +401,10 @@ TEST_CASE ("The player keeps scales free of scratch", "[bownoise][cleanbowing]")
     CHECK (clean.loud <= 1);
     CHECK (clean.scratchy * 3 <= unassisted.scratchy);
     // With the string's twist both settle on most notes; which few do not is
-    // chaotic, so this only checks the player does not make it worse.
-    CHECK (clean.helmholtz + 3 >= unassisted.helmholtz);
+    // chaotic and moves by a few notes between platforms (40 against 44 on
+    // Apple silicon), so this only checks the player does not make it worse
+    // by more than a tenth of the notes.
+    CHECK (clean.helmholtz + clean.notes / 10 >= unassisted.helmholtz);
 }
 
 TEST_CASE ("Imperfection at 100% leaves the bow weight alone", "[bownoise][cleanbowing]")
