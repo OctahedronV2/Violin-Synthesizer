@@ -156,7 +156,7 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         {
             sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
             output.processPreBody (samples, chunkLength);
-            if (authVariant() == 3)
+            if (authOn (3))
             {
                 // SCRATCH: the measured bodies stop at 10 kHz; above that the
                 // bridge still passes the string's own "air" (Iowa level).

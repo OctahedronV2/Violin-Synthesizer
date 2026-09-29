@@ -257,7 +257,7 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
-    if (authVariant() == 1)
+    if (authOn (1))
     {
         noteVibRate = 1.0 + 0.06 * nextNoise();
         noteVibDepth = 1.0 + 0.2 * nextNoise();
@@ -518,7 +518,7 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     secondsSinceNoteChange += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise);
-    if (authVariant() == 1)
+    if (authOn (1))
     {
         const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
         rate *= noteVibRate * (0.8 + 0.25 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)));
@@ -583,7 +583,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto onset
         = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
     auto onsetShape = onset;
-    if (authVariant() == 1)
+    if (authOn (1))
     {
         // Blooms over 0.6 s, wider when louder, a little different on every note.
         const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
@@ -597,7 +597,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
     auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
-    if (authVariant() == 1 && ! instrument->fretted)
+    if (authOn (1) && ! instrument->fretted)
     {
         // Rolling the finger back from the note: the swing leans flat, and the
         // hand lingers at the top, so the heard pitch stays on the note.
@@ -636,7 +636,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
         + tremorSpeed * humanise * speedTremor.band() * tremorScale;
-    if (authVariant() == 2 && isBowed() && noteArticulation != Articulation::spiccato
+    if (authOn (2) && isBowed() && noteArticulation != Articulation::spiccato
         && noteArticulation != Articulation::staccato && noteArticulation != Articulation::tremolo)
     {
         // Note shaping: a small grip at the start of each stroke, then the bow

@@ -9,3 +9,8 @@ inline int authVariant()
     return v;
 }
 } // namespace violinsynth::engine
+namespace violinsynth::engine
+{
+// AUTH_VARIANT=5 turns all four on together.
+inline bool authOn (int n) { return authVariant() == n || authVariant() == 5; }
+} // namespace violinsynth::engine

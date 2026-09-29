@@ -128,7 +128,7 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
         right[i] = m - side;
     }
 
-    if (authVariant() == 4)
+    if (authOn (4))
     {
         // SCRATCH: a violin radiates each frequency in its own direction, so two
         // microphones hear different body peaks. As vibrato sweeps the partials
