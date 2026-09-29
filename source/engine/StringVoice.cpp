@@ -484,6 +484,7 @@ void StringVoice::release()
     {
         releaseStartLevel = envelopeShape();
         releaseOverride = -1.0;
+        dampAfterLift = false;
         stage = Stage::release;
         envelopePosition = 0.0;
     }
@@ -942,7 +943,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     {
         envelopePosition += dt / std::max (releaseOverride > 0.0 ? std::min (releaseOverride, settings.releaseSeconds) : settings.releaseSeconds, 1.0e-3);
         if (envelopePosition >= 1.0)
+        {
             stage = Stage::ringing;
+            if (dampAfterLift && currentNote > spec->openMidiNote)
+                setDamping (Damping::damped);
+            else if (hg::param ("RING_SHORT", 0.0) > 0.5 && damping == Damping::bowed)
+                setDamping (Damping::shortRing); // HG: the bow has left; the note dies like a real one
+            dampAfterLift = false;
+        }
     }
 
     const auto& friction = string.getParams().friction;

@@ -93,7 +93,10 @@ public:
     void leaveBow()
     {
         if (stage == Stage::release)
+        {
             releaseOverride = hg::param ("LIFT_T", 0.012);
+            dampAfterLift = hg::param ("CROSS_DAMP", 0.0) > 0.5; // HG: the finger follows the bow to the next string
+        }
     }
 
     void setExpression (const NoteExpression& e)
@@ -184,6 +187,7 @@ private:
     double logF0 = 0.0, targetLogF0 = 0.0;
     double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0, hairPrevious = 0.0, hairGrain = 0.0;
     int hairHoldCount = 0;
+    bool dampAfterLift = false;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
