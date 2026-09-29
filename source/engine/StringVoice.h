@@ -182,7 +182,8 @@ private:
     Stage stage = Stage::open;
     int currentNote = -1;
     double logF0 = 0.0, targetLogF0 = 0.0;
-    double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0;
+    double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0, hairPrevious = 0.0, hairGrain = 0.0;
+    int hairHoldCount = 0;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;

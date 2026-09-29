@@ -1058,10 +1058,19 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         if (const auto locked = stuckSamples / (lockedPeriods * fs / f0); locked > 1.0)
             force *= std::pow (lockedEase, locked); // easing further the longer it holds
         hairRandom = hairRandom * 1664525u + 1013904223u;
-        const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
+        static const int hairHold = static_cast<int> (hg::param ("HAIR_HOLD", 1.0)); // HG: rosin crunch, a grain held for several samples
+        if (++hairHoldCount >= hairHold)
+        {
+            hairHoldCount = 0;
+            hairGrain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
+        }
+        const auto grain = hairGrain;
         hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
-        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
-            * (string.isSticking() ? hairStick : 1.0)
+        static const double hairTilt = hg::param ("HAIR_TILT", 0.0); // HG: tilt the grain toward the scratch band
+        const auto tilted = hg::param ("HAIR_GAIN", 1.0) * (hairLevel - hairTilt * hairPrevious) / (1.0 - 0.5 * hairTilt);
+        hairPrevious = hairLevel;
+        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * tilted * hairScale * speed
+            * (string.isSticking() ? hg::param ("HAIR_STICK", hairStick) : 1.0)
             * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (currentNote - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
     }
 
