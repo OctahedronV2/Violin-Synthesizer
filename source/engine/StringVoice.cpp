@@ -996,7 +996,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         if (hg::on (hg::transitions) && transitionSeconds < 0.04)
             hairBoost = std::max (hairBoost, 1.0 + 2.5 * (1.0 - transitionSeconds / 0.04));
         speed = forceSpeed;
-        if (const auto ring = instrument->releaseRing;
+        if (const auto ring = instrument->releaseRing * hg::param ("REL_RING", 1.0);
             ring > 0.0 && stage == Stage::release && slurs (noteArticulation))
         {
             // A released stroke: the bow lifts off while it still moves, so the
@@ -1080,6 +1080,18 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * tilted * hairScale * speed
             * (string.isSticking() ? hg::param ("HAIR_STICK", hairStick) : 1.0)
             * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (currentNote - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
+        // HG: the scratch belongs to the bowing: strongest while a new stroke or note is still
+        // catching (before the string settles into clean slip-stick), then mostly gone.
+        static const double scratchA = hg::param ("AS_A", 0.0), scratchT = hg::param ("AS_T", 0.08);
+        if (scratchA > 0.0)
+            hairVelocity *= 1.0 + scratchA * std::exp (-std::min (strokeSeconds, secondsSinceNoteChange) / scratchT);
+        // HG: as the bow lifts, fewer hairs touch the string: the grain fades with the weight.
+        static const bool hairLift = hg::param ("HAIR_LIFT", 0.0) > 0.5;
+        if (hairLift && stage == Stage::release)
+        {
+            const auto left = envelopeShape() / std::max (releaseStartLevel, 1.0e-3);
+            hairVelocity *= left * left;
+        }
     }
 
     if (hg::on (hg::wideBow))
