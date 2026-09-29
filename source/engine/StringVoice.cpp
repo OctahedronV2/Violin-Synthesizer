@@ -196,6 +196,12 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
     tremorLowCoeff = std::exp (-2.0 * std::numbers::pi * tremorLowHz * controlInterval / fs);
     tremorHighCoeff = std::exp (-2.0 * std::numbers::pi * tremorHighHz * controlInterval / fs);
     hairCoeff = std::exp (-2.0 * std::numbers::pi * hg::param ("HAIR_HZ", hairNoiseHz) / fs);
+    hairPeak.setPeak (fs, hg::param ("SC_PEAK_HZ", 2200.0), hg::param ("SC_PEAK_DB", 0.0), hg::param ("SC_PEAK_Q", 0.8));
+    hairShelf.setHighShelf (fs, hg::param ("SC_SHELF_HZ", 5000.0), hg::param ("SC_SHELF_DB", 0.0));
+    hairLow.setHighPass (fs, hg::param ("SC_LOW_HZ", 20.0));
+    hairPeak.reset();
+    hairLow.reset();
+    hairShelf.reset();
     // Both scaled to unit variance (uniform noise has variance 1/3).
     hairScale = 1.0 / std::sqrt ((1.0 - hairCoeff) / (3.0 * (1.0 + hairCoeff)));
     {
@@ -1085,7 +1091,9 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         static const double hairTilt = hg::param ("HAIR_TILT", 0.0); // HG: tilt the grain toward the scratch band
         const auto tilted = hg::param ("HAIR_GAIN", 1.0) * (hairLevel - hairTilt * hairPrevious) / (1.0 - 0.5 * hairTilt);
         hairPrevious = hairLevel;
-        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * tilted * hairScale * speed
+        static const bool scratchColour = hg::param ("SC_PEAK_DB", 0.0) != 0.0 || hg::param ("SC_SHELF_DB", 0.0) != 0.0 || hg::param ("SC_LOW_HZ", 20.0) > 20.0;
+        const auto coloured = scratchColour ? static_cast<double> (hairShelf.process (hairPeak.process (hairLow.process (static_cast<float> (tilted))))) : tilted;
+        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * coloured * hairScale * speed
             * (string.isSticking() ? hg::param ("HAIR_STICK", hairStick) : 1.0)
             * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (currentNote - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
         // HG: the scratch belongs to the bowing: strongest while a new stroke or note is still
