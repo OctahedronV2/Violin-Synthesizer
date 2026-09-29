@@ -184,6 +184,19 @@ void Violin::apply (const StringActions& actions)
                 if (s != a.string)
                     voices[static_cast<std::size_t> (s)].liftFinger(); // the hand moves on
     }
+    if (hg::on (hg::crossLift))
+    {
+        // HG: the bow is on the strings that play now; one it has crossed away from lifts at once.
+        bool played[maxStrings] = {};
+        bool any = false;
+        for (const auto& a : actions)
+            if (a.type != StringAction::Type::release)
+                played[a.string] = any = true;
+        if (any)
+            for (int s = 0; s < instrument->numStrings; ++s)
+                if (! played[s])
+                    voices[static_cast<std::size_t> (s)].leaveBow();
+    }
     if (instrument->flatBridge)
         updateDrones (newStroke);
 }

@@ -481,6 +481,7 @@ void StringVoice::release()
     if (stage == Stage::attack || stage == Stage::sustain)
     {
         releaseStartLevel = envelopeShape();
+        releaseOverride = -1.0;
         stage = Stage::release;
         envelopePosition = 0.0;
     }
@@ -929,7 +930,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     else if (stage == Stage::release)
     {
-        envelopePosition += dt / std::max (settings.releaseSeconds, 1.0e-3);
+        envelopePosition += dt / std::max (releaseOverride > 0.0 ? std::min (releaseOverride, settings.releaseSeconds) : settings.releaseSeconds, 1.0e-3);
         if (envelopePosition >= 1.0)
             stage = Stage::ringing;
     }

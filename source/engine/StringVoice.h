@@ -4,6 +4,7 @@
 #include "dsp/BowedString.h"
 #include "engine/Articulation.h"
 #include "engine/StringData.h"
+#include "engine/HurdyFix.h"
 
 #include <cmath>
 #include <cstdint>
@@ -88,6 +89,12 @@ public:
     void release();
     // HG: the finger lifts from a ringing stopped note (another string took over).
     void liftFinger();
+    // HG: the bow crosses to another string, so it leaves this released one at once.
+    void leaveBow()
+    {
+        if (stage == Stage::release)
+            releaseOverride = hg::param ("LIFT_T", 0.012);
+    }
 
     void setExpression (const NoteExpression& e)
     {
@@ -175,7 +182,7 @@ private:
     Stage stage = Stage::open;
     int currentNote = -1;
     double logF0 = 0.0, targetLogF0 = 0.0;
-    double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08;
+    double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
