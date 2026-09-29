@@ -187,7 +187,8 @@ private:
     int currentNote = -1;
     double logF0 = 0.0, targetLogF0 = 0.0;
     double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0, hairPrevious = 0.0, hairGrain = 0.0;
-    Biquad hairPeak, hairShelf, hairLow; // HG: scratch colour (SC_PEAK_*, SC_SHELF_*)
+    Biquad hairPeak, hairShelf, hairLow;
+    double evenGain = 1.0; // HG: scratch colour (SC_PEAK_*, SC_SHELF_*)
     int hairHoldCount = 0;
     bool dampAfterLift = false;
     double dynamics = 0.5, dynamicsTarget = 0.5, dynamicsCoeff = 0.0;

@@ -1,3 +1,6 @@
+#include <string>
+#include <array>
+#include <cstdlib>
 #include "engine/StringVoice.h"
 
 #include "engine/HurdyFix.h"
@@ -1177,6 +1180,31 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
     }
 
+    // HG: the player evens out notes that the body makes stick out (EVEN="midi:dB,...", dB to remove).
+    {
+        static const auto evenTable = [] {
+            std::array<double, 128> t {};
+            if (const char* e = std::getenv ("EVEN"))
+            {
+                std::string str (e);
+                std::size_t pos = 0;
+                while (pos < str.size())
+                {
+                    const auto comma = str.find (',', pos);
+                    const auto item = str.substr (pos, comma == std::string::npos ? std::string::npos : comma - pos);
+                    if (const auto colon = item.find (':'); colon != std::string::npos)
+                        t[static_cast<std::size_t> (std::clamp (std::atoi (item.substr (0, colon).c_str()), 0, 127))] = std::atof (item.substr (colon + 1).c_str());
+                    if (comma == std::string::npos)
+                        break;
+                    pos = comma + 1;
+                }
+            }
+            return t;
+        }();
+        const auto target = currentNote >= 0 ? std::pow (10.0, -evenTable[static_cast<std::size_t> (std::clamp (currentNote, 0, 127))] / 20.0) : evenGain;
+        evenGain += (target - evenGain) * 0.0005;
+        out *= evenGain;
+    }
     return out;
 }
 } // namespace violinsynth::engine
