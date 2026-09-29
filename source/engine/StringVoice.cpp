@@ -382,7 +382,15 @@ void StringVoice::start (int note, float velocity, Articulation a)
 {
     string.setFinger (0.0, 0.0);
     vertical.setFinger (0.0, 0.0);
-    setTarget (note, false);
+    const bool ringingString = stage != Stage::open && peakLevel > 1.0e-3;
+    const auto previousNote = currentNote;
+    if (hg::on (hg::longing) && ringingString && previousNote > spec->openMidiNote && std::abs (note - previousNote) >= 2)
+    {
+        setTarget (note, true); // the finger slides to the new note through the bow change
+        shifting = true;
+    }
+    else
+        setTarget (note, false);
     setArticulation (a);
     dynamicsTarget = std::clamp (static_cast<double> (velocity), 0.0, 1.0);
     dynamics = dynamicsTarget;
@@ -392,6 +400,9 @@ void StringVoice::start (int note, float velocity, Articulation a)
     vibratoSeconds = hg::on (hg::vibrato) ? 0.12 : 0.0; // HG: the hand keeps its vibrato between strokes
     stage = Stage::attack;
     attackSeconds = -1.0; // use the Attack setting
+    strokeBite = true;
+    if (hg::on (hg::proBowing) && slurs (a))
+        attackSeconds = ringingString ? hg::param ("CHANGE_T", 0.03) : hg::param ("FRESH_T", 0.05);
 
     switch (a)
     {
@@ -441,6 +452,7 @@ void StringVoice::legato (int note, float velocity, Articulation a)
         stage = Stage::attack;
         attackSeconds = legatoEntrySeconds;
         vibratoSeconds = vibratoCrossingSeconds; // the hand was already vibrating on the other string
+        strokeBite = false;
         envelopePosition = 0.0;
     }
 }
@@ -561,7 +573,8 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     // Singing vibrato: it quickens from 0.8 to about 1.05 times the rate as it blooms.
     const auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * noteVibRate
-        * (0.8 + 0.25 * vibratoBloom (settings)) * (hg::on (hg::vibrato) ? hg::param ("VIB_RATE", 1.1) * vibCycleRate : 1.0);
+        * (0.8 + 0.25 * vibratoBloom (settings)) * (hg::on (hg::vibrato) ? hg::param ("VIB_RATE", 1.1) * vibCycleRate : 1.0)
+        * (hg::on (hg::somber) ? hg::param ("SOMBER_VIB_RATE", 0.87) : 1.0);
     vibratoPhase += rate * seconds;
     if (vibratoPhase >= 1.0 && hg::on (hg::vibrato))
         vibCycleRate = 1.0 + 0.09 * nextNoise(); // no two cycles the same
@@ -576,7 +589,9 @@ void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
     if (glideProgress < 1.0)
     {
         const auto time
-            = shifting ? (hg::on (hg::transitions) ? std::max (settings.portamentoSeconds, 0.12) : settings.portamentoSeconds)
+            = shifting ? (hg::on (hg::longing) ? hg::param ("SLIDE_T", 0.14)
+                          : hg::on (hg::transitions) ? std::max (settings.portamentoSeconds, 0.12)
+                                                     : settings.portamentoSeconds)
                        : std::min (fingerChangeSeconds, settings.portamentoSeconds);
         glideProgress = time <= 0.0 ? 1.0 : std::min (1.0, glideProgress + seconds / time);
     }
@@ -585,7 +600,7 @@ void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
     else
     {
         auto c = 0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress);
-        if (shifting)
+        if (shifting && ! hg::on (hg::longing))
             c = c * c * (3.0 - 2.0 * c); // a hidden shift: the finger moves late and fast, then lands
         logF0 = glideFrom + (targetLogF0 - glideFrom) * c;
     }
@@ -648,7 +663,8 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     // The vibrato blooms, wider when louder and a little different on every
     // note. 0.8 brings the default depth to the 16 cents measured on real players.
-    const auto onsetShape = (hg::on (hg::vibrato) ? hg::param ("VIB_DEPTH", 1.7) : 0.8) * vibratoBloom (settings) * noteVibDepth * (0.75 + 0.5 * dynamics);
+    const auto grow = hg::on (hg::longing) ? 0.45 + 0.85 * std::min (1.0, secondsSinceNoteChange / 1.1) : 1.0;
+    const auto onsetShape = grow * (hg::on (hg::vibrato) ? hg::param ("VIB_DEPTH", 1.7) : hg::on (hg::somber) ? 1.4 : 0.8) * vibratoBloom (settings) * noteVibDepth * (0.75 + 0.5 * dynamics);
     const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
     if (droning)
@@ -739,7 +755,27 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     const auto lo = spec->forceWindowLow;
     const auto hi = spec->playerWindowHigh + (spec->forceWindowHigh - spec->playerWindowHigh) * imperfection;
     fractionTarget = (lo + (hi - lo) * setting) * droneWeight;
-    if (hg::on (hg::bowArm) && isBowed())
+    if (hg::on (hg::somber))
+    {
+        // Somber: the bow further from the bridge, lighter and slower.
+        betaTarget *= hg::param ("SOMBER_BETA", 1.35);
+        fractionTarget *= hg::param ("SOMBER_FORCE", 0.85);
+        armSpeedGain *= 0.85;
+    }
+    if (hg::on (hg::proBowing) && isBowed())
+    {
+        // Bow distribution: long notes get a slow, heavy bow; quick notes a light, fast one.
+        const auto d = std::clamp (std::pow (0.45 / std::max (context.expectedNote, 0.05), 0.3), 0.75, 1.35);
+        armSpeedGain *= d;
+        fractionTarget *= std::pow (d, -0.6);
+    }
+    if (hg::on (hg::longing) && isBowed())
+    {
+        // Lean into each note and sing higher notes out.
+        const auto u = secondsSinceNoteChange;
+        armSpeedGain *= (0.8 + 0.4 * (1.0 - std::exp (-u / 0.35))) * std::clamp (1.0 + 0.025 * (currentNote - 72), 0.7, 1.3);
+    }
+    if ((hg::on (hg::bowArm) || hg::on (hg::proBowing)) && isBowed())
     {
         // Heavy at the frog, light at the tip: down-bows fade, up-bows grow.
         const auto place = 0.5 - context.bowPlace;
@@ -914,11 +950,11 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
         auto forceGain = 1.0;
         auto hairBoost = 1.0;
-        if (hg::on (hg::bowArm) && slurs (noteArticulation) && attackSeconds < 0.0 && strokeSeconds < 0.05)
+        if ((hg::on (hg::bowArm) || hg::on (hg::proBowing)) && slurs (noteArticulation) && strokeBite && strokeSeconds < 0.05)
         {
             // The hair bites into the string before it settles: a short consonant.
             const auto bite = 1.0 - strokeSeconds / 0.05;
-            forceGain = 1.0 + hg::param ("BITE", 0.9) * bite;
+            forceGain = 1.0 + hg::param ("BITE", hg::on (hg::somber) ? 0.5 : 0.9) * bite;
             hairBoost = 1.0 + 3.0 * bite;
         }
         if (hg::on (hg::transitions) && transitionSeconds < 0.04)

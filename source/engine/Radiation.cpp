@@ -58,6 +58,9 @@ void Radiation::prepare (double sampleRate, int maxBlockSize)
     hgEq[0].setPeak (fs, hg::param ("NASAL_HZ", 1000.0), hg::param ("NASAL_DB", -7.0), 0.8);
     hgEq[1].setPeak (fs, hg::param ("WARM_HZ", 420.0), hg::param ("WARM_DB", 4.0), 0.9);
     hgEq[2].setPeak (fs, hg::param ("BRILL_HZ", 3000.0), hg::param ("BRILL_DB", 2.0), 1.2);
+    hgDark[0].setHighShelf (fs, hg::param ("DARK_HZ", 2500.0), hg::param ("DARK_DB", -6.0));
+    hgDark[1].setPeak (fs, 350.0, 4.0, 0.9);
+    hgDark[2].setPeak (fs, 1000.0, -5.0, 0.8);
     bodyPeaksDb = -1.0;
     setBodyPeaks (0.0);
     reset();
@@ -72,6 +75,8 @@ void Radiation::reset()
     for (auto& f : micPeaks)
         f.reset();
     for (auto& f : hgEq)
+        f.reset();
+    for (auto& f : hgDark)
         f.reset();
     quietRun = dormantAfter;
     dormant = true;
@@ -116,6 +121,9 @@ void Radiation::processPostBody (float* samples, int numSamples)
             x = f.process (x);
         if (hg::on (hg::body))
             for (auto& f : hgEq)
+                x = f.process (x);
+        if (hg::on (hg::somber))
+            for (auto& f : hgDark)
                 x = f.process (x);
         samples[i] = x;
     }

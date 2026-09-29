@@ -38,6 +38,7 @@ struct StringContext
     double globalBendSemitones = 0.0;
     double dynamicsOverride = -1.0; // CC11/CC2 value, or < 0 to use note velocity
     double pressureOverride = -1.0; // CC1 value, or < 0 to use the Bow Pressure setting
+    double expectedNote = 0.5; // HG: how long notes have been lately, s
     double bowPlace = 0.5; // HG: where on the bow the hair meets the string, 0 frog .. 1 tip
 };
 
@@ -219,6 +220,7 @@ private:
         const auto c = std::sqrt (armCoeff);
         return 1.0 / std::sqrt (std::pow (1.0 - c, 4.0) * (1.0 + c * c) / (3.0 * std::pow (1.0 - c * c, 3.0)));
     }
+    bool strokeBite = false;
     double vibCycleRate = 1.0, lastVibPhase = 0.0, scoopCents = 0.0, transitionSeconds = 1.0e9;
     double livingForce = 0.0, livingDrive = 0.0, livingSpeed = 0.0, livingSpeedDrive = 0.0;
     double stuckSamples = 0.0; // samples the string has stuck to the moving bow without letting go

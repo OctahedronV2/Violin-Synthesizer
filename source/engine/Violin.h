@@ -138,6 +138,7 @@ private:
     double bowUsed = 0.0; // metres of hair used in the current stroke
     double bowChangePhase = -1.0; // 0..1 during an automatic bow change
     double lastStrokeTime = -1.0e9;
+    double lastBowedTime = -1.0e9, lastOnsetTime = -1.0e9, expectedNote = 0.5; // HG pro bowing
     int bowChanges = 0;
 
     // Controllers

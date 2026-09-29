@@ -137,6 +137,16 @@ void Violin::apply (const StringActions& actions)
         switch (a.type)
         {
             case StringAction::Type::start:
+                if (hg::on (hg::proBowing) && time - lastStrokeTime > 0.05)
+                {
+                    // A player plans the bowing: after a breath the bow is retaken and
+                    // the phrase starts down-bow; otherwise strokes alternate.
+                    if (time - lastBowedTime > 0.3)
+                        direction = -1.0;
+                    if (const auto ioi = time - lastOnsetTime; ioi < 2.5)
+                        expectedNote = 0.6 * expectedNote + 0.4 * ioi;
+                    lastOnsetTime = time;
+                }
                 // One bow: notes of a chord share the stroke; a new stroke turns the bow.
                 if (time - lastStrokeTime > 0.05)
                 {
@@ -151,6 +161,12 @@ void Violin::apply (const StringActions& actions)
                 newStroke = true;
                 break;
             case StringAction::Type::legato:
+                if (hg::on (hg::proBowing))
+                {
+                    if (const auto ioi = time - lastOnsetTime; ioi < 2.5)
+                        expectedNote = 0.6 * expectedNote + 0.4 * ioi;
+                    lastOnsetTime = time;
+                }
                 // A player changes bow with the note; a turn mid-note is exposed.
                 if (settings.voice.autoBowChange && bowChangePhase < 0.0
                     && bowUsed > noteChangeTurnFraction * bowLengthMetres)
@@ -371,6 +387,7 @@ void Violin::render (float* out, int numSamples)
         {
             const auto used = std::clamp (bowUsed / bowLengthMetres, 0.0, 1.0);
             context.bowPlace = direction > 0.0 ? used : 1.0 - used;
+            context.expectedNote = expectedNote;
         }
 
         double sum = 0.0, fastest = 0.0;
@@ -383,6 +400,9 @@ void Violin::render (float* out, int numSamples)
         }
 
         bowUsed += fastest * dt;
+        for (int s = 0; s < instrument->numStrings; ++s)
+            if (voices[static_cast<std::size_t> (s)].isBowed())
+                lastBowedTime = time;
         if (settings.voice.autoBowChange && bowUsed > bowLengthMetres && bowChangePhase < 0.0)
             startBowChange();
 

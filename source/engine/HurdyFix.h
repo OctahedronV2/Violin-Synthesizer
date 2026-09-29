@@ -19,5 +19,5 @@ inline double param (const char* name, double fallback)
     const char* s = std::getenv (name);
     return s != nullptr ? std::atof (s) : fallback;
 }
-constexpr int vibrato = 1, bowArm = 2, transitions = 4, cleanEnds = 8, body = 16, living = 32;
+constexpr int vibrato = 1, bowArm = 2, transitions = 4, cleanEnds = 8, body = 16, living = 32, proBowing = 64, somber = 128, longing = 256;
 } // namespace violinsynth::engine::hg
