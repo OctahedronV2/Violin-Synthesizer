@@ -1,5 +1,7 @@
 #include "engine/StringVoice.h"
 #include "engine/AuthVariant.h"
+#include <cstdio>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -250,6 +252,8 @@ void StringVoice::setTarget (int note, bool glide)
         handPosition = above > handPosition + handSpan ? above - 4 : std::max (firstPosition, above - 1);
     }
     shifting = shift && currentNote > spec->openMidiNote;
+    if (std::getenv ("DEBUG_NOTES"))
+        std::fprintf (stderr, "string %d note %d -> %d glide %d shift %d hand %d\n", spec->openMidiNote, currentNote, note, (int) glide, (int) shifting, handPosition);
     currentNote = note;
     targetLogF0 = std::log (midiToHz (note));
     glideFrom = logF0;
@@ -257,7 +261,7 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
-    if (authOn (1))
+    if (authOn (1) && ! (fixOn (4) && glide))
     {
         noteVibRate = 1.0 + 0.06 * nextNoise();
         noteVibDepth = 1.0 + 0.2 * nextNoise();
@@ -356,6 +360,7 @@ void StringVoice::start (int note, float velocity, Articulation a)
     dynamicsCoeff = smoothingCoeff;
     envelopePosition = 0.0;
     strokeSeconds = 0.0;
+    vibratoSeconds = 0.0;
     stage = Stage::attack;
     attackSeconds = -1.0; // use the Attack setting
 
@@ -406,6 +411,7 @@ void StringVoice::legato (int note, float velocity, Articulation a)
         dynamics = dynamicsTarget;
         stage = Stage::attack;
         attackSeconds = legatoEntrySeconds;
+        vibratoSeconds = 0.3; // the hand was already vibrating on the other string
         envelopePosition = 0.0;
     }
 }
@@ -516,11 +522,12 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     const auto seconds = samples / fs;
     advanceGlide (settings, seconds);
     secondsSinceNoteChange += seconds;
+    vibratoSeconds += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise);
     if (authOn (1))
     {
-        const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
+        const auto x = std::clamp (((fixOn (4) ? vibratoSeconds : secondsSinceNoteChange) - 0.2) / 0.6, 0.0, 1.0);
         rate *= noteVibRate * (0.8 + 0.25 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)));
     }
     vibratoPhase += rate * seconds;
@@ -540,7 +547,12 @@ void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
     if (glideProgress >= 1.0)
         logF0 = targetLogF0;
     else
-        logF0 = glideFrom + (targetLogF0 - glideFrom) * (0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress));
+    {
+        auto c = 0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress);
+        if (fixOn (2) && shifting)
+            c = c * c * (3.0 - 2.0 * c); // the finger moves late and fast, then lands
+        logF0 = glideFrom + (targetLogF0 - glideFrom) * c;
+    }
 }
 
 void StringVoice::updateArm()
@@ -586,7 +598,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     if (authOn (1))
     {
         // Blooms over 0.6 s, wider when louder, a little different on every note.
-        const auto x = std::clamp ((secondsSinceNoteChange - 0.2) / 0.6, 0.0, 1.0);
+        const auto x = std::clamp (((fixOn (4) ? vibratoSeconds : secondsSinceNoteChange) - 0.2) / 0.6, 0.0, 1.0);
         onsetShape = (0.5 - 0.5 * std::cos (std::numbers::pi * x)) * noteVibDepth * (0.75 + 0.5 * dynamics);
     }
     const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
@@ -636,6 +648,8 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
         + tremorSpeed * humanise * speedTremor.band() * tremorScale;
+    if (fixOn (2) && shifting && glideProgress < 1.0)
+        armSpeedGain *= 1.0 - 0.35 * std::sin (std::numbers::pi * glideProgress); // the bow lightens to hide the slide
     if (authOn (2) && isBowed() && noteArticulation != Articulation::spiccato
         && noteArticulation != Articulation::staccato && noteArticulation != Articulation::tremolo)
     {
@@ -646,7 +660,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         // Within a slur each note still gets its own, smaller, swell.
         const auto u = secondsSinceNoteChange;
         const auto slurred = u < t - 0.01;
-        const auto swell = (slurred ? 0.14 : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
+        const auto swell = (slurred ? (fixOn (4) ? 0.0 : 0.14) : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
         const auto shape = 1.0 + grip + swell;
         armSpeedGain *= shape;
         betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge

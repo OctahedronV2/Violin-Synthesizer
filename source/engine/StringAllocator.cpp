@@ -1,4 +1,5 @@
 #include "engine/StringAllocator.h"
+#include "engine/AuthVariant.h"
 
 #include <algorithm>
 
@@ -146,6 +147,10 @@ void StringAllocator::legatoTo (int newIndex, int fromIndex, StringActions& acti
     if (canPlay (fromString, target.note) && std::abs (target.note - from.note) <= naturalLegatoInterval
         && target.note - open <= naturalPositionRange)
         string = fromString;
+    // A player in first position crosses to the next string rather than shifting up.
+    if (fixOn (1) && string == fromString && from.note - open <= 7 && target.note - open > 7
+        && canPlay (usualString (target.note), target.note))
+        string = usualString (target.note);
 
     // In monoLegato only one string sounds; in automatic mode other chord
     // notes keep sounding unless the line needs their string.
