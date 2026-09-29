@@ -1,12 +1,19 @@
 #include "engine/OutputChain.h"
-#include "engine/AuthVariant.h"
-#include <array>
 
 #include <algorithm>
 #include <cmath>
 
 namespace violinsynth::engine
 {
+namespace
+{
+// The stage fades in with the first 5% of the Room.
+float stageFor (float room)
+{
+    return juce::jlimit (0.0f, 1.0f, room / 0.05f);
+}
+} // namespace
+
 void OutputChain::prepare (double sampleRate, int maxBlockSize)
 {
     fs = sampleRate;
@@ -20,6 +27,7 @@ void OutputChain::prepare (double sampleRate, int maxBlockSize)
 
     width.reset (fs, 0.05);
     gain.reset (fs, 0.05);
+    stageAmount.reset (fs, 0.05);
 
     const juce::dsp::ProcessSpec stereo { fs, static_cast<juce::uint32> (maxBlockSize), 2 };
     reverb.prepare (stereo);
@@ -27,12 +35,14 @@ void OutputChain::prepare (double sampleRate, int maxBlockSize)
     limiter.setThreshold (-0.3f);
     limiter.setRelease (80.0f);
 
+    prepareStage();
     dormantAfter = std::max (1, static_cast<int> (dormantSeconds * fs));
     appliedSordino = -1.0f;
     appliedRoom = -1.0f;
     setSettings (settings);
     width.setCurrentAndTargetValue (settings.width);
     gain.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (settings.gainDb));
+    stageAmount.setCurrentAndTargetValue (stageFor (settings.room));
     reset();
 }
 
@@ -50,6 +60,13 @@ void OutputChain::resetPostBody()
     decorrelateA2.reset();
     decorrelateB1.reset();
     decorrelateB2.reset();
+    for (auto& f : stage.left)
+        f.reset();
+    for (auto& f : stage.right)
+        f.reset();
+    stage.reflectionLowPass.reset();
+    std::fill (stage.line.begin(), stage.line.end(), 0.0f);
+    stage.write = 0;
     reverb.reset();
     limiter.reset();
     postBodyDormant = true;
@@ -71,6 +88,7 @@ void OutputChain::setSettings (const OutputSettings& s)
 
     width.setTargetValue (juce::jlimit (0.0f, 1.0f, settings.width));
     gain.setTargetValue (juce::Decibels::decibelsToGain (settings.gainDb));
+    stageAmount.setTargetValue (stageFor (settings.room));
 
     if (std::abs (settings.room - appliedRoom) > 1.0e-4f)
     {
@@ -110,6 +128,7 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
             std::fill (right, right + numSamples, 0.0f);
             width.skip (numSamples);
             gain.skip (numSamples);
+            stageAmount.skip (numSamples);
             return;
         }
         postBodyDormant = false;
@@ -128,70 +147,7 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
         right[i] = m - side;
     }
 
-    if (authOn (4) && ! std::getenv ("NOSTAGE")) // SCRATCH: a hall IR brings its own reflections
-    {
-        // SCRATCH: a violin radiates each frequency in its own direction, so two
-        // microphones hear different body peaks. As vibrato sweeps the partials
-        // across them, the left and right levels move against each other.
-        // Early reflections from a stage floor and nearby walls follow.
-        struct Dir
-        {
-            std::array<Biquad, 12> l, r; // SCRATCH: 4 used unless DENSE
-        };
-        static Dir dir;
-        static std::array<float, 8192> line {};
-        static int w = 0;
-        static Biquad reflLow;
-        static bool ready = false;
-        if (! ready)
-        {
-            const double fl[] = { 1150.0, 2100.0, 3300.0, 5200.0 }, fr[] = { 1500.0, 2650.0, 4100.0, 6400.0 };
-            const double g[] = { 5.0, -5.0, 5.0, -5.0 };
-            for (int k = 0; k < 4; ++k)
-            {
-                dir.l[static_cast<size_t> (k)].setPeak (fs, fl[k], g[k], 2.5);
-                dir.r[static_cast<size_t> (k)].setPeak (fs, fr[k], g[k], 2.5);
-            }
-            if (std::getenv ("DENSE"))
-            {
-                // SCRATCH: a violin's radiation at one microphone has a peak or dip every
-                // few hundred hertz above 1 kHz; each ear hears a different pattern.
-                unsigned r = 12345u;
-                const auto rnd = [&r] { r = r * 1664525u + 1013904223u; return static_cast<double> (r >> 8) / 16777216.0; };
-                for (int k = 0; k < 12; ++k)
-                {
-                    const auto f = 900.0 * std::pow (10000.0 / 900.0, (k + rnd()) / 12.0);
-                    dir.l[static_cast<size_t> (k)].setPeak (fs, f, (k % 2 ? 6.0 : -6.0), 5.0);
-                    const auto f2 = 900.0 * std::pow (10000.0 / 900.0, (k + rnd()) / 12.0);
-                    dir.r[static_cast<size_t> (k)].setPeak (fs, f2, (k % 2 ? -6.0 : 6.0), 5.0);
-                }
-            }
-            reflLow.setLowPass (fs, 5000.0);
-            ready = true;
-        }
-        const auto ms = [this] (double m) { return static_cast<int> (m * 0.001 * fs); };
-        const int tl[] = { ms (4.3), ms (11.7), ms (19.1), ms (27.9), ms (37.3) };
-        const int tr[] = { ms (5.9), ms (13.3), ms (17.2), ms (31.1), ms (41.7) };
-        const float gr[] = { 0.42f, 0.3f, 0.24f, 0.18f, 0.13f };
-        for (int i = 0; i < numSamples; ++i)
-        {
-            auto dl = left[i], dr = right[i];
-            for (auto& f : dir.l)
-                dl = f.process (dl);
-            for (auto& f : dir.r)
-                dr = f.process (dr);
-            line[static_cast<size_t> (w)] = reflLow.process (mono[i]);
-            float el = 0.0f, er = 0.0f;
-            for (int k = 0; k < 5; ++k)
-            {
-                el += gr[k] * line[static_cast<size_t> ((w - tl[k]) & 8191)];
-                er += gr[k] * line[static_cast<size_t> ((w - tr[k]) & 8191)];
-            }
-            w = (w + 1) & 8191;
-            left[i] = 0.8f * dl + 0.5f * el;
-            right[i] = 0.8f * dr + 0.5f * er;
-        }
-    }
+    processStage (mono, left, right, numSamples);
 
     float* channels[] = { left, right };
     juce::dsp::AudioBlock<float> block (channels, 2, static_cast<size_t> (numSamples));
@@ -215,5 +171,58 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
     quietRun = outputSilent ? quietRun + numSamples : 0;
     if (quietRun >= dormantAfter)
         resetPostBody();
+}
+void OutputChain::prepareStage()
+{
+    // Directivity: +-5 dB peaks, at different frequencies in each ear.
+    constexpr double leftHz[] = { 1150.0, 2100.0, 3300.0, 5200.0 }, rightHz[] = { 1500.0, 2650.0, 4100.0, 6400.0 };
+    constexpr double gainDb[] = { 5.0, -5.0, 5.0, -5.0 };
+    for (std::size_t k = 0; k < stage.left.size(); ++k)
+    {
+        stage.left[k].setPeak (fs, leftHz[k], gainDb[k], 2.5);
+        stage.right[k].setPeak (fs, rightHz[k], gainDb[k], 2.5);
+    }
+    stage.reflectionLowPass.setLowPass (fs, 5000.0);
+
+    // Five reflections per side, 4 to 42 ms.
+    constexpr double leftMs[] = { 4.3, 11.7, 19.1, 27.9, 37.3 }, rightMs[] = { 5.9, 13.3, 17.2, 31.1, 41.7 };
+    const auto samples = [this] (double ms) { return static_cast<int> (ms * 0.001 * fs); };
+    int length = 1;
+    while (length <= samples (rightMs[Stage::numReflections - 1]))
+        length *= 2;
+    stage.line.assign (static_cast<std::size_t> (length), 0.0f);
+    stage.mask = length - 1;
+    stage.write = 0;
+    for (std::size_t k = 0; k < Stage::numReflections; ++k)
+    {
+        stage.delayLeft[k] = samples (leftMs[k]);
+        stage.delayRight[k] = samples (rightMs[k]);
+    }
+}
+
+void OutputChain::processStage (const float* mono, float* left, float* right, int numSamples)
+{
+    constexpr std::array<float, Stage::numReflections> reflectionGain { 0.42f, 0.3f, 0.24f, 0.18f, 0.13f };
+    for (int i = 0; i < numSamples; ++i)
+    {
+        auto directLeft = left[i], directRight = right[i];
+        for (auto& f : stage.left)
+            directLeft = f.process (directLeft);
+        for (auto& f : stage.right)
+            directRight = f.process (directRight);
+        stage.line[static_cast<std::size_t> (stage.write)] = stage.reflectionLowPass.process (mono[i]);
+        float earlyLeft = 0.0f, earlyRight = 0.0f;
+        for (std::size_t k = 0; k < Stage::numReflections; ++k)
+        {
+            earlyLeft += reflectionGain[k]
+                * stage.line[static_cast<std::size_t> ((stage.write - stage.delayLeft[k]) & stage.mask)];
+            earlyRight += reflectionGain[k]
+                * stage.line[static_cast<std::size_t> ((stage.write - stage.delayRight[k]) & stage.mask)];
+        }
+        stage.write = (stage.write + 1) & stage.mask;
+        const auto amount = stageAmount.getNextValue();
+        left[i] += amount * (0.8f * directLeft + 0.5f * earlyLeft - left[i]);
+        right[i] += amount * (0.8f * directRight + 0.5f * earlyRight - right[i]);
+    }
 }
 } // namespace violinsynth::engine

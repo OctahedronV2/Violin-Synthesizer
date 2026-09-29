@@ -2,6 +2,7 @@
 
 // Helpers for tests that play MIDI into the whole engine.
 
+#include "engine/Radiation.h"
 #include "engine/ViolinEngine.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -21,6 +22,7 @@ inline engine::EngineSettings plainSettings()
     engine::EngineSettings s;
     s.performance.voice.vibratoDepthCents = 0.0;
     s.performance.voice.humanise = 0.0;
+    s.performance.voice.intonation = 0.0;
     s.performance.voice.bowNoise = 0.0;
     s.performance.voice.resonance = 0.0;
     s.output.room = 0.0f;
@@ -81,6 +83,33 @@ inline double toneLevel (const std::vector<double>& x, double from, double to, d
         im -= x[i] * hann * std::sin (w * k);
     }
     return 2.0 * std::sqrt (re * re + im * im) / (0.5 * n);
+}
+
+// The gain of the radiation peaks and dips after the body (v1.1) at `f`: a
+// fixed filter, taken out again so the tone tests hear the violin's own
+// spectrum rather than which harmonic lands on a peak.
+inline double radiationGain (double f)
+{
+    static const auto response = []
+    {
+        engine::Radiation r;
+        constexpr int n = 1 << 15;
+        r.prepare (fs, n);
+        r.setBodyPeaks (engine::violinSpec.bodyPeaksDb);
+        std::vector<float> x (n, 0.0f);
+        r.processPreBody (x.data(), n); // no air
+        x[0] = 1.0f;
+        r.processPostBody (x.data(), n);
+        return x;
+    }();
+    double re = 0.0, im = 0.0;
+    const auto w = 2.0 * std::numbers::pi * f / fs;
+    for (std::size_t i = 0; i < response.size(); ++i)
+    {
+        re += static_cast<double> (response[i]) * std::cos (w * static_cast<double> (i));
+        im -= static_cast<double> (response[i]) * std::sin (w * static_cast<double> (i));
+    }
+    return std::sqrt (re * re + im * im);
 }
 
 inline double rms (const std::vector<double>& x, double from, double to)

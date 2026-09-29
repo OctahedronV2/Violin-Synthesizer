@@ -1,7 +1,4 @@
 #include "engine/StringVoice.h"
-#include "engine/AuthVariant.h"
-#include <cstdio>
-#include <cstdlib>
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +18,14 @@ constexpr int noiseFilterStep = 32;
 constexpr double smoothingSeconds = 0.02;
 constexpr double legatoDynamicsSeconds = 0.15; // dynamics change smoothly across a slur
 constexpr double legatoEntrySeconds = 0.025; // bow arriving on a new string mid-stroke
-constexpr double vibratoOnsetSeconds = 0.25;
+// Singing vibrato (docs/REFERENCE_SOUND.md): it starts 0.1 s before the
+// Vibrato Delay and blooms over 0.6 s. Within a slur it keeps going through
+// the note change; crossing to another string, the hand was already moving.
+constexpr double vibratoBloomSeconds = 0.6, vibratoBloomLead = 0.1, vibratoCrossingSeconds = 0.3;
+// Intonation: each note's own offset, a standard deviation of 16 cents at
+// 100% (real players measure 9.5), and the finger lands about 9 cents flat at
+// 50% and settles in 90 ms.
+constexpr double intonationSpreadCents = 16.0, landingFlatCents = -9.0, landingSettleSeconds = 0.09;
 constexpr double silenceThreshold = 1.0e-5;
 constexpr double noiseBandwidthHz = 0.7; // humanisation drift
 
@@ -80,12 +84,13 @@ constexpr double torsionMakeup = (1.0 + torsionImpedanceRatio) / torsionImpedanc
 // ... and lengthens each period a little: the note sounds 0.85 cents flatter
 // on average (up to 1.8). The string is tuned 1.4 cents sharp, which also
 // takes out the 0.55 cents the bowed model was already flat.
-// SCRATCH (final tune-up): measured on held notes it came out 1 cent sharp low
-// and 0.5 flat at the top, so the correction now follows the register.
-inline double torsionTuning (double f0)
+// (Measured on held notes G3 to E6, this comes out 1 cent sharp on the low
+// strings and 0.5 flat at the top. A correction that follows the register was
+// tried for v1.1, but the player, which listens at the note itself, then
+// settled fewer notes of a scale into clean Helmholtz motion: 35 of 64, not 42.)
+inline double torsionTuning (double)
 {
-    const auto semis = 12.0 * std::log2 (std::max (f0, 1.0) / 196.0);
-    return std::pow (2.0, (0.1 + 0.04 * semis) / 1200.0);
+    return 1.000809;
 }
 // Near the bridge with a firm bow, the twisting string can also lock onto the
 // bow: it sticks and travels with the hair, silent, however long the note is
@@ -178,12 +183,6 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
     bowedParams.friction.impedance = spec->impedance;
     bowedParams.torsion = { torsionSpeedRatio, torsionImpedanceRatio, torsionQ };
     bowedParams.loss = instrument->loss;
-    if (const char* e = std::getenv ("LOSSHI"))
-        bowedParams.loss.t60High *= std::atof (e); // SCRATCH
-    if (const char* e = std::getenv ("LOSSLO"))
-        bowedParams.loss.t60 *= std::atof (e); // SCRATCH
-    if (std::getenv ("NOTWIST"))
-        bowedParams.torsion = { 0.0, torsionImpedanceRatio, torsionQ }; // SCRATCH
     string.setParams (bowedParams);
     if (! instrument->pickup)
         setPickup ({}, 0);
@@ -265,8 +264,6 @@ void StringVoice::setTarget (int note, bool glide)
     }
     const auto currentNoteBeforeTarget = currentNote;
     shifting = shift && currentNote > spec->openMidiNote;
-    if (std::getenv ("DEBUG_NOTES"))
-        std::fprintf (stderr, "string %d note %d -> %d glide %d shift %d hand %d\n", spec->openMidiNote, currentNote, note, (int) glide, (int) shifting, handPosition);
     currentNote = note;
     targetLogF0 = std::log (midiToHz (note));
     glideFrom = logF0;
@@ -274,22 +271,22 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
+    if (const auto sigma = intonationSpreadCents * std::clamp (intonation, 0.0, 1.0);
+        sigma > 0.0 && note != currentNoteBeforeTarget)
     {
-        static const double sigma = std::getenv ("INTON") ? std::atof (std::getenv ("INTON")) : 0.0; // SCRATCH
-        if (sigma > 0.0 && note != currentNoteBeforeTarget)
-        {
-            // A real finger lands a little off and the ear pulls it in: each note has its
-            // own intonation, and starts slightly flat.
-            const auto g = (nextNoise() + nextNoise() + nextNoise()) * 0.577 * 1.73; // approx unit normal
-            noteIntonationCents = sigma * g;
-            landingCents = -9.0 * (sigma / 8.0) * (1.0 + 0.5 * nextNoise());
-        }
+        // A real finger lands a little off and the ear pulls it in: each note has
+        // its own intonation, and starts slightly flat (docs/REFERENCE_SOUND.md).
+        const auto g = nextNoise() + nextNoise() + nextNoise(); // about unit variance
+        noteIntonationCents = sigma * g;
+        landingCents = landingFlatCents * (sigma / 8.0) * (1.0 + 0.5 * nextNoise());
     }
-    if (authOn (1) && ! (fixOn (4) && glide))
+    if (! glide)
     {
+        // Each note's vibrato is a little different, and starts wherever the hand
+        // was. A slur keeps the vibrato going through the note change.
         noteVibRate = 1.0 + 0.06 * nextNoise();
-        noteVibDepth = 1.0 + 0.12 * nextNoise(); // humanise adds its own depth drift
-        vibratoPhase = 0.5 + 0.5 * nextNoise(); // the hand is wherever it was
+        noteVibDepth = 1.0 + 0.12 * nextNoise(); // Humanise adds its own depth drift
+        vibratoPhase = 0.5 + 0.5 * nextNoise();
     }
     // Take the new pitch, or start the glide, from the next sample.
     controlJump = jumpNote = true;
@@ -435,7 +432,7 @@ void StringVoice::legato (int note, float velocity, Articulation a)
         dynamics = dynamicsTarget;
         stage = Stage::attack;
         attackSeconds = legatoEntrySeconds;
-        vibratoSeconds = 0.3; // the hand was already vibrating on the other string
+        vibratoSeconds = vibratoCrossingSeconds; // the hand was already vibrating on the other string
         envelopePosition = 0.0;
     }
 }
@@ -548,12 +545,9 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     secondsSinceNoteChange += seconds;
     vibratoSeconds += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-    auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise);
-    if (authOn (1))
-    {
-        const auto x = std::clamp (((fixOn (4) ? vibratoSeconds : secondsSinceNoteChange) - 0.2) / 0.6, 0.0, 1.0);
-        rate *= noteVibRate * (0.8 + 0.25 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)));
-    }
+    // Singing vibrato: it quickens from 0.8 to about 1.05 times the rate as it blooms.
+    const auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * noteVibRate
+        * (0.8 + 0.25 * vibratoBloom (settings));
     vibratoPhase += rate * seconds;
     vibratoPhase -= std::floor (vibratoPhase);
 }
@@ -573,8 +567,8 @@ void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
     else
     {
         auto c = 0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress);
-        if (fixOn (2) && shifting)
-            c = c * c * (3.0 - 2.0 * c); // the finger moves late and fast, then lands
+        if (shifting)
+            c = c * c * (3.0 - 2.0 * c); // a hidden shift: the finger moves late and fast, then lands
         logF0 = glideFrom + (targetLogF0 - glideFrom) * c;
     }
 }
@@ -612,20 +606,22 @@ void StringVoice::updateNoise()
     depthNoise = std::clamp (depthNoise, -1.0 / noiseScale * 2.5, 1.0 / noiseScale * 2.5);
 }
 
+double StringVoice::vibratoBloom (const VoiceSettings& settings) const
+{
+    const auto x
+        = std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds - vibratoBloomLead)) / vibratoBloomSeconds,
+                      0.0,
+                      1.0);
+    return 0.5 - 0.5 * std::cos (std::numbers::pi * x);
+}
+
 double StringVoice::controlF0 (const VoiceSettings& settings, const StringContext& context) const
 {
     // Pitch: glide, bends (global and per note) and humanised vibrato.
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-    const auto onset
-        = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
-    auto onsetShape = onset;
-    if (authOn (1))
-    {
-        // Blooms over 0.6 s, wider when louder, a little different on every note.
-        const auto x = std::clamp (((fixOn (4) ? vibratoSeconds : secondsSinceNoteChange) - 0.2) / 0.6, 0.0, 1.0);
-        // SCRATCH (final tune-up): 0.8 brings the depth to the 16 cents measured on real players.
-        onsetShape = 0.8 * (0.5 - 0.5 * std::cos (std::numbers::pi * x)) * noteVibDepth * (0.75 + 0.5 * dynamics);
-    }
+    // The vibrato blooms, wider when louder and a little different on every
+    // note. 0.8 brings the default depth to the 16 cents measured on real players.
+    const auto onsetShape = 0.8 * vibratoBloom (settings) * noteVibDepth * (0.75 + 0.5 * dynamics);
     const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
     if (droning)
@@ -634,15 +630,17 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
     auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
-    if (authOn (1) && ! instrument->fretted)
+    if (! instrument->fretted)
     {
-        // The hand lingers at the ends of the swing. It no longer leans flat: the
+        // The hand lingers at the ends of the swing. It is centred on the note: the
         // flat finger landing already models the approach from below.
         const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
-        vibratoCents = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
+        vibratoCents
+            = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
     }
-    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / 0.09);
-    const auto bendCents = noteIntonationCents + landing + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
+    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / landingSettleSeconds);
+    const auto bendCents = noteIntonationCents + landing
+        + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
         + fingerWanderCents * humanise * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
@@ -650,6 +648,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
 
 void StringVoice::updateTargets (const VoiceSettings& settings, const StringContext& context)
 {
+    intonation = settings.intonation;
     // Bow position: the setting, or the per-note timbre (tasto 0 .. ponticello 1),
     // unless the articulation fixes it.
     betaTarget = settings.bowPosition;
@@ -674,10 +673,10 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
         + tremorSpeed * humanise * speedTremor.band() * tremorScale;
-    if (fixOn (2) && shifting && glideProgress < 1.0)
+    if (shifting && glideProgress < 1.0)
         armSpeedGain *= 1.0 - 0.35 * std::sin (std::numbers::pi * glideProgress); // the bow lightens to hide the slide
-    if (authOn (2) && isBowed() && noteArticulation != Articulation::spiccato
-        && noteArticulation != Articulation::staccato && noteArticulation != Articulation::tremolo)
+    if (isBowed() && noteArticulation != Articulation::spiccato && noteArticulation != Articulation::staccato
+        && noteArticulation != Articulation::tremolo)
     {
         // Note shaping: a small grip at the start of each stroke, then the bow
         // opens into the note (a swell peaking near 0.8 s) and eases back.
@@ -686,7 +685,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         // Within a slur each note still gets its own, smaller, swell.
         const auto u = secondsSinceNoteChange;
         const auto slurred = u < t - 0.01;
-        const auto swell = (slurred ? (fixOn (4) ? 0.0 : 0.14) : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
+        const auto swell = (slurred ? 0.0 : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
         const auto shape = 1.0 + grip + swell;
         armSpeedGain *= shape;
         betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge
@@ -827,8 +826,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     else if (stage == Stage::release)
     {
-        static const double relSec = std::getenv ("RELSEC") ? std::atof (std::getenv ("RELSEC")) : 0.0; // SCRATCH
-        envelopePosition += dt / std::max (relSec > 0.0 ? relSec : settings.releaseSeconds, 1.0e-3);
+        envelopePosition += dt / std::max (settings.releaseSeconds, 1.0e-3);
         if (envelopePosition >= 1.0)
             stage = Stage::ringing;
     }
@@ -871,13 +869,13 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
         auto forceGain = 1.0;
         speed = forceSpeed;
+        if (const auto ring = instrument->releaseRing;
+            ring > 0.0 && stage == Stage::release && slurs (noteArticulation))
         {
-            // SCRATCH (reference comparison): a released stroke lifts the bow while it
-            // still moves, so the string keeps its amplitude and rings on. RING 0..1 is
-            // how much of the bow speed is kept while the weight comes off.
-            static const double ring = std::getenv ("RING") ? std::atof (std::getenv ("RING")) : 0.0;
-            if (ring > 0.0 && stage == Stage::release && slurs (noteArticulation))
-                speed = nominal * (1.0 - (1.0 - ring) * (1.0 - envelopeShape() / std::max (releaseStartLevel, 1.0e-3)));
+            // A released stroke: the bow lifts off while it still moves, so the
+            // string keeps its amplitude and rings on after the note ends.
+            const auto lifted = 1.0 - envelopeShape() / std::max (releaseStartLevel, 1.0e-3);
+            speed = nominal * (1.0 - (1.0 - ring) * lifted);
         }
 
         switch (noteArticulation)
@@ -943,17 +941,6 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         hairRandom = hairRandom * 1664525u + 1013904223u;
         const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
         hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
-        {
-            // SCRATCH: reshape the hair noise, less near the note and more rosin hiss up high.
-            static const double hpHz = std::getenv ("NOISE_HP") ? std::atof (std::getenv ("NOISE_HP")) : 0.0;
-            static const double hpGain = std::getenv ("NOISE_GAIN") ? std::atof (std::getenv ("NOISE_GAIN")) : 1.0;
-            if (hpHz > 0.0)
-            {
-                const auto c = std::exp (-2.0 * std::numbers::pi * hpHz / fs);
-                hairLow = c * hairLow + (1.0 - c) * hairLevel;
-                hairLevel = hpGain * (hairLevel - hairLow);
-            }
-        }
         hairVelocity = hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
             * (string.isSticking() ? hairStick : 1.0);
     }
@@ -980,20 +967,6 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     if (isBowed())
         player.listen (y, string.slipStarted());
-    {
-        // SCRATCH: rosin hiss radiated at each slip (pulsed noise), outside the string loop.
-        static const double pulse = std::getenv ("PULSE") ? std::atof (std::getenv ("PULSE")) : 0.0;
-        static const double pulseHp = std::getenv ("PULSE_HP") ? std::atof (std::getenv ("PULSE_HP")) : 2000.0;
-        if (pulse > 0.0 && isBowed())
-        {
-            pulseRandom = pulseRandom * 1664525u + 1013904223u;
-            const auto w = static_cast<double> (pulseRandom >> 8) / 16777216.0 * 2.0 - 1.0;
-            const auto c = std::exp (-2.0 * std::numbers::pi * pulseHp / fs);
-            pulseLow = c * pulseLow + (1.0 - c) * w;
-            const auto n = (w - pulseLow) * pulse * spec->impedance * std::abs (speed) * (string.isSticking() ? 0.15 : 1.0);
-            out += n;
-        }
-    }
     stuckSamples = isBowed() && speed != 0.0 && string.isSticking() ? stuckSamples + 1.0 : 0.0;
     lastSpeed = std::abs (speed);
     lastF0 = f0;

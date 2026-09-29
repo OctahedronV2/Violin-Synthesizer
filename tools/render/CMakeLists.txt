@@ -14,6 +14,7 @@ set(VIOLINSYNTH_RENDER_SOURCES
     "${PROJECT_SOURCE_DIR}/source/engine/GuitarAmp.cpp"
     "${PROJECT_SOURCE_DIR}/source/engine/StringAllocator.cpp"
     "${PROJECT_SOURCE_DIR}/source/engine/OutputChain.cpp"
+    "${PROJECT_SOURCE_DIR}/source/engine/Radiation.cpp"
     "${PROJECT_SOURCE_DIR}/source/engine/ViolinEngine.cpp"
     "${PROJECT_SOURCE_DIR}/source/engine/StringVoice.cpp"
     "${PROJECT_SOURCE_DIR}/source/engine/SympatheticStrings.cpp"

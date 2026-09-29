@@ -3,6 +3,7 @@
 #include "engine/Body.h"
 #include "engine/GuitarAmp.h"
 #include "engine/OutputChain.h"
+#include "engine/Radiation.h"
 #include "engine/Realtime.h"
 #include "engine/SympatheticStrings.h"
 #include "engine/Violin.h"
@@ -27,7 +28,7 @@ struct EngineSettings
 //
 //   violin (four bowed strings at >= 176.4 kHz) -> decimate -> + open-string resonance
 //   -> DC block, sordino
-//   -> body -> stereo width, room, gain, limiter
+//   -> body and its radiation (air, peaks) -> stereo width, room, gain, limiter
 //
 // The bowed guitar (PerformanceSettings::instrument) is heard through a
 // pickup and an amplifier instead of the body: its strings' pickup signal
@@ -86,6 +87,7 @@ private:
     Violin violin;
     SympatheticStrings sympathetic;
     Body body;
+    Radiation radiation;
     GuitarAmp amp;
     OutputChain output;
     EngineSettings settings;

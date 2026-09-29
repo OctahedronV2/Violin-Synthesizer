@@ -347,36 +347,39 @@ ScaleStats scaleStats (double imperfection, const std::vector<int>& roots)
 
             // Helmholtz motion over the last 300 ms of each note: one slip per
             // period and no scratch, as the player hears it.
+            // Scratch is measured on the played string itself, with the same
+            // meter the player listens with: in the output, the notes before
+            // it ring on under it (v1.1), and two pitches at once read as noise.
             std::vector<bool> clean (notes.size(), true);
-            const auto x = run (e,
-                                0.05 + length * static_cast<double> (notes.size()) + 0.3,
-                                events,
-                                [&] (double t)
-                                {
-                                    const auto i = static_cast<std::size_t> ((t - 0.05) / length);
-                                    const auto into = t - 0.05 - length * static_cast<double> (i);
-                                    if (i >= notes.size() || into < length - 0.3)
-                                        return;
-                                    const auto& violin = e.getViolin();
-                                    for (int string = 0; string < 4; ++string)
-                                        if (violin.noteOnString (string) == notes[i])
-                                        {
-                                            const auto slips = violin.stringSlipsPerPeriod (string);
-                                            if (slips < 0.8 || slips > 1.2
-                                                || violin.stringScratch (string) > dsp::BowController::scratchThreshold)
-                                                clean[i] = false;
-                                        }
-                                });
+            std::vector<double> worst (notes.size(), 0.0);
+            run (e,
+                 0.05 + length * static_cast<double> (notes.size()) + 0.3,
+                 events,
+                 [&] (double t)
+                 {
+                     const auto i = static_cast<std::size_t> ((t - 0.05) / length);
+                     const auto into = t - 0.05 - length * static_cast<double> (i);
+                     if (i >= notes.size() || into < 0.15)
+                         return;
+                     const auto& violin = e.getViolin();
+                     for (int string = 0; string < 4; ++string)
+                         if (violin.noteOnString (string) == notes[i])
+                         {
+                             if (into < length - 0.1)
+                                 worst[i] = std::max (worst[i], violin.stringScratch (string));
+                             const auto slips = violin.stringSlipsPerPeriod (string);
+                             if (into >= length - 0.3
+                                 && (slips < 0.8 || slips > 1.2
+                                     || violin.stringScratch (string) > dsp::BowController::scratchThreshold))
+                                 clean[i] = false;
+                         }
+                 });
 
             for (std::size_t i = 0; i < notes.size(); ++i)
             {
-                const auto t = 0.05 + length * static_cast<double> (i);
-                double worst = -100.0;
-                for (auto u = t + 0.1; u < t + length - 0.1; u += 0.05)
-                    worst = std::max (worst, noiseDb (x, u, u + 0.05, engine::midiToHz (notes[i])));
                 ++stats.notes;
-                stats.loud += worst > -10.0 ? 1 : 0;
-                stats.scratchy += worst > -20.0 ? 1 : 0;
+                stats.loud += worst[i] > 0.1 ? 1 : 0; // -10 dB
+                stats.scratchy += worst[i] > 0.01 ? 1 : 0; // -20 dB
                 stats.helmholtz += clean[i] ? 1 : 0;
             }
         }
@@ -392,11 +395,11 @@ TEST_CASE ("The player keeps scales free of scratch", "[bownoise][cleanbowing]")
     INFO ("of " << clean.notes << " notes: loud " << clean.loud << " (unassisted " << unassisted.loud << "), scratchy "
                 << clean.scratchy << " (" << unassisted.scratchy << "), in Helmholtz motion " << clean.helmholtz << " ("
                 << unassisted.helmholtz << ")");
-    REQUIRE (unassisted.loud >= 2); // the unassisted model does scratch on these notes
+    REQUIRE (unassisted.scratchy >= 5); // the unassisted model does scratch on these notes
     // The model is chaotic, so one note in 64 may still flare up (and which
-    // one moves between platforms); the player removes most of them.
-    CHECK (clean.loud * 3 <= unassisted.loud);
-    CHECK (clean.scratchy < unassisted.scratchy);
+    // one moves between platforms); the player removes most of the scratch.
+    CHECK (clean.loud <= 1);
+    CHECK (clean.scratchy * 3 <= unassisted.scratchy);
     // With the string's twist both settle on most notes; which few do not is
     // chaotic, so this only checks the player does not make it worse.
     CHECK (clean.helmholtz + 3 >= unassisted.helmholtz);

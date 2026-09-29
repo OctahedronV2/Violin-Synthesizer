@@ -31,6 +31,7 @@ set(VIOLINSYNTH_SOURCES
     engine/GuitarAmp.cpp
     engine/StringAllocator.cpp
     engine/OutputChain.cpp
+    engine/Radiation.cpp
     engine/ViolinEngine.cpp
     engine/StringVoice.cpp
     engine/SympatheticStrings.cpp

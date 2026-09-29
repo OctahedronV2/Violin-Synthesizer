@@ -23,6 +23,7 @@ struct VoiceSettings
     double pitchBendRangeSemitones = 2.0;
     double humanise = 0.5; // 0..1: random drift of vibrato, bow speed, contact point and finger pitch
     double imperfection = 0.0; // 0..1: 0 plays cleanly like a professional, 1 is the unassisted model
+    double intonation = 0.1; // 0..1: how far each note's tuning strays (16 cents standard deviation at 1)
     double bowNoise = 0.5; // 0..1: grain of the rosin and hair in the friction
     double resonance = 0.3; // 0..1: sympathetic resonance of undamped strings
     bool autoBowChange = true;
@@ -77,6 +78,8 @@ public:
     bool isDrone() const { return droning; }
 
     // Actions from the allocator.
+    // The Intonation setting, for the notes that follow (VoiceSettings::intonation).
+    void setIntonation (double amount) { intonation = amount; }
     void start (int note, float velocity, Articulation a = Articulation::legato); // new stroke or pluck
     void legato (int note, float velocity, Articulation a = Articulation::legato); // glide, or enter mid-bow
     void release();
@@ -139,6 +142,7 @@ private:
     void advanceControl (const VoiceSettings& settings, int samples);
     void updateTargets (const VoiceSettings& settings, const StringContext& context);
     double controlF0 (const VoiceSettings& settings, const StringContext& context) const;
+    double vibratoBloom (const VoiceSettings& settings) const; // 0..1
     void rampPitchTo (double f0, int samples);
     double envelopeShape() const;
     double nextNoise();
@@ -171,9 +175,8 @@ private:
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
     double noteVibRate = 1.0, noteVibDepth = 1.0, vibratoSeconds = 0.0;
-    unsigned pulseRandom = 987654321u;
-    double pulseLow = 0.0;
-    double hairLow = 0.0, noteIntonationCents = 0.0, landingCents = 0.0; // SCRATCH
+    double noteIntonationCents = 0.0, landingCents = 0.0;
+    double intonation = 0.1; // the setting, for the next note (setIntonation)
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0, noiseScale = 1.0;
     double glideFrom = 0.0, glideProgress = 1.0;
     bool shifting = false; // the slur moves the hand, rather than changing finger

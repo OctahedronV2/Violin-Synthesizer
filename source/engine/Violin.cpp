@@ -89,6 +89,8 @@ void Violin::setSettings (const PerformanceSettings& s)
 {
     settings = s;
     allocator.setMode (s.playMode);
+    for (auto& voice : voices)
+        voice.setIntonation (s.voice.intonation);
     if (s.instrument != currentInstrument)
         setInstrument (s.instrument);
     else if (s.pickup != currentPickup)

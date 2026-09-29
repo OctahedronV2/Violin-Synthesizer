@@ -4,7 +4,7 @@ An expressive, physically modelled violin synthesizer plugin (VST3 / AU / Standa
 
 See [docs/DEVELOPMENT_PLAN.md](docs/DEVELOPMENT_PLAN.md) for the synthesis approach, architecture and milestones.
 
-> **Status: Phases 0–6 implemented.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. It comes with 32 level-matched factory presets and a resizable editor. It also plays two bowed guitars ([docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md)). The **electric**, as Jimmy Page played it, has six steel strings under a flat bridge, humbucking pickups and a valve amp. The **acoustic**, as Ramin Djawadi played it, sounds through a measured guitar body. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md), [docs/PHASE5.md](docs/PHASE5.md) and [docs/PHASE6.md](docs/PHASE6.md).
+> **Status: Phases 0–6 implemented.** The plugin models the whole violin: four physically modelled bowed strings (digital waveguides with a bow–string friction model) sharing one bow, measured violin bodies, double stops, legato and string crossings, sympathetic resonance, humanised vibrato, MPE, and ten articulations from staccato to pizzicato. It comes with 54 level-matched factory presets and a resizable editor. Version 1.1 adds a **baroque violin** with gut strings, and a sound tuned against a real recording ([docs/REFERENCE_SOUND.md](docs/REFERENCE_SOUND.md)). It also plays two bowed guitars ([docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md)). The **electric**, as Jimmy Page played it, has six steel strings under a flat bridge, humbucking pickups and a valve amp. The **acoustic**, as Ramin Djawadi played it, sounds through a measured guitar body. See [docs/PHASES_2_3.md](docs/PHASES_2_3.md), [docs/PHASE4.md](docs/PHASE4.md), [docs/PHASE5.md](docs/PHASE5.md) and [docs/PHASE6.md](docs/PHASE6.md).
 
 ![The editor](docs/editor.png)
 
@@ -56,7 +56,7 @@ In **FL Studio**:
 
 Things to try:
 
-- **Start from a preset:** click the preset name at the top for 27 factory sounds by category (Solo, Styles, Articulations, Character, Expressive), or step through them with **<** and **>**. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Octavio/Presets`.
+- **Start from a preset:** click the preset name at the top for 54 factory sounds by category (Solo, Styles, Articulations, Character, Expressive, Bowed Guitar), or step through them with **<** and **>**. **Save** keeps your own versions; they are stored in `Documents/OctahedronV2/Octavio/Presets`.
 - **Play expressively:**
   - Velocity sets how hard the bow is drawn.
   - Overlapping notes glide legato; separate notes get a new bow stroke.
@@ -68,6 +68,7 @@ Things to try:
 - **MPE controllers:** turn on **Play → MPE** for per-note bend, pressure (vibrato) and slide (bow position).
 - **Articulations:** pick one under **Articulation**, or use keyswitches. MIDI notes 24–33 (C2–A2 in FL Studio's note names) select legato, détaché, staccato, spiccato, tremolo, pizzicato, harmonics, sul ponticello, sul tasto and con sordino. Drag [docs/demo/articulations.mid](docs/demo/articulations.mid) onto the plugin's track to hear them all. Details are in [docs/PHASE5.md](docs/PHASE5.md).
 - **Change the violin:** under **Body & Output → Body**, choose one of four measured instruments. **Quality → Light** uses less CPU.
+- **Play a baroque violin:** set **Instrument** to **Baroque violin**, or load the **Baroque Violin** preset from **Styles**. Its gut strings ring on longer and its open strings answer every note. **Intonation** (under Pitch) sets how freely each note is tuned. It plays at A440; transpose a semitone down in your DAW for A415.
 - **Play a bowed guitar:** set **Instrument** to **Electric guitar** or **Acoustic guitar**, or load a preset from the **Bowed Guitar** category. On the electric, **Pickup**, **Drive** and **Drone** replace the body controls. Drone sets how firmly the flat bow catches the neighbouring strings. The acoustic keeps only **Drone**. See [docs/BOWED_GUITAR.md](docs/BOWED_GUITAR.md).
 - **Shape the sound:**
   - Drag the **bow pad**: left/right moves the bow between the bridge (bright, glassy) and the fingerboard (soft), and up/down changes its pressure on the string.
