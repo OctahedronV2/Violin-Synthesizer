@@ -1098,12 +1098,13 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         const auto coloured = scratchColour ? static_cast<double> (hairShelf.process (hairPeak.process (hairLow.process (static_cast<float> (tilted))))) : tilted;
         hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * coloured * hairScale * speed
             * (string.isSticking() ? hg::param ("HAIR_STICK", hairStick) : 1.0)
-            * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (currentNote - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
+            * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (std::max (currentNote, static_cast<int> (hg::param ("NS_FLOOR", 0.0))) - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
         // HG: the scratch belongs to the bowing: strongest while a new stroke or note is still
         // catching (before the string settles into clean slip-stick), then mostly gone.
         static const double scratchA = hg::param ("AS_A", 0.0), scratchT = hg::param ("AS_T", 0.08);
         if (scratchA > 0.0)
-            hairVelocity *= 1.0 + scratchA * std::pow (10.0, -hg::param ("AS_SLOPE", 0.0) * (currentNote - 69) / 20.0)
+            hairVelocity *= 1.0 + scratchA * std::pow (10.0, (-hg::param ("AS_SLOPE", 0.0) * (std::max (currentNote, static_cast<int> (hg::param ("AS_FLOOR", 0.0))) - 69)
+                                                              - hg::param ("AS_LOWCUT", 0.0) * std::max (0.0, hg::param ("AS_FLOOR", 0.0) - currentNote)) / 20.0) // HG: low strings catch cleaner in quick runs
                                     * std::exp (-std::min (strokeSeconds, secondsSinceNoteChange) / scratchT);
         // HG: as the bow lifts, fewer hairs touch the string: the grain fades with the weight.
         static const bool hairLift = hg::param ("HAIR_LIFT", 0.0) > 0.5;
