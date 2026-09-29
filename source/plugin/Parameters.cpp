@@ -158,6 +158,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // noise of real held notes; 0 is the clean model (docs/NATURAL_PLAYING.md).
     layout.add (floatParam (id::bowNoise, "Bow Noise", Range { 0.0f, 1.0f }, 0.5f, Format::percent));
 
+    // Intonation: how far each note lands from true pitch before the ear
+    // corrects it. 10% is a modern soloist; about 30% is historically informed
+    // playing on gut strings (docs/REFERENCE_SOUND.md).
+    layout.add (floatParam (id::intonation, "Intonation", Range { 0.0f, 1.0f }, 0.1f, Format::percent));
+
     return layout;
 }
 
@@ -191,7 +196,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& state)
       pickup (state.getRawParameterValue (id::pickup.getParamID())),
       drive (state.getRawParameterValue (id::drive.getParamID())),
       drone (state.getRawParameterValue (id::drone.getParamID())),
-      bowNoise (state.getRawParameterValue (id::bowNoise.getParamID()))
+      bowNoise (state.getRawParameterValue (id::bowNoise.getParamID())),
+      intonation (state.getRawParameterValue (id::intonation.getParamID()))
 {
 }
 
@@ -223,6 +229,7 @@ engine::EngineSettings Reader::read() const
     s.performance.voice.humanise = humanise->load();
     s.performance.voice.imperfection = imperfection->load();
     s.performance.voice.bowNoise = bowNoise->load();
+    s.performance.voice.intonation = intonation->load();
     s.performance.voice.autoBowChange = autoBowChange->load() > 0.5f;
     s.performance.playMode = static_cast<engine::PlayMode> (juce::jlimit (0, 2, static_cast<int> (playMode->load())));
     s.performance.mpe = mpe->load() > 0.5f;

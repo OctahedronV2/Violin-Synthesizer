@@ -1,5 +1,8 @@
 #pragma once
 
+#include <array>
+#include <vector>
+
 #include "engine/Filters.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
@@ -17,7 +20,13 @@ struct OutputSettings
 
 // Everything after the string except the body:
 //   before the body: DC blocker, sordino (mute on the bridge)
-//   after the body:  stereo width, small room, output gain, limiter
+//   after the body:  stereo width, stage, small room, output gain, limiter
+//
+// The stage (docs/REFERENCE_SOUND.md): a violin radiates each frequency in
+// its own direction, so the two microphones hear different body peaks, which
+// move against each other as vibrato sweeps the harmonics across them. Early
+// reflections from the stage floor and nearby walls follow. It fades in as
+// the Room rises from 0 to 5%, so Room at 0 is the dry violin.
 //
 // Once the body's output and the chain's own tails (all-passes, room,
 // limiter) have been silent for a second (below -120 dBFS), the part after the body writes
@@ -53,7 +62,20 @@ private:
     float appliedRoom = -1.0f;
 
     AllPass decorrelateA1, decorrelateA2, decorrelateB1, decorrelateB2;
-    juce::SmoothedValue<float> width, gain;
+    juce::SmoothedValue<float> width, gain, stageAmount;
+
+    struct Stage
+    {
+        static constexpr int numReflections = 5;
+        std::array<Biquad, 4> left, right; // directivity peaks
+        Biquad reflectionLowPass;
+        std::vector<float> line; // power-of-two length
+        int mask = 0, write = 0;
+        std::array<int, numReflections> delayLeft {}, delayRight {};
+    };
+    void prepareStage();
+    void processStage (const float* mono, float* left, float* right, int numSamples);
+    Stage stage;
 
     juce::dsp::Reverb reverb;
     juce::dsp::Limiter<float> limiter;

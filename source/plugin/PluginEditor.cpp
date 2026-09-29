@@ -84,11 +84,9 @@ public:
         addAndMakeVisible (keyswitchHint);
 
         // Pitch
-        pitchKnobs = { &addKnob (id::vibratoRate, "Vib Rate"),
-                       &addKnob (id::vibratoDepth, "Vib Depth"),
-                       &addKnob (id::vibratoDelay, "Vib Delay"),
-                       &addKnob (id::portamento, "Glide"),
-                       &addKnob (id::bendRange, "Bend") };
+        pitchKnobs = { &addKnob (id::vibratoRate, "Vib Rate"),   &addKnob (id::vibratoDepth, "Vib Depth"),
+                       &addKnob (id::vibratoDelay, "Vib Delay"), &addKnob (id::portamento, "Glide"),
+                       &addKnob (id::bendRange, "Bend"),         &addKnob (id::intonation, "Intonation") };
 
         // Play
         playChoices = { &addChoice (id::playMode, "Mode") };
@@ -488,6 +486,9 @@ private:
                                "and 4x12 cabinet"
                              : instrument == engine::Instrument::bowedAcousticGuitar
                              ? "Bowed acoustic guitar: measured guitar body by pe_mace on Freesound (CC0)"
+                             : instrument == engine::Instrument::baroqueViolin
+                             ? "Baroque violin: gut strings on the measured violin bodies of the CNSM Dataset (Pauget "
+                               "Ballesteros 2026, CC BY 4.0)"
                              : "Measured violin bodies: CNSM Dataset (Pauget Ballesteros 2026, CC BY 4.0) and "
                                "University of Iowa Musical Instrument Samples",
                          juce::dontSendNotification);

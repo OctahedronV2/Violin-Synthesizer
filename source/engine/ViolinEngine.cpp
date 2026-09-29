@@ -49,6 +49,7 @@ void ViolinEngine::prepare (double hostSampleRate, int maxBlockSize)
     body.prepare (hostRate, acoustic() ? Body::guitarBody : settings.body);
     amp.prepare (getInternalSampleRate(), hostRate);
     output.prepare (hostRate, maxBlock);
+    radiation.prepare (hostRate, maxBlock);
     mono.setSize (1, maxBlock);
     reset();
 }
@@ -58,6 +59,7 @@ void ViolinEngine::reset()
     violin.reset();
     sympathetic.reset();
     body.reset();
+    radiation.reset();
     amp.reset();
     output.reset();
     sordino = settings.output.sordino;
@@ -151,9 +153,16 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
         }
         else
         {
-            sympathetic.process (samples, chunkLength, violin.openStrings(), settings.performance.voice.resonance);
+            sympathetic.process (samples,
+                                 chunkLength,
+                                 violin.openStrings(),
+                                 settings.performance.voice.resonance
+                                     * instrumentSpec (settings.performance.instrument).sympatheticScale);
             output.processPreBody (samples, chunkLength);
+            radiation.setBodyPeaks (instrumentSpec (settings.performance.instrument).bodyPeaksDb);
+            radiation.processPreBody (samples, chunkLength);
             body.process (samples, chunkLength);
+            radiation.processPostBody (samples, chunkLength);
         }
 
         auto* left = buffer.getWritePointer (0, chunkStart);

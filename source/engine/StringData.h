@@ -74,13 +74,15 @@ enum class Instrument
     violin,
     bowedGuitar, // electric
     bowedAcousticGuitar,
+    baroqueViolin, // gut strings, as heard in historically informed playing (v1.1)
 };
 
-inline constexpr int numInstruments = 3;
+inline constexpr int numInstruments = 4;
 // Every one is bowed, so the names leave that out.
 inline constexpr std::array<const char*, numInstruments> instrumentNames { "Violin",
                                                                            "Electric guitar",
-                                                                           "Acoustic guitar" };
+                                                                           "Acoustic guitar",
+                                                                           "Baroque violin" };
 
 // Everything about an instrument that the strings and the player need
 // (the start of the InstrumentSpec planned for Octastra, docs/OCTASTRA_DESIGN.md).
@@ -97,6 +99,15 @@ struct InstrumentSpec
     bool fretted; // notes step from fret to fret; vibrato only bends up
     bool pickup; // heard through a magnetic pickup rather than a body
     bool flatBridge; // the bow also catches the strings beside the played ones
+    // How much of the bow speed is kept while the bow lifts off at the end of
+    // a smooth stroke, 0..1. Kept speed keeps the string's amplitude, so the
+    // note rings on after the bow leaves (docs/REFERENCE_SOUND.md). 0 slows
+    // the bow to a stop on the string.
+    double releaseRing;
+    // Sympathetic resonance of the open strings, relative to the Resonance setting.
+    double sympatheticScale;
+    // Depth of the radiation peaks and dips added after the body, dB (0: none).
+    double bodyPeaksDb;
     // The player listens for the pitch the twisting string really sounds,
     // slightly sharp of the note. The violin's player was tuned listening at
     // the note itself, and keeps doing so.
@@ -113,11 +124,39 @@ inline constexpr InstrumentSpec violinSpec {
     0.328,
     0.07,
     1.0,
-    dsp::LossSpec {},
+    // A stopped string rings for about 3 s once the bow leaves it (1.5 s
+    // before v1.1, which the notes' ends never let you hear).
+    dsp::LossSpec { 3.0, 0.25, 4000.0 },
     1.0,
     false,
     false,
     false,
+    0.6,
+    0.1, // measured against real recordings: quieter than the model's full coupling
+    9.0,
+    false,
+};
+
+// A baroque violin: gut strings at lower tension. They ring on longer, the
+// open strings answer more, and the bow comes off almost at full speed at the
+// end of each stroke, as in historically informed playing. Fitted to Dmitry
+// Sinkovsky's Biber (docs/REFERENCE_SOUND.md).
+inline constexpr InstrumentSpec baroqueViolinSpec {
+    strings.data(),
+    static_cast<int> (strings.size()),
+    55,
+    103,
+    0.328,
+    0.07,
+    1.0,
+    dsp::LossSpec { 3.75, 0.25, 4000.0 },
+    1.0,
+    false,
+    false,
+    false,
+    0.8,
+    1.0,
+    10.0,
     false,
 };
 
@@ -140,6 +179,9 @@ inline constexpr InstrumentSpec bowedGuitarSpec {
     true,
     true,
     true,
+    0.0,
+    1.0,
+    0.0,
     true,
 };
 
@@ -163,6 +205,9 @@ inline constexpr InstrumentSpec bowedAcousticGuitarSpec {
     true,
     false,
     true,
+    0.0,
+    1.0,
+    0.0,
     true,
 };
 
@@ -174,6 +219,8 @@ inline const InstrumentSpec& instrumentSpec (Instrument i)
             return bowedGuitarSpec;
         case Instrument::bowedAcousticGuitar:
             return bowedAcousticGuitarSpec;
+        case Instrument::baroqueViolin:
+            return baroqueViolinSpec;
         default:
             return violinSpec;
     }

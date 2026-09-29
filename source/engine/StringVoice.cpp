@@ -18,7 +18,14 @@ constexpr int noiseFilterStep = 32;
 constexpr double smoothingSeconds = 0.02;
 constexpr double legatoDynamicsSeconds = 0.15; // dynamics change smoothly across a slur
 constexpr double legatoEntrySeconds = 0.025; // bow arriving on a new string mid-stroke
-constexpr double vibratoOnsetSeconds = 0.25;
+// Singing vibrato (docs/REFERENCE_SOUND.md): it starts 0.1 s before the
+// Vibrato Delay and blooms over 0.6 s. Within a slur it keeps going through
+// the note change; crossing to another string, the hand was already moving.
+constexpr double vibratoBloomSeconds = 0.6, vibratoBloomLead = 0.1, vibratoCrossingSeconds = 0.3;
+// Intonation: each note's own offset, a standard deviation of 16 cents at
+// 100% (real players measure 9.5), and the finger lands about 9 cents flat at
+// 50% and settles in 90 ms.
+constexpr double intonationSpreadCents = 16.0, landingFlatCents = -9.0, landingSettleSeconds = 0.09;
 constexpr double silenceThreshold = 1.0e-5;
 constexpr double noiseBandwidthHz = 0.7; // humanisation drift
 
@@ -77,7 +84,14 @@ constexpr double torsionMakeup = (1.0 + torsionImpedanceRatio) / torsionImpedanc
 // ... and lengthens each period a little: the note sounds 0.85 cents flatter
 // on average (up to 1.8). The string is tuned 1.4 cents sharp, which also
 // takes out the 0.55 cents the bowed model was already flat.
-constexpr double torsionTuning = 1.000809;
+// (Measured on held notes G3 to E6, this comes out 1 cent sharp on the low
+// strings and 0.5 flat at the top. A correction that follows the register was
+// tried for v1.1, but the player, which listens at the note itself, then
+// settled fewer notes of a scale into clean Helmholtz motion: 35 of 64, not 42.)
+inline double torsionTuning (double)
+{
+    return 1.000809;
+}
 // Near the bridge with a firm bow, the twisting string can also lock onto the
 // bow: it sticks and travels with the hair, silent, however long the note is
 // held (v1.0.1: Bright Soloist's G and A strings went dead). In Helmholtz
@@ -248,6 +262,7 @@ void StringVoice::setTarget (int note, bool glide)
         shift = true;
         handPosition = above > handPosition + handSpan ? above - 4 : std::max (firstPosition, above - 1);
     }
+    const auto currentNoteBeforeTarget = currentNote;
     shifting = shift && currentNote > spec->openMidiNote;
     currentNote = note;
     targetLogF0 = std::log (midiToHz (note));
@@ -256,6 +271,23 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
+    if (const auto sigma = intonationSpreadCents * std::clamp (intonation, 0.0, 1.0);
+        sigma > 0.0 && note != currentNoteBeforeTarget)
+    {
+        // A real finger lands a little off and the ear pulls it in: each note has
+        // its own intonation, and starts slightly flat (docs/REFERENCE_SOUND.md).
+        const auto g = nextNoise() + nextNoise() + nextNoise(); // about unit variance
+        noteIntonationCents = sigma * g;
+        landingCents = landingFlatCents * (sigma / 8.0) * (1.0 + 0.5 * nextNoise());
+    }
+    if (! glide)
+    {
+        // Each note's vibrato is a little different, and starts wherever the hand
+        // was. A slur keeps the vibrato going through the note change.
+        noteVibRate = 1.0 + 0.06 * nextNoise();
+        noteVibDepth = 1.0 + 0.12 * nextNoise(); // Humanise adds its own depth drift
+        vibratoPhase = 0.5 + 0.5 * nextNoise();
+    }
     // Take the new pitch, or start the glide, from the next sample.
     controlJump = jumpNote = true;
     jumpGlides = glide;
@@ -349,6 +381,7 @@ void StringVoice::start (int note, float velocity, Articulation a)
     dynamicsCoeff = smoothingCoeff;
     envelopePosition = 0.0;
     strokeSeconds = 0.0;
+    vibratoSeconds = 0.0;
     stage = Stage::attack;
     attackSeconds = -1.0; // use the Attack setting
 
@@ -399,6 +432,7 @@ void StringVoice::legato (int note, float velocity, Articulation a)
         dynamics = dynamicsTarget;
         stage = Stage::attack;
         attackSeconds = legatoEntrySeconds;
+        vibratoSeconds = vibratoCrossingSeconds; // the hand was already vibrating on the other string
         envelopePosition = 0.0;
     }
 }
@@ -509,8 +543,12 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     const auto seconds = samples / fs;
     advanceGlide (settings, seconds);
     secondsSinceNoteChange += seconds;
+    vibratoSeconds += seconds;
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-    vibratoPhase += settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * seconds;
+    // Singing vibrato: it quickens from 0.8 to about 1.05 times the rate as it blooms.
+    const auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * noteVibRate
+        * (0.8 + 0.25 * vibratoBloom (settings));
+    vibratoPhase += rate * seconds;
     vibratoPhase -= std::floor (vibratoPhase);
 }
 
@@ -527,7 +565,12 @@ void StringVoice::advanceGlide (const VoiceSettings& settings, double seconds)
     if (glideProgress >= 1.0)
         logF0 = targetLogF0;
     else
-        logF0 = glideFrom + (targetLogF0 - glideFrom) * (0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress));
+    {
+        auto c = 0.5 - 0.5 * std::cos (std::numbers::pi * glideProgress);
+        if (shifting)
+            c = c * c * (3.0 - 2.0 * c); // a hidden shift: the finger moves late and fast, then lands
+        logF0 = glideFrom + (targetLogF0 - glideFrom) * c;
+    }
 }
 
 void StringVoice::updateArm()
@@ -563,21 +606,41 @@ void StringVoice::updateNoise()
     depthNoise = std::clamp (depthNoise, -1.0 / noiseScale * 2.5, 1.0 / noiseScale * 2.5);
 }
 
+double StringVoice::vibratoBloom (const VoiceSettings& settings) const
+{
+    const auto x
+        = std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds - vibratoBloomLead)) / vibratoBloomSeconds,
+                      0.0,
+                      1.0);
+    return 0.5 - 0.5 * std::cos (std::numbers::pi * x);
+}
+
 double StringVoice::controlF0 (const VoiceSettings& settings, const StringContext& context) const
 {
     // Pitch: glide, bends (global and per note) and humanised vibrato.
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
-    const auto onset
-        = std::clamp ((secondsSinceNoteChange - settings.vibratoDelaySeconds) / vibratoOnsetSeconds, 0.0, 1.0);
-    const auto depth = (onset * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
+    // The vibrato blooms, wider when louder and a little different on every
+    // note. 0.8 brings the default depth to the 16 cents measured on real players.
+    const auto onsetShape = 0.8 * vibratoBloom (settings) * noteVibDepth * (0.75 + 0.5 * dynamics);
+    const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
     if (droning)
         return std::exp (logF0); // an open string: nothing to bend it
     // A fretted string can only be pushed sharp: its vibrato bends up from the note.
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
-    const auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
-    const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
+    auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
+    if (! instrument->fretted)
+    {
+        // The hand lingers at the ends of the swing. It is centred on the note: the
+        // flat finger landing already models the approach from below.
+        const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
+        vibratoCents
+            = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
+    }
+    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / landingSettleSeconds);
+    const auto bendCents = noteIntonationCents + landing
+        + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
         + fingerWanderCents * humanise * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
@@ -585,6 +648,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
 
 void StringVoice::updateTargets (const VoiceSettings& settings, const StringContext& context)
 {
+    intonation = settings.intonation;
     // Bow position: the setting, or the per-note timbre (tasto 0 .. ponticello 1),
     // unless the articulation fixes it.
     betaTarget = settings.bowPosition;
@@ -609,6 +673,23 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
         + tremorSpeed * humanise * speedTremor.band() * tremorScale;
+    if (shifting && glideProgress < 1.0)
+        armSpeedGain *= 1.0 - 0.35 * std::sin (std::numbers::pi * glideProgress); // the bow lightens to hide the slide
+    if (isBowed() && noteArticulation != Articulation::spiccato && noteArticulation != Articulation::staccato
+        && noteArticulation != Articulation::tremolo)
+    {
+        // Note shaping: a small grip at the start of each stroke, then the bow
+        // opens into the note (a swell peaking near 0.8 s) and eases back.
+        const auto t = strokeSeconds;
+        const auto grip = 0.12 * std::exp (-t / 0.07);
+        // Within a slur each note still gets its own, smaller, swell.
+        const auto u = secondsSinceNoteChange;
+        const auto slurred = u < t - 0.01;
+        const auto swell = (slurred ? 0.0 : 0.22) * (u / 0.5) * std::exp (1.0 - u / 0.5);
+        const auto shape = 1.0 + grip + swell;
+        armSpeedGain *= shape;
+        betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge
+    }
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
@@ -658,7 +739,7 @@ void StringVoice::updateControlRate (const VoiceSettings& settings, const String
     if (stage == Stage::attack || stage == Stage::sustain)
         player.adjust (controlInterval / fs, 1.0 - settings.imperfection);
     f0Now = controlJump ? controlF0 (settings, context) : f0End; // an event lands on this sample
-    player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning : f0Now));
+    player.setPeriod (fs / (instrument->playerHearsTwist && twists() ? f0Now * torsionTuning (f0Now) : f0Now));
     controlJump = jumpNote = false;
     advanceControl (settings, controlInterval);
     updateNoise(); // drawn at the same samples as before, so tremolo's jitter is unchanged
@@ -788,6 +869,14 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         }
         auto forceGain = 1.0;
         speed = forceSpeed;
+        if (const auto ring = instrument->releaseRing;
+            ring > 0.0 && stage == Stage::release && slurs (noteArticulation))
+        {
+            // A released stroke: the bow lifts off while it still moves, so the
+            // string keeps its amplitude and rings on after the note ends.
+            const auto lifted = 1.0 - envelopeShape() / std::max (releaseStartLevel, 1.0e-3);
+            speed = nominal * (1.0 - (1.0 - ring) * lifted);
+        }
 
         switch (noteArticulation)
         {
@@ -856,7 +945,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             * (string.isSticking() ? hairStick : 1.0);
     }
 
-    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning : f0,
+    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning (f0) : f0,
                              b,
                              context.direction * speed,
                              force,
