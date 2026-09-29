@@ -20,4 +20,5 @@ inline double param (const char* name, double fallback)
     return s != nullptr ? std::atof (s) : fallback;
 }
 constexpr int vibrato = 1, bowArm = 2, transitions = 4, cleanEnds = 8, body = 16, living = 32, proBowing = 64, somber = 128, longing = 256;
+constexpr int playerDynamics = 1024, wideBow = 2048, softFinger = 4096, rollingFinger = 8192;
 } // namespace violinsynth::engine::hg

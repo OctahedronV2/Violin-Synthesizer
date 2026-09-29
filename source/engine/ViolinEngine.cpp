@@ -163,7 +163,8 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             output.processPreBody (samples, chunkLength);
             radiation.setBodyPeaks (instrumentSpec (settings.performance.instrument).bodyPeaksDb);
             radiation.processPreBody (samples, chunkLength);
-            body.process (samples, chunkLength);
+            if (static const bool noBody = hg::param ("NO_BODY", 0.0) > 0.5; ! noBody)
+                body.process (samples, chunkLength);
             radiation.processPostBody (samples, chunkLength);
         }
 

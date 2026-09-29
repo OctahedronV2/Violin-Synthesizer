@@ -110,15 +110,17 @@ void Radiation::processPostBody (float* samples, int numSamples)
         return; // at rest: silence in, silence out
     dormant = false;
 
-    const bool peaks = bodyPeaksDb != 0.0;
+    static const bool noMic = hg::param ("NO_MIC", 0.0) > 0.5, noPeaks = hg::param ("NO_PEAKS", 0.0) > 0.5;
+    const bool peaks = bodyPeaksDb != 0.0 && ! noPeaks;
     for (int i = 0; i < numSamples; ++i)
     {
         auto x = samples[i] + airGain * air[static_cast<std::size_t> (i)];
         if (peaks)
             for (auto& f : bodyPeaks)
                 x = f.process (x);
-        for (auto& f : micPeaks)
-            x = f.process (x);
+        if (! noMic)
+            for (auto& f : micPeaks)
+                x = f.process (x);
         if (hg::on (hg::body))
             for (auto& f : hgEq)
                 x = f.process (x);

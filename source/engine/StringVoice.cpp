@@ -680,6 +680,8 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
         const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
         vibratoCents
             = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
+        if (hg::on (hg::rollingFinger))
+            vibratoCents -= 0.5 * std::max (depth, 0.0) * hg::param ("FLAT_LEAN", 0.0); // the hand rocks back from the note
     }
     const auto landing = landingCents * std::exp (-secondsSinceNoteChange / landingSettleSeconds)
         + scoopCents * std::exp (-secondsSinceNoteChange / hg::param ("SCOOP_T", 0.045));
@@ -784,6 +786,15 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     }
     if (hg::on (hg::living))
         fractionTarget *= 1.0 + hg::param ("LIVE_FORCE", 0.3) * std::clamp (livingForce * livingScale(), -2.0, 2.0);
+    if (hg::on (hg::playerDynamics) && isBowed() && noteArticulation != Articulation::pizzicato)
+    {
+        // Players make dynamics with weight and contact point, not bow speed:
+        // piano far from the bridge and light, forte close in and heavy.
+        const auto d = std::clamp (dynamics, 0.0, 1.0);
+        const auto far = hg::param ("PD_FAR", 2.0), close = hg::param ("PD_CLOSE", 0.4);
+        betaTarget = std::clamp (betaTarget * far * std::pow (close / far, d), 0.035, 0.3);
+        fractionTarget *= hg::param ("PD_LIGHT", 0.8) + (hg::param ("PD_HEAVY", 1.25) - hg::param ("PD_LIGHT", 0.8)) * d;
+    }
     speedScale = 1.0;
     switch (noteArticulation)
     {
@@ -939,7 +950,10 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         forceFraction = fractionTarget + smoothingCoeff * (forceFraction - fractionTarget);
 
         // Speed from dynamics; force follows speed within the string's playable window.
-        const auto nominal = (minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics)) * speedScale
+        const auto dynSpeed = hg::on (hg::playerDynamics)
+                                ? hg::param ("PD_SPEED_P", 0.3) + (hg::param ("PD_SPEED_F", 0.24) - hg::param ("PD_SPEED_P", 0.3)) * dynamics
+                                : minBowSpeed + (maxBowSpeed - minBowSpeed) * dynamics * std::sqrt (dynamics);
+        const auto nominal = dynSpeed * speedScale
             * context.bowChangeGain * (twists() ? torsionMakeup : 1.0) * armSpeedGain;
         auto forceSpeed = nominal * envelopeShape(); // the speed the force follows
         if (stage == Stage::release)
@@ -1036,7 +1050,26 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
             * (string.isSticking() ? hairStick : 1.0);
     }
 
-    auto y = string.process (isBowed() && twists() ? f0 * torsionTuning (f0) : f0,
+    if (hg::on (hg::wideBow))
+        string.setBowWidth (hg::param ("BOW_W", 0.008) / (instrument->scaleLength * midiToHz (spec->openMidiNote) / f0));
+    auto fingerTrim = hg::on (hg::wideBow) ? std::pow (2.0, -hg::param ("WIDE_TRIM", 5.0) * hg::param ("BOW_W", 0.008) / 0.008 / 1200.0) : 1.0;
+    if (hg::on (hg::softFinger) && currentNote > spec->openMidiNote && damping != Damping::plucked)
+    {
+        // A fleshy fingertip: a lossy, slightly soft stop that rolls with the vibrato.
+        auto pole = hg::param ("FINGER_SOFT", 0.7);
+        auto gain = hg::param ("FINGER_GAIN", 0.996);
+        if (hg::on (hg::rollingFinger))
+        {
+            const auto roll = std::sin (2.0 * std::numbers::pi * vibratoPhase) * vibratoBloom (settings);
+            pole = std::clamp (pole + hg::param ("ROLL", 0.12) * roll, 0.0, 0.95);
+            gain = std::min (gain * (1.0 - 0.002 * roll), 0.999);
+        }
+        string.setFingerStop (gain, pole);
+        fingerTrim *= std::pow (2.0, hg::param ("FINGER_TRIM", 5.0) * pole / 0.7 / 1200.0); // the soft stop sits a little flat
+    }
+    else
+        string.setFingerStop (1.0, 0.0);
+    auto y = string.process (fingerTrim * (isBowed() && twists() ? f0 * torsionTuning (f0) : f0),
                              b,
                              context.direction * speed,
                              force,

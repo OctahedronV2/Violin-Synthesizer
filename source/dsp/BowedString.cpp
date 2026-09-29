@@ -51,6 +51,8 @@ void BowedString::prepare (double internalSampleRate, double lowestF0)
     nutLine.prepare (maxDelay);
     torsionBridgeLine.prepare (maxDelay);
     torsionNutLine.prepare (maxDelay);
+    midAB.prepare (maxDelay);
+    midBA.prepare (maxDelay);
     tauTable.assign (tauTableSize, -1.0);
     setLowestF0 (lowestF0);
     reset();
@@ -78,6 +80,10 @@ void BowedString::setPickup (const std::array<double, maxCoils>& coilMetres,
 void BowedString::reset()
 {
     bridgeLine.reset();
+    midAB.reset();
+    midBA.reset();
+    fingerState = 0.0;
+    stickingB = false;
     for (auto& m : modes)
         m.x1 = m.x2 = m.y1 = m.y2 = 0.0;
     lastForce = 0.0;
@@ -149,14 +155,22 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
 {
     if (lastF0 < 0.0 || std::abs (f0 - lastF0) > f0Tolerance * lastF0)
         updateCoefficients (f0);
+    if (widthFraction > 0.0 && numCoils == 0)
+        return process2 (f0, beta, vBow, force, excitation);
 
     const auto period = fs / f0;
     const auto maxDelay = bridgeLine.maxSupportedDelay();
     const auto dBridge = std::clamp (beta * period - tau, FractionalDelay::minDelay, maxDelay);
-    const auto dNut = std::clamp ((1.0 - beta) * period, FractionalDelay::minDelay, maxDelay);
+    const auto fingerDelay = fingerDelayFor (f0);
+    const auto dNut = std::clamp ((1.0 - beta) * period - fingerDelay, FractionalDelay::minDelay, maxDelay);
 
     const auto yBridge = bridgeLine.read (dBridge);
-    const auto yNut = nutLine.read (dNut);
+    auto yNut = nutLine.read (dNut);
+    if (fingerPole > 0.0 || fingerGain < 1.0)
+    {
+        fingerState = (1.0 - fingerPole) * yNut + fingerPole * fingerState;
+        yNut = fingerGain * fingerState;
+    }
 
     const auto reflected = loopFilter.process (yBridge);
     double bridgeVelocity = 0.0;
@@ -244,5 +258,113 @@ double BowedString::process (double f0, double beta, double vBow, double force, 
     lastVelocity = twists ? vH + injected : result.velocity + excitation;
     lastForce = params.friction.impedance * (yBridge - fromBridge);
     return lastForce;
+}
+double BowedString::process2 (double f0, double beta, double vBow, double force, double excitation)
+{
+    // A bow with width: contact A nearer the bridge, B nearer the nut, joined
+    // by a short stretch of string. Each grips and slips on its own, so the
+    // hairs across the ribbon can slip at different moments (differential
+    // slipping), which rounds the Helmholtz corner and roughens it slightly.
+    const auto period = fs / f0;
+    const auto maxDelay = bridgeLine.maxSupportedDelay();
+    const auto m = std::max (FractionalDelay::minDelay, 0.5 * widthFraction * period); // one way, A to B
+    const auto betaA = std::max (beta - 0.5 * widthFraction, 0.5 * beta);
+    const auto dBridge = std::clamp (betaA * period - tau, FractionalDelay::minDelay, maxDelay);
+    const auto fingerDelay = fingerDelayFor (f0);
+    const auto dNut = std::clamp (period - betaA * period - 2.0 * m - fingerDelay, FractionalDelay::minDelay, maxDelay);
+
+    const auto yBridge = bridgeLine.read (dBridge);
+    auto yNut = nutLine.read (dNut);
+    if (fingerPole > 0.0 || fingerGain < 1.0)
+    {
+        fingerState = (1.0 - fingerPole) * yNut + fingerPole * fingerState;
+        yNut = fingerGain * fingerState;
+    }
+    const auto reflected = loopFilter.process (yBridge);
+    double bridgeVelocity = 0.0;
+    if (bodyFeedback)
+    {
+        for (auto& md : modes)
+        {
+            const auto y = md.b0 * (lastForce - md.x2) - md.a1 * md.y1 - md.a2 * md.y2;
+            md.x2 = md.x1;
+            md.x1 = lastForce;
+            md.y2 = md.y1;
+            md.y1 = y;
+            bridgeVelocity += y;
+        }
+    }
+    const auto fromBridge = -reflected + 2.0 * bridgeVelocity;
+    const auto fromNut = -yNut;
+    const auto aMid = midBA.read (m); // arriving at A from B
+    const auto bMid = midAB.read (m); // arriving at B from A
+
+    // Hair near the bridge takes a little more of the weight.
+    const auto shareA = 0.55;
+    const auto& torsion = params.torsion;
+    const bool twists = torsion.speedRatio > 0.0 && force > 0.0;
+    double tFromBridge = 0.0, tFromNut = 0.0;
+    auto frictionA = params.friction;
+    if (twists)
+    {
+        const auto torsionPeriod = period / torsion.speedRatio;
+        tFromBridge = torsionReflection
+            * torsionBridgeLine.readLinear (std::clamp (beta * torsionPeriod, FractionalDelay::minDelay, maxDelay));
+        tFromNut = torsionReflection
+            * torsionNutLine.readLinear (std::clamp ((1.0 - beta) * torsionPeriod, FractionalDelay::minDelay, maxDelay));
+        frictionA.impedance = contactImpedance;
+    }
+    const auto vtH = tFromBridge + tFromNut;
+
+    // Contact A
+    const auto vHA = fromBridge + aMid;
+    auto ra = solveJunction (vBow, vHA + vtH, force * shareA, frictionA, sticking);
+    if (fingerHold > 0.0)
+        ra.velocity += fingerHold * (fingerVelocity - ra.velocity);
+    sinceSlip += 1.0;
+    slipOnset = sticking && ! ra.sticking;
+    if (slipOnset)
+    {
+        lastSlipInterval = sinceSlip;
+        sinceSlip = 0.0;
+    }
+    sticking = ra.sticking;
+    const auto changeA = ra.velocity - vHA - vtH;
+    const auto share = twists ? transverseShare : 1.0;
+    const auto injA = changeA * share + excitation;
+    if (twists)
+    {
+        const auto twist = changeA - changeA * share;
+        torsionBridgeLine.write (tFromNut + twist);
+        torsionNutLine.write (tFromBridge + twist);
+    }
+
+    // Contact B (no twist of its own: the torsion is modelled at A)
+    const auto vHB = bMid + fromNut;
+    const auto rb = solveJunction (vBow, vHB, force * (1.0 - shareA), params.friction, stickingB);
+    stickingB = rb.sticking;
+    const auto injB = rb.velocity - vHB;
+
+    bridgeLine.write (aMid + injA);
+    midAB.write (fromBridge + injA);
+    nutLine.write (bMid + injB);
+    midBA.write (fromNut + injB);
+
+    lastVelocity = ra.velocity;
+    lastForce = params.friction.impedance * (yBridge - fromBridge);
+    return lastForce;
+}
+
+double BowedString::fingerDelayFor (double f0)
+{
+    if (fingerPole <= 0.0)
+        return 0.0;
+    if (fingerPole != cachedFingerPole || f0 != cachedFingerF0)
+    {
+        cachedFingerPole = fingerPole;
+        cachedFingerF0 = f0;
+        cachedFingerDelay = harmonicPhaseDelay (fingerPole, f0, fs);
+    }
+    return cachedFingerDelay;
 }
 } // namespace violinsynth::dsp

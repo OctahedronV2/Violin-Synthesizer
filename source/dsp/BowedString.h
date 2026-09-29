@@ -77,6 +77,16 @@ public:
         fingerHold = hold;
     }
 
+    // HG experiments. A bow of finite width: two contact points `fraction`
+    // of the string apart (0: a point bow). A soft stopping finger at the far
+    // end: it keeps `gain` of each reflection and low-passes it with pole `a`
+    // (0: a rigid stop).
+    void setBowWidth (double fraction) { widthFraction = fraction; }
+    void setFingerStop (double gain, double a)
+    {
+        fingerGain = gain;
+        fingerPole = a;
+    }
     double stringVelocity() const { return lastVelocity; }
     bool isSticking() const { return sticking; }
     // Samples between the last two slip onsets (the string letting go of the
@@ -129,6 +139,12 @@ private:
     struct Mode { double b0 = 0.0, a1 = 0.0, a2 = 0.0, x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0; };
     std::array<Mode, bodyModes> modes {};
     bool bodyFeedback = false;
+    FractionalDelay midAB, midBA; // between the two contact points of a wide bow
+    double widthFraction = 0.0, fingerGain = 1.0, fingerPole = 0.0, fingerState = 0.0;
+    bool stickingB = false;
+    double fingerDelayFor (double f0);
+    double cachedFingerPole = -1.0, cachedFingerF0 = -1.0, cachedFingerDelay = 0.0;
+    double process2 (double f0, double beta, double vBow, double force, double excitation);
     double lastForce = 0.0;
 };
 } // namespace violinsynth::dsp
