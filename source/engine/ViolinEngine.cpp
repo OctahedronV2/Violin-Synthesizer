@@ -177,7 +177,7 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 for (int i = 0; i < chunkLength; ++i)
                     samples[i] += g * air[static_cast<size_t> (i)];
             }
-            else
+            else if (! std::getenv ("NOBODY"))
                 body.process (samples, chunkLength);
         }
 

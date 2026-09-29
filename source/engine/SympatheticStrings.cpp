@@ -1,6 +1,7 @@
 #include "engine/SympatheticStrings.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace violinsynth::engine
 {
@@ -40,7 +41,8 @@ void SympatheticStrings::reset()
 
 void SympatheticStrings::process (float* bridgeForce, int numSamples, const std::array<bool, 4>& isOpen, double amount)
 {
-    const auto coupling = std::clamp (amount, 0.0, 1.0) * maxCoupling;
+    static const double scratchScale = std::getenv ("SYMPC") ? std::atof (std::getenv ("SYMPC")) : 1.0; // SCRATCH
+    const auto coupling = std::clamp (amount, 0.0, 1.0) * maxCoupling * scratchScale;
 
     std::array<bool, 4> active {};
     bool any = false;

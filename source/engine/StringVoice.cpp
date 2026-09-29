@@ -172,6 +172,12 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
     bowedParams.friction.impedance = spec->impedance;
     bowedParams.torsion = { torsionSpeedRatio, torsionImpedanceRatio, torsionQ };
     bowedParams.loss = instrument->loss;
+    if (const char* e = std::getenv ("LOSSHI"))
+        bowedParams.loss.t60High *= std::atof (e); // SCRATCH
+    if (const char* e = std::getenv ("LOSSLO"))
+        bowedParams.loss.t60 *= std::atof (e); // SCRATCH
+    if (std::getenv ("NOTWIST"))
+        bowedParams.torsion = { 0.0, torsionImpedanceRatio, torsionQ }; // SCRATCH
     string.setParams (bowedParams);
     if (! instrument->pickup)
         setPickup ({}, 0);
