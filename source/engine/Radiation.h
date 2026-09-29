@@ -49,6 +49,7 @@ private:
     std::array<Biquad, 36> bodyPeaks;
     std::array<Biquad, 40> micPeaks;
     std::array<Biquad, 3> hgEq, hgDark; // HG: less nasal body
+    std::array<Biquad, 2> hgHill; // HG: the bridge's rocking resonance and top-end radiation
     std::vector<float> air;
     int quietRun = 0, dormantAfter = 1; // samples of silent input
     bool dormant = false, airSilent = true;
