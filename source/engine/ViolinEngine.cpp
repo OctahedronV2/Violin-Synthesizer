@@ -1,5 +1,7 @@
 #include "engine/ViolinEngine.h"
 
+#include "engine/HurdyFix.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -156,7 +158,7 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
             sympathetic.process (samples,
                                  chunkLength,
                                  violin.openStrings(),
-                                 settings.performance.voice.resonance
+                                 (hg::on (hg::cleanEnds) ? 0.0 : 1.0) * settings.performance.voice.resonance
                                      * instrumentSpec (settings.performance.instrument).sympatheticScale);
             output.processPreBody (samples, chunkLength);
             radiation.setBodyPeaks (instrumentSpec (settings.performance.instrument).bodyPeaksDb);

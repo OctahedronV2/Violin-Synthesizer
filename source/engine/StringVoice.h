@@ -5,6 +5,7 @@
 #include "engine/Articulation.h"
 #include "engine/StringData.h"
 
+#include <cmath>
 #include <cstdint>
 
 namespace violinsynth::engine
@@ -37,6 +38,7 @@ struct StringContext
     double globalBendSemitones = 0.0;
     double dynamicsOverride = -1.0; // CC11/CC2 value, or < 0 to use note velocity
     double pressureOverride = -1.0; // CC1 value, or < 0 to use the Bow Pressure setting
+    double bowPlace = 0.5; // HG: where on the bow the hair meets the string, 0 frog .. 1 tip
 };
 
 // Per-note expression (MPE, or channel-wide controllers when MPE is off).
@@ -83,6 +85,8 @@ public:
     void start (int note, float velocity, Articulation a = Articulation::legato); // new stroke or pluck
     void legato (int note, float velocity, Articulation a = Articulation::legato); // glide, or enter mid-bow
     void release();
+    // HG: the finger lifts from a ringing stopped note (another string took over).
+    void liftFinger();
 
     void setExpression (const NoteExpression& e)
     {
@@ -209,6 +213,14 @@ private:
     NoteExpression expression;
     double silentSeconds = 0.0, lastSpeed = 0.0, lastF0 = 0.0, peakLevel = 0.0, peakDecay = 0.0;
     int controlCounter = 0;
+    // HG experiments
+    double livingScale() const
+    {
+        const auto c = std::sqrt (armCoeff);
+        return 1.0 / std::sqrt (std::pow (1.0 - c, 4.0) * (1.0 + c * c) / (3.0 * std::pow (1.0 - c * c, 3.0)));
+    }
+    double vibCycleRate = 1.0, lastVibPhase = 0.0, scoopCents = 0.0, transitionSeconds = 1.0e9;
+    double livingForce = 0.0, livingDrive = 0.0, livingSpeed = 0.0, livingSpeedDrive = 0.0;
     double stuckSamples = 0.0; // samples the string has stuck to the moving bow without letting go
 
     // Articulation state

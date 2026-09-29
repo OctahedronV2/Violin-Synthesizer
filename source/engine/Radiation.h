@@ -48,6 +48,7 @@ private:
     std::array<Biquad, 3> airFilters;
     std::array<Biquad, 36> bodyPeaks;
     std::array<Biquad, 40> micPeaks;
+    std::array<Biquad, 3> hgEq; // HG: less nasal body
     std::vector<float> air;
     int quietRun = 0, dormantAfter = 1; // samples of silent input
     bool dormant = false, airSilent = true;

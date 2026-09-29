@@ -1,5 +1,7 @@
 #include "engine/Violin.h"
 
+#include "engine/HurdyFix.h"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -161,6 +163,10 @@ void Violin::apply (const StringActions& actions)
                 voice.release();
                 break;
         }
+        if (a.type != StringAction::Type::release && hg::on (hg::cleanEnds))
+            for (int s = 0; s < instrument->numStrings; ++s)
+                if (s != a.string)
+                    voices[static_cast<std::size_t> (s)].liftFinger(); // the hand moves on
     }
     if (instrument->flatBridge)
         updateDrones (newStroke);
@@ -362,6 +368,10 @@ void Violin::render (float* out, int numSamples)
                 context.bowChangeGain = std::abs (std::cos (std::numbers::pi * bowChangePhase));
         }
         context.direction = direction;
+        {
+            const auto used = std::clamp (bowUsed / bowLengthMetres, 0.0, 1.0);
+            context.bowPlace = direction > 0.0 ? used : 1.0 - used;
+        }
 
         double sum = 0.0, fastest = 0.0;
         for (int s = 0; s < instrument->numStrings; ++s)

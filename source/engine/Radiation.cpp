@@ -1,5 +1,7 @@
 #include "engine/Radiation.h"
 
+#include "engine/HurdyFix.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -53,6 +55,9 @@ void Radiation::prepare (double sampleRate, int maxBlockSize)
     airFilters[1].setHighPass (fs, 11000.0, 1.31);
     airFilters[2].setHighShelf (fs, 14000.0, -6.0);
     setPeaks (micPeaks, fs, 4242u, 800.0, 9000.0, micPeaksDb, micQ);
+    hgEq[0].setPeak (fs, hg::param ("NASAL_HZ", 1000.0), hg::param ("NASAL_DB", -7.0), 0.8);
+    hgEq[1].setPeak (fs, hg::param ("WARM_HZ", 420.0), hg::param ("WARM_DB", 4.0), 0.9);
+    hgEq[2].setPeak (fs, hg::param ("BRILL_HZ", 3000.0), hg::param ("BRILL_DB", 2.0), 1.2);
     bodyPeaksDb = -1.0;
     setBodyPeaks (0.0);
     reset();
@@ -65,6 +70,8 @@ void Radiation::reset()
     for (auto& f : bodyPeaks)
         f.reset();
     for (auto& f : micPeaks)
+        f.reset();
+    for (auto& f : hgEq)
         f.reset();
     quietRun = dormantAfter;
     dormant = true;
@@ -107,6 +114,9 @@ void Radiation::processPostBody (float* samples, int numSamples)
                 x = f.process (x);
         for (auto& f : micPeaks)
             x = f.process (x);
+        if (hg::on (hg::body))
+            for (auto& f : hgEq)
+                x = f.process (x);
         samples[i] = x;
     }
 
