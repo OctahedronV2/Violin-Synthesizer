@@ -176,6 +176,44 @@ void ViolinEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBu
                 const auto g = static_cast<float> (std::getenv ("AIR_GAIN") ? std::atof (std::getenv ("AIR_GAIN")) : 0.02);
                 for (int i = 0; i < chunkLength; ++i)
                     samples[i] += g * air[static_cast<size_t> (i)];
+                if (std::getenv ("MICFS"))
+                {
+                    // SCRATCH: the fine peaks and dips of the sound radiated toward one
+                    // microphone, which the smooth bridge-admittance body lacks.
+                    static std::array<Biquad, 40> fsq;
+                    static bool fsReady = false;
+                    if (! fsReady)
+                    {
+                        unsigned r = 4242u;
+                        const auto rnd = [&r] { r = r * 1664525u + 1013904223u; return static_cast<double> (r >> 8) / 16777216.0; };
+                        const auto depth = std::atof (std::getenv ("MICFS"));
+                        for (size_t k = 0; k < fsq.size(); ++k)
+                        {
+                            const auto f = 800.0 * std::pow (9000.0 / 800.0, (static_cast<double> (k) + rnd()) / static_cast<double> (fsq.size()));
+                            fsq[k].setPeak (hostRate, f, (k % 2 ? depth : -depth) * (0.6 + 0.8 * rnd()), std::getenv ("MICQ") ? std::atof (std::getenv ("MICQ")) : 30.0);
+                        }
+                        fsReady = true;
+                    }
+                    for (int i = 0; i < chunkLength; ++i)
+                        for (auto& q : fsq)
+                            samples[i] = q.process (samples[i]);
+                }
+                // SCRATCH: top-end correction measured against CNSM recordings of the same violin.
+                static const double topDb = std::getenv ("TOP_DB") ? std::atof (std::getenv ("TOP_DB")) : 0.0;
+                if (topDb != 0.0)
+                {
+                    static std::array<Biquad, 2> top;
+                    static bool topReady = false;
+                    if (! topReady)
+                    {
+                        const auto hz = std::getenv ("TOP_HZ") ? std::atof (std::getenv ("TOP_HZ")) : 5000.0;
+                        top[0].setHighShelf (hostRate, hz, topDb, 0.6);
+                        top[1].setPeak (hostRate, 6300.0, std::getenv ("PEAK_DB") ? std::atof (std::getenv ("PEAK_DB")) : 0.0, 1.2);
+                        topReady = true;
+                    }
+                    for (int i = 0; i < chunkLength; ++i)
+                        samples[i] = top[1].process (top[0].process (samples[i]));
+                }
             }
             else if (! std::getenv ("NOBODY"))
                 body.process (samples, chunkLength);

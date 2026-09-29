@@ -257,6 +257,7 @@ void StringVoice::setTarget (int note, bool glide)
         shift = true;
         handPosition = above > handPosition + handSpan ? above - 4 : std::max (firstPosition, above - 1);
     }
+    const auto currentNoteBeforeTarget = currentNote;
     shifting = shift && currentNote > spec->openMidiNote;
     if (std::getenv ("DEBUG_NOTES"))
         std::fprintf (stderr, "string %d note %d -> %d glide %d shift %d hand %d\n", spec->openMidiNote, currentNote, note, (int) glide, (int) shifting, handPosition);
@@ -267,6 +268,17 @@ void StringVoice::setTarget (int note, bool glide)
     if (! glide)
         logF0 = targetLogF0;
     secondsSinceNoteChange = 0.0;
+    {
+        static const double sigma = std::getenv ("INTON") ? std::atof (std::getenv ("INTON")) : 0.0; // SCRATCH
+        if (sigma > 0.0 && note != currentNoteBeforeTarget)
+        {
+            // A real finger lands a little off and the ear pulls it in: each note has its
+            // own intonation, and starts slightly flat.
+            const auto g = (nextNoise() + nextNoise() + nextNoise()) * 0.577 * 1.73; // approx unit normal
+            noteIntonationCents = sigma * g;
+            landingCents = -9.0 * (1.0 + 0.5 * nextNoise());
+        }
+    }
     if (authOn (1) && ! (fixOn (4) && glide))
     {
         noteVibRate = 1.0 + 0.06 * nextNoise();
@@ -622,7 +634,8 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
         const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
         vibratoCents = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi) - 0.1);
     }
-    const auto bendCents = 100.0 * (context.globalBendSemitones + expression.bendSemitones)
+    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / 0.09);
+    const auto bendCents = noteIntonationCents + landing + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
         + fingerWanderCents * humanise * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
@@ -914,6 +927,17 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         hairRandom = hairRandom * 1664525u + 1013904223u;
         const auto grain = static_cast<double> (hairRandom >> 8) / static_cast<double> (1u << 24) * 2.0 - 1.0;
         hairLevel = hairCoeff * hairLevel + (1.0 - hairCoeff) * grain;
+        {
+            // SCRATCH: reshape the hair noise, less near the note and more rosin hiss up high.
+            static const double hpHz = std::getenv ("NOISE_HP") ? std::atof (std::getenv ("NOISE_HP")) : 0.0;
+            static const double hpGain = std::getenv ("NOISE_GAIN") ? std::atof (std::getenv ("NOISE_GAIN")) : 1.0;
+            if (hpHz > 0.0)
+            {
+                const auto c = std::exp (-2.0 * std::numbers::pi * hpHz / fs);
+                hairLow = c * hairLow + (1.0 - c) * hairLevel;
+                hairLevel = hpGain * (hairLevel - hairLow);
+            }
+        }
         hairVelocity = hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * hairLevel * hairScale * speed
             * (string.isSticking() ? hairStick : 1.0);
     }
@@ -940,6 +964,20 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
     }
     if (isBowed())
         player.listen (y, string.slipStarted());
+    {
+        // SCRATCH: rosin hiss radiated at each slip (pulsed noise), outside the string loop.
+        static const double pulse = std::getenv ("PULSE") ? std::atof (std::getenv ("PULSE")) : 0.0;
+        static const double pulseHp = std::getenv ("PULSE_HP") ? std::atof (std::getenv ("PULSE_HP")) : 2000.0;
+        if (pulse > 0.0 && isBowed())
+        {
+            pulseRandom = pulseRandom * 1664525u + 1013904223u;
+            const auto w = static_cast<double> (pulseRandom >> 8) / 16777216.0 * 2.0 - 1.0;
+            const auto c = std::exp (-2.0 * std::numbers::pi * pulseHp / fs);
+            pulseLow = c * pulseLow + (1.0 - c) * w;
+            const auto n = (w - pulseLow) * pulse * spec->impedance * std::abs (speed) * (string.isSticking() ? 0.15 : 1.0);
+            out += n;
+        }
+    }
     stuckSamples = isBowed() && speed != 0.0 && string.isSticking() ? stuckSamples + 1.0 : 0.0;
     lastSpeed = std::abs (speed);
     lastF0 = f0;

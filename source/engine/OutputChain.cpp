@@ -136,7 +136,7 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
         // Early reflections from a stage floor and nearby walls follow.
         struct Dir
         {
-            std::array<Biquad, 4> l, r;
+            std::array<Biquad, 12> l, r; // SCRATCH: 4 used unless DENSE
         };
         static Dir dir;
         static std::array<float, 8192> line {};
@@ -151,6 +151,20 @@ void OutputChain::processPostBody (const float* mono, float* left, float* right,
             {
                 dir.l[static_cast<size_t> (k)].setPeak (fs, fl[k], g[k], 2.5);
                 dir.r[static_cast<size_t> (k)].setPeak (fs, fr[k], g[k], 2.5);
+            }
+            if (std::getenv ("DENSE"))
+            {
+                // SCRATCH: a violin's radiation at one microphone has a peak or dip every
+                // few hundred hertz above 1 kHz; each ear hears a different pattern.
+                unsigned r = 12345u;
+                const auto rnd = [&r] { r = r * 1664525u + 1013904223u; return static_cast<double> (r >> 8) / 16777216.0; };
+                for (int k = 0; k < 12; ++k)
+                {
+                    const auto f = 900.0 * std::pow (10000.0 / 900.0, (k + rnd()) / 12.0);
+                    dir.l[static_cast<size_t> (k)].setPeak (fs, f, (k % 2 ? 6.0 : -6.0), 5.0);
+                    const auto f2 = 900.0 * std::pow (10000.0 / 900.0, (k + rnd()) / 12.0);
+                    dir.r[static_cast<size_t> (k)].setPeak (fs, f2, (k % 2 ? -6.0 : 6.0), 5.0);
+                }
             }
             reflLow.setLowPass (fs, 5000.0);
             ready = true;

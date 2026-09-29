@@ -171,6 +171,9 @@ private:
     double forceFraction = 0.48, beta = 0.11, betaFloor = 0.02, smoothingCoeff = 0.0;
     double vibratoPhase = 0.0, secondsSinceNoteChange = 0.0;
     double noteVibRate = 1.0, noteVibDepth = 1.0, vibratoSeconds = 0.0;
+    unsigned pulseRandom = 987654321u;
+    double pulseLow = 0.0;
+    double hairLow = 0.0, noteIntonationCents = 0.0, landingCents = 0.0; // SCRATCH
     double rateNoise = 0.0, depthNoise = 0.0, noiseCoeff = 0.0, noiseScale = 1.0;
     double glideFrom = 0.0, glideProgress = 1.0;
     bool shifting = false; // the slur moves the hand, rather than changing finger
