@@ -54,6 +54,17 @@ int main (int argc, char** argv)
         else if (name == "body") s.body = static_cast<int> (value);
         else if (name == "instrument") s.performance.instrument = static_cast<engine::Instrument> (static_cast<int> (value));
         else if (name == "articulation") s.performance.articulation = static_cast<engine::Articulation> (static_cast<int> (value));
+        else if (name == "attack") v.attackSeconds = value;
+        else if (name == "release") v.releaseSeconds = value;
+        else if (name == "vibratoDelay") v.vibratoDelaySeconds = value;
+        else if (name == "portamento") v.portamentoSeconds = value;
+        else if (name == "autoBowChange") v.autoBowChange = value > 0.5;
+        else if (name == "playMode") s.performance.playMode = static_cast<engine::PlayMode> (static_cast<int> (value));
+        else if (name == "pickup") s.performance.pickup = static_cast<engine::Pickup> (static_cast<int> (value));
+        else if (name == "drone") s.performance.drone = value;
+        else if (name == "drive") s.drive = value;
+        else if (name == "sordino") s.output.sordino = static_cast<float> (value);
+        else if (name == "outputGain") s.output.gainDb = static_cast<float> (value);
         else if (name == "start") startSeconds = value;
         else if (name == "length") lengthSeconds = value;
         else
