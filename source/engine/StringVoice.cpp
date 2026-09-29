@@ -576,9 +576,16 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     // Singing vibrato: it quickens from 0.8 to about 1.05 times the rate as it blooms.
     const auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * noteVibRate
-        * (0.8 + 0.25 * vibratoBloom (settings)) * (hg::on (hg::vibrato) ? hg::param ("VIB_RATE", 1.1) * vibCycleRate : 1.0)
+        * (0.8 + 0.25 * vibratoBloom (settings)) * (hg::on (hg::vibrato) ? hg::param ("VIB_RATE", 1.1) * vibCycleRate : vibJitterRate)
         * (hg::on (hg::somber) ? hg::param ("SOMBER_VIB_RATE", 0.87) : 1.0);
     vibratoPhase += rate * seconds;
+    if (vibratoPhase >= 1.0 && (hg::param ("VIB_RJIT", 0.0) > 0.0 || hg::param ("VIB_DJIT", 0.0) > 0.0))
+    {
+        // HG: a human hand: every cycle a little different in length and width.
+        static const double rj = hg::param ("VIB_RJIT", 0.0), dj = hg::param ("VIB_DJIT", 0.0);
+        vibJitterRate = 1.0 + rj * nextNoise();
+        vibJitterDepth = std::max (0.2, 1.0 + dj * nextNoise());
+    }
     if (vibratoPhase >= 1.0 && hg::on (hg::vibrato))
         vibCycleRate = 1.0 + 0.09 * nextNoise(); // no two cycles the same
     vibratoPhase -= std::floor (vibratoPhase);
@@ -676,13 +683,14 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     const auto wave = instrument->fretted ? 1.0 - std::cos (2.0 * std::numbers::pi * vibratoPhase)
                                           : std::sin (2.0 * std::numbers::pi * vibratoPhase);
     auto vibratoCents = 0.5 * std::max (depth, 0.0) * wave;
+    const auto cycleDepth = vibJitterDepth;
     if (! instrument->fretted)
     {
         // The hand lingers at the ends of the swing. It is centred on the note: the
         // flat finger landing already models the approach from below.
         const auto phi = 2.0 * std::numbers::pi * vibratoPhase;
         vibratoCents
-            = 0.5 * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
+            = 0.5 * cycleDepth * std::max (depth, 0.0) * (std::sin (phi) + 0.15 * std::sin (2.0 * phi - 0.5 * std::numbers::pi));
         if (hg::on (hg::rollingFinger))
             vibratoCents -= 0.5 * std::max (depth, 0.0) * hg::param ("FLAT_LEAN", 0.0); // the hand rocks back from the note
     }

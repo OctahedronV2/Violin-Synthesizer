@@ -229,7 +229,7 @@ private:
         return 1.0 / std::sqrt (std::pow (1.0 - c, 4.0) * (1.0 + c * c) / (3.0 * std::pow (1.0 - c * c, 3.0)));
     }
     bool strokeBite = false;
-    double vibCycleRate = 1.0, lastVibPhase = 0.0, scoopCents = 0.0, transitionSeconds = 1.0e9;
+    double vibCycleRate = 1.0, vibJitterRate = 1.0, vibJitterDepth = 1.0, lastVibPhase = 0.0, scoopCents = 0.0, transitionSeconds = 1.0e9;
     double livingForce = 0.0, livingDrive = 0.0, livingSpeed = 0.0, livingSpeedDrive = 0.0;
     double stuckSamples = 0.0; // samples the string has stuck to the moving bow without letting go
 

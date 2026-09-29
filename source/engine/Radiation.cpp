@@ -54,7 +54,7 @@ void Radiation::prepare (double sampleRate, int maxBlockSize)
     airFilters[0].setHighPass (fs, 11000.0, 0.54);
     airFilters[1].setHighPass (fs, 11000.0, 1.31);
     airFilters[2].setHighShelf (fs, 14000.0, -6.0);
-    setPeaks (micPeaks, fs, 4242u, 800.0, 9000.0, micPeaksDb, micQ);
+    setPeaks (micPeaks, fs, 4242u, 800.0, 9000.0, hg::param ("MIC_DB", micPeaksDb), hg::param ("MIC_Q", micQ));
     hgEq[0].setPeak (fs, hg::param ("NASAL_HZ", 1000.0), hg::param ("NASAL_DB", -7.0), 0.8);
     hgEq[1].setPeak (fs, hg::param ("WARM_HZ", 420.0), hg::param ("WARM_DB", 4.0), 0.9);
     hgEq[2].setPeak (fs, hg::param ("BRILL_HZ", 3000.0), hg::param ("BRILL_DB", 2.0), 1.2);
