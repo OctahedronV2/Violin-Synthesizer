@@ -1211,6 +1211,27 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         evenGain += (target - evenGain) * 0.0005;
         out *= evenGain;
     }
+    {
+        // HG: pitch-dependent colour, interpolated from G3 (55) through B4 (71) to E6 (88).
+        static const double ptLo = hg::param ("PT_LO_DB", 0.0), ptHi = hg::param ("PT_HI_DB", 0.0),
+                            p2Lo = hg::param ("PT2_LO_DB", 0.0), p2Hi = hg::param ("PT2_HI_DB", 0.0),
+                            pmLo = hg::param ("PM_LO_DB", 0.0), pmMid = hg::param ("PM_MID_DB", 0.0), pmHi = hg::param ("PM_HI_DB", 0.0);
+        static const bool tiltOn = ptLo != 0.0 || ptHi != 0.0 || p2Lo != 0.0 || p2Hi != 0.0 || pmLo != 0.0 || pmMid != 0.0 || pmHi != 0.0;
+        if (tiltOn && currentNote >= 0)
+        {
+            if (currentNote != tiltNote)
+            {
+                tiltNote = currentNote;
+                const auto u = std::clamp ((currentNote - 55) / 33.0, 0.0, 1.0);
+                const auto m = currentNote < 71 ? pmLo + (pmMid - pmLo) * std::clamp ((currentNote - 55) / 16.0, 0.0, 1.0)
+                                                : pmMid + (pmHi - pmMid) * std::clamp ((currentNote - 71) / 17.0, 0.0, 1.0);
+                tiltShelf.setHighShelf (fs, hg::param ("PT_HZ", 2500.0), ptLo + (ptHi - ptLo) * u);
+                tiltTop.setHighShelf (fs, hg::param ("PT2_HZ", 8000.0), p2Lo + (p2Hi - p2Lo) * u);
+                tiltMid.setPeak (fs, hg::param ("PM_HZ", 950.0), m, hg::param ("PM_Q", 1.0));
+            }
+            out = static_cast<decltype (out)> (tiltMid.process (tiltTop.process (tiltShelf.process (out))));
+        }
+    }
     return out;
 }
 } // namespace violinsynth::engine

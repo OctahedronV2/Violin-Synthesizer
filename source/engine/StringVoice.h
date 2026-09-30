@@ -188,6 +188,8 @@ private:
     double logF0 = 0.0, targetLogF0 = 0.0;
     double envelopePosition = 0.0, releaseStartLevel = 1.0, attackSeconds = 0.08, releaseOverride = -1.0, hairPrevious = 0.0, hairGrain = 0.0;
     Biquad hairPeak, hairShelf, hairLow;
+    Biquad tiltShelf, tiltTop, tiltMid; // HG: pitch-dependent colour (PT_*, PT2_*, PM_*)
+    int tiltNote = -1;
     double evenGain = 1.0; // HG: scratch colour (SC_PEAK_*, SC_SHELF_*)
     int hairHoldCount = 0;
     bool dampAfterLift = false;
