@@ -754,10 +754,13 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         // Within a slur each note still gets its own, smaller, swell.
         const auto u = secondsSinceNoteChange;
         const auto slurred = u < t - 0.01;
-        const auto swellSize = hg::on (hg::bowArm) ? (slurred ? 0.2 : hg::param ("SWELL", 0.55)) : (slurred ? 0.0 : 0.22);
+        const auto swellSize = hg::on (hg::bowArm) ? (slurred ? 0.2 : hg::param ("SWELL", 0.55)) : (slurred ? hg::param ("SLUR_SWELL", 0.0) : 0.22); // HG: SLUR_SWELL gives slurred notes their own swell
         const auto swellTime = hg::on (hg::bowArm) ? 0.6 : 0.5;
         const auto swell = swellSize * (u / swellTime) * std::exp (1.0 - u / swellTime);
-        const auto shape = 1.0 + grip + swell;
+        // HG: a slurred note change still lightens the bow for a moment (SLUR_DIP), so each note has a start.
+        static const double slurDip = hg::param ("SLUR_DIP", 0.0);
+        const auto dip = slurred && u < 0.08 ? slurDip * std::sin (std::numbers::pi * u / 0.08) : 0.0;
+        const auto shape = (1.0 + grip + swell) * (1.0 - dip);
         armSpeedGain *= shape;
         betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge
     }
