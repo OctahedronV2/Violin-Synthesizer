@@ -404,10 +404,18 @@ void Violin::render (float* out, int numSamples)
         }
 
         double sum = 0.0, fastest = 0.0;
+        // HG: in a double stop the player leans toward the top (melody) string (DS_LOW dB off the lower ones).
+        static const double doubleStopLow = std::pow (10.0, -hg::param ("DS_LOW", 0.0) / 20.0);
+        int topBowed = -1;
+        for (int s = 0; s < instrument->numStrings; ++s)
+            if (voices[static_cast<std::size_t> (s)].isBowed())
+                topBowed = s;
         for (int s = 0; s < instrument->numStrings; ++s)
         {
             auto& v = voices[static_cast<std::size_t> (s)];
-            sum += v.processSample (settings.voice, context);
+            auto& g = doubleStopGain[static_cast<std::size_t> (s)];
+            g += ((v.isBowed() && s < topBowed ? doubleStopLow : 1.0) - g) * 0.0005;
+            sum += g * v.processSample (settings.voice, context);
             if (v.drawsBow())
                 fastest = std::max (fastest, v.currentBowSpeed());
         }

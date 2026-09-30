@@ -188,6 +188,8 @@ void StringVoice::configure (const InstrumentSpec& newInstrument, int stringInde
     bowedParams.friction.impedance = spec->impedance;
     bowedParams.torsion = { torsionSpeedRatio, torsionImpedanceRatio, torsionQ };
     bowedParams.loss = instrument->loss;
+    // HG: lower strings keep more of their upper harmonics (LOSSHI on the G string, fading to none on E).
+    bowedParams.loss.t60High *= std::pow (hg::param ("LOSSHI", 1.0), std::clamp ((76.0 - spec->openMidiNote) / 21.0, 0.0, 1.0));
     string.setParams (bowedParams);
     if (! instrument->pickup)
         setPickup ({}, 0);

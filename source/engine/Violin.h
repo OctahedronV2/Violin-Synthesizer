@@ -154,5 +154,6 @@ private:
     // -1: not held; outOfRange: held but silent.
     static constexpr std::int8_t outOfRange = -2;
     std::array<std::array<std::int8_t, 128>, 17> soundingNote {};
+    std::array<double, 8> doubleStopGain { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 }; // HG
 };
 } // namespace violinsynth::engine

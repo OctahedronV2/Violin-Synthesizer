@@ -65,6 +65,7 @@ void Radiation::prepare (double sampleRate, int maxBlockSize)
     hgHill[1].setHighShelf (fs, hg::param ("AIR_HZ", 5500.0), hg::param ("AIR_DB", 5.0));
     hgExtra[0].setPeak (fs, hg::param ("X1_HZ", 4200.0), hg::param ("X1_DB", 0.0), hg::param ("X1_Q", 1.4));
     hgExtra[1].setPeak (fs, hg::param ("X2_HZ", 7500.0), hg::param ("X2_DB", 0.0), hg::param ("X2_Q", 1.4));
+    hgExtra[2].setPeak (fs, hg::param ("X3_HZ", 290.0), hg::param ("X3_DB", 0.0), hg::param ("X3_Q", 1.4));
     bodyPeaksDb = -1.0;
     setBodyPeaks (0.0);
     reset();
