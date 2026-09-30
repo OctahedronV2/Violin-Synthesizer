@@ -1105,7 +1105,7 @@ double StringVoice::processSample (const VoiceSettings& settings, const StringCo
         hairPrevious = hairLevel;
         static const bool scratchColour = hg::param ("SC_PEAK_DB", 0.0) != 0.0 || hg::param ("SC_SHELF_DB", 0.0) != 0.0 || hg::param ("SC_LOW_HZ", 20.0) > 20.0;
         const auto coloured = scratchColour ? static_cast<double> (hairShelf.process (hairPeak.process (hairLow.process (static_cast<float> (tilted))))) : tilted;
-        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise, 0.0, 1.0) * coloured * hairScale * speed
+        hairVelocity = hairBoost * hairNoise * std::clamp (settings.bowNoise + hg::param ("SL_NOISE", 0.0) * slowness, 0.0, 1.0) * coloured * hairScale * speed
             * (string.isSticking() ? hg::param ("HAIR_STICK", hairStick) : 1.0)
             * std::pow (10.0, std::clamp (-hg::param ("NOISE_SLOPE", 0.0) * (std::max (currentNote, static_cast<int> (hg::param ("NS_FLOOR", 0.0))) - 69), -18.0, 18.0) / 20.0); // HG: lower notes are rougher
         // HG: the scratch belongs to the bowing: strongest while a new stroke or note is still
