@@ -147,6 +147,13 @@ void Violin::apply (const StringActions& actions)
                         expectedNote = 0.6 * expectedNote + 0.4 * ioi;
                     lastOnsetTime = time;
                 }
+                else if (time - lastStrokeTime > 0.05)
+                {
+                    // HG: the tempo is tracked for slow-note shaping (SL_*) too.
+                    if (const auto ioi = time - lastOnsetTime; ioi < 2.5)
+                        expectedNote = 0.6 * expectedNote + 0.4 * ioi;
+                    lastOnsetTime = time;
+                }
                 // One bow: notes of a chord share the stroke; a new stroke turns the bow.
                 if (time - lastStrokeTime > 0.05)
                 {
@@ -161,7 +168,6 @@ void Violin::apply (const StringActions& actions)
                 newStroke = true;
                 break;
             case StringAction::Type::legato:
-                if (hg::on (hg::proBowing))
                 {
                     if (const auto ioi = time - lastOnsetTime; ioi < 2.5)
                         expectedNote = 0.6 * expectedNote + 0.4 * ioi;

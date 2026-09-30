@@ -589,7 +589,7 @@ void StringVoice::advanceControl (const VoiceSettings& settings, int samples)
     // Singing vibrato: it quickens from 0.8 to about 1.05 times the rate as it blooms.
     const auto rate = settings.vibratoRateHz * (1.0 + 0.08 * humanise * noiseScale * rateNoise) * noteVibRate
         * (0.8 + 0.25 * vibratoBloom (settings)) * (hg::on (hg::vibrato) ? hg::param ("VIB_RATE", 1.1) * vibCycleRate : vibJitterRate)
-        * (hg::on (hg::somber) ? hg::param ("SOMBER_VIB_RATE", 0.87) : 1.0);
+        * (hg::on (hg::somber) ? hg::param ("SOMBER_VIB_RATE", 0.87) : 1.0) * (1.0 + hg::param ("SL_VRATE", 0.0) * slowness);
     vibratoPhase += rate * seconds;
     if (vibratoPhase >= 1.0 && (hg::param ("VIB_RJIT", 0.0) > 0.0 || hg::param ("VIB_DJIT", 0.0) > 0.0))
     {
@@ -673,7 +673,7 @@ double StringVoice::vibratoBloom (const VoiceSettings& settings) const
 {
     const auto x = hg::on (hg::vibrato)
                      ? std::clamp ((vibratoSeconds - hg::param ("VIB_DELAY", 0.06)) / hg::param ("VIB_BLOOM", 0.22), 0.0, 1.0)
-                     : std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds - vibratoBloomLead)) / hg::param ("VIB_BLOOM_S", vibratoBloomSeconds),
+                     : std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds + hg::param ("SL_DELAY", 0.0) * slowness - vibratoBloomLead)) / hg::param ("VIB_BLOOM_S", vibratoBloomSeconds),
                       0.0,
                       1.0);
     return 0.5 - 0.5 * std::cos (std::numbers::pi * x);
@@ -687,7 +687,7 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
     // note. 0.8 brings the default depth to the 16 cents measured on real players.
     const auto grow = hg::on (hg::longing) ? 0.45 + 0.85 * std::min (1.0, secondsSinceNoteChange / 1.1) : 1.0;
     const auto onsetShape = grow * (hg::on (hg::vibrato) ? hg::param ("VIB_DEPTH", 1.7) : hg::on (hg::somber) ? 1.4 : 0.8) * vibratoBloom (settings) * noteVibDepth * (0.75 + 0.5 * dynamics);
-    const auto depth = (onsetShape * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
+    const auto depth = (onsetShape * (1.0 + hg::param ("SL_VIB", 0.0) * slowness) * settings.vibratoDepthCents * (1.0 + 0.25 * humanise * noiseScale * depthNoise)
                         + 30.0 * expression.pressure);
     if (droning)
         return std::exp (logF0); // an open string: nothing to bend it
@@ -738,6 +738,8 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         default:
             break;
     }
+    // HG: how slow the music is lately (0 fast .. 1 slow), from the tempo (SL_*).
+    slowness = std::clamp ((context.expectedNote - hg::param ("SL_LO", 0.3)) / std::max (0.05, hg::param ("SL_HI", 0.9) - hg::param ("SL_LO", 0.3)), 0.0, 1.0);
     const auto humanise = std::clamp (settings.humanise, 0.0, 1.0);
     betaTarget *= 1.0 + armBetaWander * humanise * armScale * betaWander;
     armSpeedGain = 1.0 + armSpeedWander * humanise * armScale * speedWander
@@ -756,10 +758,10 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
         const auto slurred = u < t - 0.01;
         const auto swellSize = hg::on (hg::bowArm) ? (slurred ? 0.2 : hg::param ("SWELL", 0.55)) : (slurred ? hg::param ("SLUR_SWELL", 0.0) : 0.22); // HG: SLUR_SWELL gives slurred notes their own swell
         const auto swellTime = hg::on (hg::bowArm) ? 0.6 : 0.5;
-        const auto swell = swellSize * (u / swellTime) * std::exp (1.0 - u / swellTime);
+        const auto swell = (swellSize + hg::param ("SL_SWELL", 0.0) * slowness) * (u / swellTime) * std::exp (1.0 - u / swellTime);
         // HG: a slurred note change still lightens the bow for a moment (SLUR_DIP), so each note has a start.
         static const double slurDip = hg::param ("SLUR_DIP", 0.0);
-        const auto dip = slurred && u < 0.08 ? slurDip * std::sin (std::numbers::pi * u / 0.08) : 0.0;
+        const auto dip = slurred && u < 0.08 ? std::clamp (slurDip + hg::param ("SL_DIP", 0.0) * slowness, 0.0, 0.9) * std::sin (std::numbers::pi * u / 0.08) : 0.0;
         const auto shape = (1.0 + grip + swell) * (1.0 - dip);
         armSpeedGain *= shape;
         betaTarget *= 1.0 - 0.6 * swell; // louder, the bow moves toward the bridge
@@ -770,6 +772,8 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     {
         armSpeedGain *= 1.0 + hg::param ("LIVE_SPEED", 0.14) * std::clamp (livingSpeed * livingScale(), -2.0, 2.0);
     }
+    armSpeedGain *= 1.0 + hg::param ("SL_SPEED", 0.0) * slowness;
+    betaTarget *= 1.0 + hg::param ("SL_BETA", 0.0) * slowness;
     betaTarget = noteArticulation == Articulation::pizzicato ? pluckBeta : std::clamp (betaTarget, betaFloor, 0.3);
 
     // Bow force as a fraction of Schelleng's F_max: the Bow Pressure setting
@@ -782,7 +786,7 @@ void StringVoice::updateTargets (const VoiceSettings& settings, const StringCont
     const auto imperfection = std::clamp (settings.imperfection, 0.0, 1.0);
     const auto lo = spec->forceWindowLow;
     const auto hi = spec->playerWindowHigh + (spec->forceWindowHigh - spec->playerWindowHigh) * imperfection;
-    fractionTarget = (lo + (hi - lo) * setting) * droneWeight;
+    fractionTarget = (lo + (hi - lo) * setting) * droneWeight * (1.0 + hg::param ("SL_PRESS", 0.0) * slowness);
     if (hg::on (hg::somber))
     {
         // Somber: the bow further from the bridge, lighter and slower.

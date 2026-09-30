@@ -190,6 +190,7 @@ private:
     Biquad hairPeak, hairShelf, hairLow;
     Biquad tiltShelf, tiltTop, tiltMid; // HG: pitch-dependent colour (PT_*, PT2_*, PM_*)
     int tiltNote = -1;
+    double slowness = 0.0; // HG: 0 fast .. 1 slow music (SL_*)
     double evenGain = 1.0; // HG: scratch colour (SC_PEAK_*, SC_SHELF_*)
     int hairHoldCount = 0;
     bool dampAfterLift = false;
