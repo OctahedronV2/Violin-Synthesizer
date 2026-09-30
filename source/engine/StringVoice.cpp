@@ -297,7 +297,7 @@ void StringVoice::setTarget (int note, bool glide)
         // its own intonation, and starts slightly flat (docs/REFERENCE_SOUND.md).
         const auto g = nextNoise() + nextNoise() + nextNoise(); // about unit variance
         noteIntonationCents = sigma * g;
-        landingCents = landingFlatCents * (sigma / 8.0) * (1.0 + 0.5 * nextNoise());
+        landingCents = hg::param ("LAND_C", landingFlatCents * (sigma / 8.0)) * (1.0 + 0.5 * nextNoise());
     }
     if (! glide)
     {
@@ -673,7 +673,7 @@ double StringVoice::vibratoBloom (const VoiceSettings& settings) const
 {
     const auto x = hg::on (hg::vibrato)
                      ? std::clamp ((vibratoSeconds - hg::param ("VIB_DELAY", 0.06)) / hg::param ("VIB_BLOOM", 0.22), 0.0, 1.0)
-                     : std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds - vibratoBloomLead)) / vibratoBloomSeconds,
+                     : std::clamp ((vibratoSeconds - (settings.vibratoDelaySeconds - vibratoBloomLead)) / hg::param ("VIB_BLOOM_S", vibratoBloomSeconds),
                       0.0,
                       1.0);
     return 0.5 - 0.5 * std::cos (std::numbers::pi * x);
@@ -706,11 +706,11 @@ double StringVoice::controlF0 (const VoiceSettings& settings, const StringContex
         if (hg::on (hg::rollingFinger))
             vibratoCents -= 0.5 * std::max (depth, 0.0) * hg::param ("FLAT_LEAN", 0.0); // the hand rocks back from the note
     }
-    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / landingSettleSeconds)
+    const auto landing = landingCents * std::exp (-secondsSinceNoteChange / hg::param ("LAND_T", landingSettleSeconds))
         + scoopCents * std::exp (-secondsSinceNoteChange / hg::param ("SCOOP_T", 0.045));
     const auto bendCents = noteIntonationCents + landing
         + 100.0 * (context.globalBendSemitones + expression.bendSemitones)
-        + fingerWanderCents * humanise * armScale * pitchWander
+        + hg::param ("WANDER_C", fingerWanderCents * humanise) * armScale * pitchWander
         + tremorCents * humanise * pitchTremor.band() * tremorScale;
     return std::max (std::exp (logF0) * std::pow (2.0, (bendCents + vibratoCents) / 1200.0), minF0);
 }

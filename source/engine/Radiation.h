@@ -51,7 +51,9 @@ private:
     std::array<Biquad, 40> micPeaks;
     std::array<Biquad, 3> hgEq, hgDark; // HG: less nasal body
     std::array<Biquad, 2> hgHill;
-    std::array<Biquad, 3> hgExtra; // HG: hgExtra = X1/X2 tone peaks
+    std::array<Biquad, 3> hgExtra;
+    std::array<Biquad, 24> hgGeq; // HG: graphic EQ from env GEQ="hz:dB,..."
+    int hgGeqCount = 0; // HG: hgExtra = X1/X2 tone peaks
     bool hgExtraOn = hg::param ("X1_DB", 0.0) != 0.0 || hg::param ("X2_DB", 0.0) != 0.0 || hg::param ("X3_DB", 0.0) != 0.0;
     // HG: the bridge's rocking resonance and top-end radiation
     std::vector<float> air;

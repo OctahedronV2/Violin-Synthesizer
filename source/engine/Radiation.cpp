@@ -1,3 +1,5 @@
+#include <string>
+#include <cstdlib>
 #include "engine/Radiation.h"
 
 #include "engine/HurdyFix.h"
@@ -65,6 +67,26 @@ void Radiation::prepare (double sampleRate, int maxBlockSize)
     hgHill[1].setHighShelf (fs, hg::param ("AIR_HZ", 5500.0), hg::param ("AIR_DB", 5.0));
     hgExtra[0].setPeak (fs, hg::param ("X1_HZ", 4200.0), hg::param ("X1_DB", 0.0), hg::param ("X1_Q", 1.4));
     hgExtra[1].setPeak (fs, hg::param ("X2_HZ", 7500.0), hg::param ("X2_DB", 0.0), hg::param ("X2_Q", 1.4));
+    hgGeqCount = 0;
+    if (const char* e = std::getenv ("GEQ"))
+    {
+        const std::string str (e);
+        std::size_t pos = 0;
+        while (pos < str.size() && hgGeqCount < static_cast<int> (hgGeq.size()))
+        {
+            const auto comma = str.find (',', pos);
+            const auto item = str.substr (pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (const auto colon = item.find (':'); colon != std::string::npos)
+            {
+                const auto hz = std::atof (item.substr (0, colon).c_str()), db = std::atof (item.substr (colon + 1).c_str());
+                if (std::abs (db) > 0.05)
+                    hgGeq[static_cast<std::size_t> (hgGeqCount++)].setPeak (fs, hz, db, hg::param ("GEQ_Q", 2.0));
+            }
+            if (comma == std::string::npos)
+                break;
+            pos = comma + 1;
+        }
+    }
     hgExtra[2].setPeak (fs, hg::param ("X3_HZ", 290.0), hg::param ("X3_DB", 0.0), hg::param ("X3_Q", 1.4));
     bodyPeaksDb = -1.0;
     setBodyPeaks (0.0);
@@ -84,6 +106,8 @@ void Radiation::reset()
     for (auto& f : hgDark)
         f.reset();
     for (auto& f : hgExtra)
+        f.reset();
+    for (auto& f : hgGeq)
         f.reset();
     for (auto& f : hgHill)
         f.reset();
@@ -142,6 +166,8 @@ void Radiation::processPostBody (float* samples, int numSamples)
         if (hgExtraOn)
             for (auto& f : hgExtra)
                 x = f.process (x);
+        for (int g = 0; g < hgGeqCount; ++g)
+            x = hgGeq[static_cast<std::size_t> (g)].process (x);
         samples[i] = x;
     }
 
