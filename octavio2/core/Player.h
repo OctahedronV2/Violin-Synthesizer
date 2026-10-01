@@ -145,7 +145,11 @@ struct Player
         double earT = 0.0;
     } st[4];
 
-    double handSemis = 0.0; // hand position: semitones above the open string of the first finger
+    // hand position: semitones above the open string where the first finger sits. A position
+    // reaches handPos - 1 (stretched back) to handPos + 5 (fourth finger) without shifting:
+    // first position (handPos 2) plays semitones 1..7 on each string, E on the D string to A.
+    double handPos = 2.0;
+    bool inReach (double semis) const { return semis >= handPos - 1.0 && semis <= handPos + 5.0; }
     int lastString = 2;
 
     void init (Violin& v_, double fs_)
@@ -182,7 +186,7 @@ struct Player
             double c = 0.12 * semis + 0.6 * std::max (0.0, semis - 7.0);
             c += 0.9 * std::abs (s - lastString);
             if (semis > 0)
-                c += 0.15 * std::abs (semis - handSemis);
+                c += inReach (semis) ? 0.0 : 0.6 + 0.1 * std::min (std::abs (semis - handPos), std::abs (semis - handPos - 5.0));
             if (semis == 0 && pitch != 55)
                 c += 0.8; // open strings can't vibrate: a violinist mostly stops the note
             if (c < bestCost)
@@ -253,7 +257,9 @@ struct Player
         const double from = S.lifted ? openPitch[s] : S.pitch;
         const double jump = std::abs (pitch - from);
         // a shift: same string, finger already down, the hand moves more than a tone
-        const bool shift = ! S.lifted && semis > 0 && jump > 2.0 && std::abs (semis - handSemis) > 2.0;
+        // a shift: the note is out of the hand's reach (the finger slides on this string if one is down)
+        const bool outOfReach = semis > 0 && ! inReach (semis);
+        const bool shift = ! S.lifted && outOfReach && jump > 1.0;
         S.target = pitch;
         if (shift)
         {
@@ -268,8 +274,8 @@ struct Player
             vn->s[s].setNote (pitch);
             S.setPitchAt = t;
         }
-        if (semis > 0)
-            handSemis = semis;
+        if (outOfReach) // the hand moves: up, the note under the third finger; down, under the first
+            handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
         S.lifted = semis == 0;
         S.noteOn = t;
         S.captured = false;
