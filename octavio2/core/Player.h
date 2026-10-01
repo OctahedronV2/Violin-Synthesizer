@@ -41,10 +41,10 @@ struct PlayerParams
     // detache in quick passages (the previous note started less than shapeIOI s before): each
     // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
     // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
-    double shapeIOI = 0.0, strokeSus = 0.4, strokeTau = 0.12;
+    double shapeIOI = 0.45, strokeSus = 1.0, strokeTau = 0.12;
     // ... and the bow force is released after the attack (Guettler's martele/detache: high force
     // to start, then a diminuendo by releasing force while the speed holds) to forceSus of it
-    double forceSus = 1.0, forceTau = 0.08, forceHold = 0.03;
+    double forceSus = 0.55, forceTau = 0.08, forceHold = 0.03;
     double dynGlide = 0.04; // s: speed, contact and force move to a new dynamic this smoothly
     // register: dB of extra bow speed by pitch (G3 .. E7 every 6 semitones), so a velocity plays
     // about equally loud anywhere on the instrument (fitted on the dry render)
@@ -87,7 +87,7 @@ struct PlayerParams
     double bite = 0.1; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
-    double earUp = 0.25, earDown = 0.15, earMax = 1.3, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
+    double earUp = 0.25, earDown = 0.15, earMax = 2.0, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
 };
 
