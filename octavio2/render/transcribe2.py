@@ -1,16 +1,20 @@
 """Transcribe a monophonic violin recording to MIDI for like-for-like renders, fast passages included.
 
-    python3 transcribe2.py in.flac out.mid [--check]
+    python3 transcribe2.py in.flac out.mid [--check] [--valley dB]
 
 The scorer's transcriber (references/tool/transcribe.py) smooths pitch over ~130 ms and needs a
 pitch to hold 50 ms, so fast figures (16ths at ~100 ms) lose notes, and it slurs anything without
 a 30 ms silence, so separate strokes become one legato line. Here:
   - pitch is smoothed over 45 ms and a note needs to hold 30 ms
-  - a stroke ends at a level valley (10 dB under the peaks on both sides) or at silence;
+  - a stroke ends at a level valley (VALLEY dB under the peaks on both sides, 10 by default; real
+    bow changes in fast Haydn passages dip about 6 dB, slurred changes 1-3, so --valley 5 reads
+    passagework as separate strokes) or at silence;
     separate strokes don't overlap, so the player changes bow there
   - a pitch change after a short unvoiced break (10 ms) is also a new stroke
   - a pitch change without a valley or break is a slur (40 ms overlap, the player keeps the bow)
   - velocity follows each note's peak level (2.5 velocity per dB, 100 at the file's loud level)
+  - loud stretches the pitch tracker rejects (two strings at once) are read as double stops:
+    the strongest harmonic series, then the strongest one left after removing it
 --check prints, per 2 s, how much of the real pitch track the MIDI covers with the right note.
 """
 import os, sys
@@ -19,6 +23,9 @@ from scipy.ndimage import median_filter
 
 sys.path.insert(0, '/mnt/project-files/research/world-class/references/tool')
 import violinscore as vs
+
+
+VALLEY = 10.0  # dB under the peaks on both sides that marks a bow change
 
 
 def transcribe(path):
@@ -40,7 +47,7 @@ def transcribe(path):
     valley = np.zeros(n, bool)
     for i in range(W, n - W):
         if rs[i] == rs[i - 3:i + 4].min():
-            if rs[i - W:i].max() - rs[i] > 10 and rs[i + 1:i + W + 1].max() - rs[i] > 10:
+            if rs[i - W:i].max() - rs[i] > VALLEY and rs[i + 1:i + W + 1].max() - rs[i] > VALLEY:
                 valley[i] = True
     # notes: runs of a stable label, cut at valleys
     notes = []
@@ -69,12 +76,70 @@ def transcribe(path):
             cur, st = lab[i], i
         i += 1
     close(n, True)
+    notes += double_stops(x, f0, rms, loud, a4)
+    notes.sort(key=lambda k: k['on'])
     # velocity from each note's peak level
     for k in notes:
         a, b = int(k['on'] * FR), int(k['off'] * FR)
         pk = np.percentile(rms[a:max(b, a + 1)], 90)
         k['vel'] = int(np.clip(100 + 2.5 * (pk - loud), 25, 120))
     return notes, f0, a4
+
+
+def salience(S, f, a4, exclude=()):
+    """Harmonic-sum strength of each MIDI note 55..100 in a magnitude spectrum."""
+    out = {}
+    for m in range(55, 101):
+        f1 = a4 * 2 ** ((m - 69) / 12)
+        tot = 0.0
+        for h in range(1, 7):
+            fh = h * f1
+            if fh > f[-1] or any(abs(fh / fe - round(fh / fe)) < 0.02 for fe in exclude):
+                continue
+            b = (f > fh * 0.985) & (f < fh * 1.015)
+            if b.any():
+                tot += S[b].max() / h ** 0.5
+        out[m] = tot
+    return out
+
+
+def double_stops(x, f0, rms, loud, a4):
+    """Loud runs (>= 60 ms) without a single pitch: find the two notes of a double stop."""
+    FR, FS = vs.FR, vs.FS
+    bad = (f0 == 0) & (rms > loud - 20)
+    out, i, n = [], 0, len(bad)
+    while i < n:
+        if not bad[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and bad[j]:
+            j += 1
+        if (j - i) / FR >= 0.06:
+            picks = []
+            for k in range(i, j, 4):
+                s0 = int(k / FR * FS)
+                fr = x[s0:s0 + 4096]
+                if len(fr) < 4096:
+                    break
+                S = np.abs(np.fft.rfft(fr * np.hanning(4096)))
+                f = np.fft.rfftfreq(4096, 1 / FS)
+                s1 = salience(S, f, a4)
+                m1 = max(s1, key=s1.get)
+                f1 = a4 * 2 ** ((m1 - 69) / 12)
+                s2 = salience(S, f, a4, exclude=(f1,))
+                s2 = {m: v for m, v in s2.items() if 2 <= abs(m - m1) <= 16}
+                m2 = max(s2, key=s2.get)
+                picks.append((m1, m2 if s2[m2] > 0.35 * s1[m1] else -1))
+            if picks:
+                lo = int(np.median([min(a, b) if b > 0 else a for a, b in picks]))
+                hi = int(np.median([max(a, b) if b > 0 else a for a, b in picks]))
+                d = dict(on=i / FR, off=j / FR, note=lo, sep_after=True)
+                if hi != lo and np.mean([b > 0 for a, b in picks]) > 0.5:
+                    d['extra'] = hi
+                out.append(d)
+        i = j
+    return out
 
 
 def write_mid(notes, out):
@@ -88,8 +153,9 @@ def write_mid(notes, out):
                 off = nxt['on'] + 0.04 if nxt['note'] != k['note'] else nxt['on'] - 0.012
             else:
                 off = min(off, nxt['on'] - 0.012)  # separate stroke: let go before the next
-        ev.append((on, 1, k['note'], k['vel']))
-        ev.append((max(off, on + 0.03), 0, k['note'], 0))
+        for p in [k['note']] + ([k['extra']] if 'extra' in k else []):
+            ev.append((on, 1, p, k['vel']))
+            ev.append((max(off, on + 0.03), 0, p, 0))
     ev.sort(key=lambda e: (e[0], e[1]))
     mf = mido.MidiFile(ticks_per_beat=480)
     tr = mido.MidiTrack()
@@ -126,6 +192,8 @@ def coverage(mid, f0, a4=440.0, upto=None):
 
 if __name__ == '__main__':
     src, out = sys.argv[1], sys.argv[2]
+    if '--valley' in sys.argv:
+        VALLEY = float(sys.argv[sys.argv.index('--valley') + 1])
     notes, f0, a4 = transcribe(src)
     write_mid(notes, out)
     print(out, len(notes), 'notes, a4 %.1f' % a4)

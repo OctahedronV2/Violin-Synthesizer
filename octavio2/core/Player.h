@@ -41,10 +41,17 @@ struct PlayerParams
     // detache in quick passages (the previous note started less than shapeIOI s before): each
     // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
     // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
-    double shapeIOI = 0.45, strokeSus = 1.0, strokeTau = 0.12;
+    double shapeIOI = 0.3831, strokeSus = 0.7078, strokeTau = 0.1498;
     // ... and the bow force is released after the attack (Guettler's martele/detache: high force
     // to start, then a diminuendo by releasing force while the speed holds) to forceSus of it
-    double forceSus = 0.55, forceTau = 0.08, forceHold = 0.03;
+    // quick strokes (quickRun note starts in a row each less than quickIOI s apart: passagework) use
+    // their own stroke shape and stop (q* below, same meaning as the unprefixed settings), pressure
+    // higher in the Schelleng window (quickP added to p) and the bow nearer the bridge (contact x
+    // quickContact). Slower shaped notes (up to shapeIOI) keep the settings above.
+    double quickIOI = 0.2, quickRun = 2, quickP = 0.0, quickContact = 1.0;
+    double qForceSus = 0.4883, qForceTau = 0.07482, qForceHold = 0.0159, qStrokeSus = 0.7078, qStrokeTau = 0.1498;
+    double qStopForce = 0.5138, qStopTime = 0.035, qStopAccel = 25.0;
+    double forceSus = 0.4883, forceTau = 0.07482, forceHold = 0.0159;
     double dynGlide = 0.04; // s: speed, contact and force move to a new dynamic this smoothly
     // register: dB of extra bow speed by pitch (G3 .. E7 every 6 semitones), so a velocity plays
     // about equally loud anywhere on the instrument (fitted on the dry render)
@@ -54,17 +61,20 @@ struct PlayerParams
     double contactFollow = 0.0; // contact distance scales with the stopped length ^ this
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
-    double posLo = 0.38, posRange = 0.40;
-    double accel = 8.0; // bow acceleration limit, m/s^2 (higher at ff)
-    double accelFF = 20.0;
+    double posLo = 0.55, posRange = 0.2712;
+    double accel = 12.82; // bow acceleration limit, m/s^2 (higher at ff)
+    double accelFF = 30.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
     double changeDip = 0.25; // force reduction at a bow change
-    double releaseTime = 0.05; // lift-off force time constant, s
+    double releaseTime = 0.07368; // lift-off force time constant, s
     // a short separate note (held less than stopBelow s) ends with the bow stopping on the string
     // (decelerating at stopAccel m/s^2, force x stopForce) for stopTime s before it lifts: the
     // stopped hair damps the string, so quick detache notes end crisply instead of ringing on
-    double stopBelow = 0.35, stopAccel = 25.0, stopForce = 0.6, stopTime = 0.04;
+    double stopBelow = 0.6, stopAccel = 25.0, stopForce = 0.5138, stopTime = 0.035;
+    // hair resting on a stopped string is lossy: while the bow is stopped on it the string loses
+    // stopDamp per round trip (else the pinned string rings on below the note, nut side of the bow)
+    double stopDamp = 0.0, qStopDamp = 0.0;
     double crossTime = 0.02; // string crossing: force moves to the new string, s
     double bowLength = 0.62; // hair, m
     // left hand
@@ -84,10 +94,10 @@ struct PlayerParams
     // force so it is captured into Helmholtz motion at once instead of multiple slipping
     double crossBite = 0.3, crossBiteTime = 0.05;
     double noiseStart = 0.3, noiseRise = 0.08; // slip hiss while a note starts, then full
-    double bite = 0.1; // extra force at the start of every stroke (Guettler: capture needs force)
+    double bite = 0.07393; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
-    double earUp = 0.25, earDown = 0.15, earMax = 2.0, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
+    double earUp = 0.25, earDown = 0.15, earMax = 2.106, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
 };
 
@@ -126,7 +136,10 @@ struct Player
     double dTarget = 0.6, noteNow = 69.0;
     int slurNotes = 0;
     double lastOn = -10.0;
-    bool shaped = false;
+    int shortRun = 0; // consecutive note starts less than quickIOI apart
+    bool shaped = false, quick = false;
+    // the stroke shape in use (set at each new stroke from the normal or the quick settings)
+    double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
     double contactMM = 22.0;
 
@@ -213,7 +226,7 @@ struct Player
     {
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
         // on a shorter (stopped) string the player moves the bow towards the bridge too
-        const double c = contactMM * std::pow (L / stringLength, pp.contactFollow);
+        const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow);
         return std::clamp (c * 1e-3 / L, 0.02, 0.3);
     }
 
@@ -223,7 +236,7 @@ struct Player
         const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
-        const double p = pp.posLo + pp.posRange * d;
+        const double p = std::min (0.95, pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0));
         return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
     }
 
@@ -301,6 +314,8 @@ struct Player
     {
         const bool anyHeld = nHeld > 0;
         const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
+        if (! chord)
+            shortRun = t - lastOn < pp.quickIOI ? shortRun + 1 : 0;
         int s;
         if (chord)
         {
@@ -352,6 +367,16 @@ struct Player
             // a new stroke
             slurNotes = 0;
             shaped = pp.shapeIOI > 0 && t - lastOn < pp.shapeIOI;
+            quick = shaped && shortRun >= (int) pp.quickRun; // a run, not a lone grace note
+            fSus = quick ? pp.qForceSus : pp.forceSus;
+            fTau = quick ? pp.qForceTau : pp.forceTau;
+            fHold = quick ? pp.qForceHold : pp.forceHold;
+            sSus = quick ? pp.qStrokeSus : pp.strokeSus;
+            sTau = quick ? pp.qStrokeTau : pp.strokeTau;
+            stF = quick ? pp.qStopForce : pp.stopForce;
+            stT = quick ? pp.qStopTime : pp.stopTime;
+            stA = quick ? pp.qStopAccel : pp.stopAccel;
+            stD = quick ? pp.qStopDamp : pp.stopDamp;
             s = chooseString (pitch);
             for (int k = 0; k < 4; ++k)
                 st[k].bowed = false;
@@ -373,6 +398,8 @@ struct Player
         }
         lastString = s;
         lastVel = vel127;
+        if (log)
+            std::fprintf (stderr, "on %.3f p%d s%d %s%s%s\n", t, pitch, s, strokeStart == t ? "stroke" : "slur", shaped ? " shaped" : "", quick ? " quick" : "");
         lastOn = t;
         if (nHeld < 16)
             held[nHeld++] = { pitch, vel127, t, s };
@@ -398,6 +425,8 @@ struct Player
             return;
         if (nHeld == 0)
         {
+            if (log)
+                std::fprintf (stderr, "off %.3f p%d %s\n", t, pitch, pp.stopBelow > 0 && t - strokeStart < pp.stopBelow ? "stop" : "release");
             if (pp.stopBelow > 0 && t - strokeStart < pp.stopBelow)
             {
                 stopping = true;
@@ -437,7 +466,7 @@ struct Player
         const double balance[4] = { pp.speedG, pp.speedD, pp.speedA, pp.speedE };
         double shape = 1.0;
         if (shaped)
-            shape = pp.strokeSus + (1.0 - pp.strokeSus) * std::exp (-(t - strokeStart) / pp.strokeTau);
+            shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
         vTarget = dir * V * shape * balance[lastString];
         if (releasing)
         {
@@ -450,13 +479,13 @@ struct Player
         if (stopping)
         {
             vTarget = 0.0;
-            if (t - stopT > pp.stopTime)
+            if (t - stopT > stT)
             {
                 stopping = false;
                 releasing = true;
             }
         }
-        const double a = (stopping ? pp.stopAccel : accel) * dt;
+        const double a = (stopping ? stA : accel) * dt;
         v += std::clamp (vTarget - v, -a, a);
         if (changing && std::abs (v - vTarget) < 1e-4)
             changing = false;
@@ -510,7 +539,10 @@ struct Player
                 S.dampEnv = 1.0;
             }
             S.dampEnv *= std::exp (-dt / pp.liftDampTime);
-            vn->s[s].damp = pp.liftDamp * S.dampEnv;
+            double dmp = pp.liftDamp * S.dampEnv;
+            if (stopping && S.bowed && std::abs (v) < 0.02)
+                dmp = std::max (dmp, stD);
+            vn->s[s].damp = dmp;
             {
                 const double age = t - std::max (S.noteOn, S.landAt);
                 vn->s[s].noiseGain = pp.noiseStart + (1.0 - pp.noiseStart) * std::clamp (age / pp.noiseRise, 0.0, 1.0);
@@ -529,9 +561,9 @@ struct Player
                 if (sliding)
                     ft *= 1.0 - pp.shiftLighten;
                 if (stopping)
-                    ft *= pp.stopForce;
-                if (shaped && age > pp.forceHold)
-                    ft *= pp.forceSus + (1.0 - pp.forceSus) * std::exp (-(age - pp.forceHold) / pp.forceTau);
+                    ft *= stF;
+                if (shaped && age > fHold)
+                    ft *= fSus + (1.0 - fSus) * std::exp (-(age - fHold) / fTau);
             }
             // listening: every few ms compare the slip rate with the note's frequency
             if (S.bowed && ! releasing && S.force > 0.0)
@@ -549,8 +581,8 @@ struct Player
                         capSum += c;
                         capSlow += c > 0.05;
                         capVerySlow += c > 0.1;
-                        if (log && c > 0.1)
-                            std::fprintf (stderr, "slow capture %.3f s at %.2f string %d pitch %.1f\n", c, t, s, S.target);
+                        if (log)
+                            std::fprintf (stderr, "capture %.3f s at %.3f string %d pitch %.1f\n", c, t, s, S.target);
                     }
                     S.earHigh = spp > 1.4 ? S.earHigh + 1 : 0;
                     if (S.earHigh >= 2)

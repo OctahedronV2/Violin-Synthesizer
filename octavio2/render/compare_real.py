@@ -8,6 +8,10 @@ Per 4 s and overall:
   level  correlation of the two level envelopes (dB, 20 ms, where the real player sounds):
          the shape of the phrasing, accents and note separations
   sep    level dip between strokes, median, real vs render (dB under the surrounding peaks)
+  shape  mean level difference in dB over every frame where either one sounds, silences included
+         (each file's loud level = 0 dB, floor -40 dB): the render ringing on through the real
+         player's gaps, missing a chord, or holding a note the real player lets die all count here
+         (notes and level only look where the real player has a clear single pitch)
 """
 import sys
 import numpy as np
@@ -36,6 +40,13 @@ def dips(rms, voiced):
     return np.median(out) if out else 0.0
 
 
+def shape(rr, ro):
+    a = np.maximum(rr - np.percentile(rr, 98), -40)
+    b = np.maximum(ro - np.percentile(ro, 98), -40)
+    m = (a > -40) | (b > -40)
+    return np.abs(a - b)[m].mean() if m.any() else np.nan
+
+
 def main():
     upto = float(sys.argv[sys.argv.index('--upto') + 1]) if '--upto' in sys.argv else None
     files = [a for a in sys.argv[1:] if not a.startswith('--') and a != str(upto) and not a.replace('.', '').isdigit()]
@@ -56,9 +67,9 @@ def main():
             vv = v[:n][s]
             nt = 100 * good[s].sum() / max(1, vv.sum())
             c = np.corrcoef(rr[:n][s][vv], ro[:n][s][vv])[0, 1] if vv.sum() > 20 else np.nan
-            rows.append('%3d-%3ds notes %3.0f%% level r %.2f' % (w, w + 4, nt, c))
+            rows.append('%3d-%3ds notes %3.0f%% level r %.2f shape %4.1f dB' % (w, w + 4, nt, c, shape(rr[:n][s], ro[:n][s])))
         c = np.corrcoef(rr[:n][v[:n]], ro[:n][v[:n]])[0, 1]
-        print('%s: notes %.0f%%  level r %.2f  sep %.1f dB' % (path.split('/')[-1], 100 * good.sum() / v[:n].sum(), c, dips(ro[:n], v[:n])))
+        print('%s: notes %.0f%%  level r %.2f  sep %.1f dB  shape %.1f dB' % (path.split('/')[-1], 100 * good.sum() / v[:n].sum(), c, dips(ro[:n], v[:n]), shape(rr[:n], ro[:n])))
         if '--detail' in sys.argv:
             print('\n'.join('    ' + r for r in rows))
 
