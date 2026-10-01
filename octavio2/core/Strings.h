@@ -133,7 +133,7 @@ struct Params
     double aT = 1.0e-6, bT = 0.22, cT = 1.0e-4, tauG = 25.0, ya = 0.4, xi = 2.0; // van Walstijn 2026, Table 1
     // bow
     int bowPoints = 4;
-    double slipNoise = 0.08, slipNoiseHz = 3000.0, slipNoiseExp = 0.5, slipNoiseFade = 0.0;
+    double slipNoise = 0.12, slipNoiseHz = 3000.0, slipNoiseExp = 0.5, slipNoiseFade = 0.0;
     // 0: the rough friction acts on the string (couples into the slip timing: jitter);
     // 1: the same force fluctuation goes straight to the bridge (hiss without jitter)
     double slipNoiseOut = 1.0;

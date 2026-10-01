@@ -29,8 +29,26 @@ struct PlayerParams
     double velLo = 20, velHi = 125, velCurve = 1.0;
     // bow speed (m/s) = speedLo + speedRange * d^speedCurve
     double speedLo = 0.05, speedRange = 0.35, speedCurve = 1.3;
+    // speedMap 1: exponential, so equal velocity steps give equal loudness steps:
+    // speed = speedPP * (speedFF / speedPP) ^ d (speedLo/speedRange/speedCurve unused)
+    double speedMap = 1, speedPP = 0.05, speedFF = 0.55;
+    // in a slur the bow follows each note's velocity (1) or keeps the stroke's dynamics (0)
+    double slurFollow = 1.0;
+    // auto bowing in Live mode: an overlapping note is slurred unless the slur already holds
+    // slurMaxNotes notes or slurMaxTime seconds, or the note is accented (velocity up by
+    // slurAccent or more): then the bow changes. 0 turns a rule off.
+    double slurMaxNotes = 4, slurMaxTime = 1.5, slurAccent = 12;
+    // detache in quick passages (the previous note started less than shapeIOI s before): each
+    // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
+    // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
+    double shapeIOI = 0.0, strokeSus = 0.4, strokeTau = 0.12; // off: it didn't deepen the dips
+    double dynGlide = 0.04; // s: speed, contact and force move to a new dynamic this smoothly
+    // register: dB of extra bow speed by pitch (G3 .. E7 every 6 semitones), so a velocity plays
+    // about equally loud anywhere on the instrument (fitted on the dry render)
+    double reg55 = 4.7, reg61 = 1.4, reg67 = 3.5, reg73 = -2.8, reg79 = 4.1, reg85 = 8.7, reg91 = 9.5, reg97 = 9.0;
     // contact point, mm from the bridge: pp .. ff
     double contactPP = 32.0, contactFF = 14.0;
+    double contactFollow = 0.0; // contact distance scales with the stopped length ^ this
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
     double posLo = 0.45, posRange = 0.40;
@@ -38,7 +56,7 @@ struct PlayerParams
     double accelFF = 20.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
-    double changeDip = 0.25; // force reduction at a bow change
+    double changeDip = 0.6; // force reduction at a bow change
     double releaseTime = 0.05; // lift-off force time constant, s
     double crossTime = 0.02; // string crossing: force moves to the new string, s
     double bowLength = 0.62; // hair, m
@@ -97,6 +115,11 @@ struct Player
     bool changing = false, releasing = false;
     double strokeStart = -1.0, lastStop = -10.0;
     double d = 0.6; // dynamics of the current stroke
+    double dTarget = 0.6, noteNow = 69.0;
+    int slurNotes = 0;
+    double lastOn = -10.0;
+    bool shaped = false;
+    double lastVel = 64.0;
     double contactMM = 22.0;
 
     struct Str
@@ -177,7 +200,9 @@ struct Player
     double betaFor (int s) const
     {
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
-        return std::clamp (contactMM * 1e-3 / L, 0.02, 0.3);
+        // on a shorter (stopped) string the player moves the bow towards the bridge too
+        const double c = contactMM * std::pow (L / stringLength, pp.contactFollow);
+        return std::clamp (c * 1e-3 / L, 0.02, 0.3);
     }
 
     double forceFor (int s, double speed) const
@@ -190,12 +215,34 @@ struct Player
         return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
     }
 
-    void setStroke (double vel127)
+    double regTrim (double pitch) const
     {
-        d = dynFromVel (vel127);
-        V = pp.speedLo + pp.speedRange * std::pow (d, pp.speedCurve);
+        const double r[8] = { pp.reg55, pp.reg61, pp.reg67, pp.reg73, pp.reg79, pp.reg85, pp.reg91, pp.reg97 };
+        const double x = std::clamp ((pitch - 55.0) / 6.0, 0.0, 6.999);
+        const int i = (int) x;
+        return std::pow (10.0, (r[i] + (x - i) * (r[i + 1] - r[i])) / 20.0);
+    }
+
+    double speedFor (double dd) const
+    {
+        if (pp.speedMap > 0)
+            return pp.speedPP * std::pow (pp.speedFF / pp.speedPP, dd);
+        return pp.speedLo + pp.speedRange * std::pow (dd, pp.speedCurve);
+    }
+
+    // jump: a new stroke takes the dynamics at once; a slur glides there (dynGlide)
+    void setStroke (double vel127, bool jump = true)
+    {
+        dTarget = dynFromVel (vel127);
+        if (jump)
+            d = dTarget;
+        applyDyn();
+        accel = pp.accel + (pp.accelFF - pp.accel) * dTarget;
+    }
+    void applyDyn()
+    {
+        V = speedFor (d) * regTrim (noteNow);
         contactMM = pp.contactPP + (pp.contactFF - pp.contactPP) * d;
-        accel = pp.accel + (pp.accelFF - pp.accel) * d;
     }
 
     // ---------------------------------------------------------------- left hand
@@ -259,8 +306,17 @@ struct Player
             if (std::abs (v) > 0.01)
                 st[s].landAt = t;
         }
-        else if (anyHeld)
+        const bool rebow = anyHeld && ! chord
+                           && ((pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
+                               || (pp.slurMaxTime > 0 && t - strokeStart > pp.slurMaxTime)
+                               || (pp.slurAccent > 0 && vel127 - lastVel >= pp.slurAccent));
+        if (rebow)
+            nHeld = 0; // the held note ends with this bow
+        if (chord)
+            ;
+        else if (anyHeld && ! rebow)
         {
+            ++slurNotes;
             // legato: same bow. The new note replaces what was sounding.
             s = chooseString (pitch);
             for (int k = 0; k < 4; ++k)
@@ -271,17 +327,21 @@ struct Player
             st[s].bowed = true;
             if (cross)
                 st[s].landAt = t;
-            // a slur keeps the stroke's speed; velocity nudges the dynamics
+            // a slur keeps the bow going; each note's velocity sets where the dynamics go
+            noteNow = pitch;
             const double dNew = dynFromVel (vel127);
-            d = 0.7 * d + 0.3 * dNew;
+            dTarget = (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
             nHeld = 0; // slurred-over notes no longer sound
         }
         else
         {
             // a new stroke
+            slurNotes = 0;
+            shaped = pp.shapeIOI > 0 && t - lastOn < pp.shapeIOI;
             s = chooseString (pitch);
             for (int k = 0; k < 4; ++k)
                 st[k].bowed = false;
+            noteNow = pitch;
             setStroke (vel127);
             const bool bowMoving = std::abs (v) > 0.01;
             if (bowMoving)
@@ -297,6 +357,8 @@ struct Player
             st[s].bowed = true;
         }
         lastString = s;
+        lastVel = vel127;
+        lastOn = t;
         if (nHeld < 16)
             held[nHeld++] = { pitch, vel127, t, s };
     }
@@ -346,8 +408,16 @@ struct Player
             }
         }
         // bow velocity: accelerate towards the target with limited acceleration
+        if (std::abs (dTarget - d) > 1e-6 || std::abs (V - speedFor (d) * regTrim (noteNow)) > 1e-9)
+        {
+            d += (dTarget - d) * std::min (1.0, dt / std::max (1e-4, pp.dynGlide));
+            applyDyn();
+        }
         const double balance[4] = { pp.speedG, pp.speedD, pp.speedA, pp.speedE };
-        vTarget = dir * V * balance[lastString];
+        double shape = 1.0;
+        if (shaped)
+            shape = pp.strokeSus + (1.0 - pp.strokeSus) * std::exp (-(t - strokeStart) / pp.strokeTau);
+        vTarget = dir * V * shape * balance[lastString];
         if (releasing)
         {
             // keep moving while the hair leaves the string, then slow down

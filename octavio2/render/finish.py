@@ -85,8 +85,11 @@ def main():
     # the bow's steady push leaves a slow drift (below 5 Hz) in the bridge force that the body IRs
     # pass; it carried most of the energy and made level matching ~8 dB too quiet
     F = ss.sosfilt(ss.butter(4, 60, 'hp', fs=FS, output='sos'), F)
-    if '--bright' in sys.argv:  # experiment: dB of high shelf above 1.5 kHz
-        F = high_shelf(F, 1500.0, float(sys.argv[sys.argv.index('--bright') + 1]))
+    # high shelf above 1.5 kHz (dB): brings the tone's brightness to the real players' (Jake picked
+    # +5 dB with more grit, 2026-10-01); --bright 0 turns it off
+    bright = float(sys.argv[sys.argv.index('--bright') + 1]) if '--bright' in sys.argv else 5.0
+    if bright:
+        F = high_shelf(F, 1500.0, bright)
     body = mono(os.path.join(DATA, 'body-fullband-balanced-48k.wav'))
     bl = mono(os.path.join(DATA, 'body-directional-left-48k.wav'))
     br = mono(os.path.join(DATA, 'body-directional-right-48k.wav'))
