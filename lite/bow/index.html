@@ -115,6 +115,7 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
 
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="worklet.js"></script>
 <script>
 const P = [
@@ -129,7 +130,11 @@ const P = [
   $('dl').hidden = false;
   $('dl').addEventListener('click', async () => {
     try {
-      const data = await fetch('clips.zip').then((r) => r.arrayBuffer());
+      $('dlStatus').textContent = 'Packing…';
+      const zip = new JSZip();
+      const names = [...document.querySelectorAll('audio')].map((a) => a.getAttribute('src'));
+      for (const n of names) zip.file(n, await fetch(n).then((r) => r.arrayBuffer()));
+      const data = await zip.generateAsync({ type: 'arraybuffer' });
       await downloads.save({ filename: 'bow-on-string-clips.zip', data });
       $('dlStatus').textContent = 'Saved.';
     } catch (e) { $('dlStatus').textContent = e && e.code === 'declined' ? '' : 'Could not save the clips here.'; }
