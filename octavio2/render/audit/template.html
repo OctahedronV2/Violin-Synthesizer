@@ -71,8 +71,13 @@ td.n { font-family: var(--mono); }
 <div class="wrap">
   <header>
     <h1>Finale Note Audit</h1>
-    <p class="lede">Every note of the Haydn Finale (2nd violin, first 53 s), the real player against Octavio 2 (D3, now the default) playing the same transcribed notes. Pick a note on the score or in the list to hear both and see what the comparison found. Nothing has been changed yet. These are the findings to check first.</p>
+    <p class="lede">Every note of the Haydn Finale (2nd violin, first 53 s), the real player against Octavio 2 playing the same transcribed notes. Pick a note on the score or in the list to hear both and see what the comparison found. This page is republished as each fix lands.</p>
   </header>
+
+  <section class="panel">
+    <h2>Fix log</h2>
+    <div class="tscroll"><table id="hist"></table></div>
+  </section>
 
   <section class="panel">
     <div class="stats" id="stats"></div>
@@ -146,6 +151,12 @@ let filter = null, sel = 0;
 const shown = () => N.filter(n => !filter || n.kinds.includes(filter));
 const cls = s => s >= 80 ? 'good' : s >= 50 ? 'warn' : 'bad';
 
+// fix log
+(function () {
+  const H = D.history || [];
+  $('hist').innerHTML = '<tr><th>Step</th><th>Change</th><th>Mean score</th><th>Under 50</th><th>Bow strokes (real ' + (N[N.length - 1].real.strokeNo) + ')</th></tr>' +
+    H.slice().reverse().map((h, j) => `<tr><td class="n">${H.length - j}</td><td>${h.desc}</td><td class="n">${h.mean}</td><td class="n">${h.under50}</td><td class="n">${h.strokes}</td></tr>`).join('');
+})();
 // summary
 (function () {
   const sc = N.map(n => n.score), mean = sc.reduce((a, b) => a + b, 0) / sc.length;
@@ -230,7 +241,7 @@ function select(i, scroll) {
   if (i !== sel && typeof stopAll === 'function' && !player.paused) stopAll();
   sel = i; const n = N[i];
   $('nname').textContent = n.name + (n.chord ? ' (double stop)' : '');
-  $('nscore').textContent = n.score; $('nscore').className = 'score s-' + cls(n.score);
+  $('nscore').textContent = n.score + (n.prev !== undefined && n.prev !== null ? '  (was ' + n.prev + ')' : ''); $('nscore').className = 'score s-' + cls(n.score);
   $('nmeta').textContent = `note ${i + 1} of ${N.length} · ${n.on.toFixed(2)}–${n.off.toFixed(2)} s · ${Math.round((n.off - n.on) * 1000)} ms · velocity ${n.vel}`;
   $('issues').innerHTML = n.issues.length ? n.issues.map(s => `<li>${s}</li>`).join('') : '<li class="ok">Matches the real note on every check.</li>';
   plot($('pp'), 'c', -120, 120, 20, n); plot($('lp'), 'l', -50, 2, 0, n);
@@ -252,7 +263,7 @@ let bufs = null, loadErr = false, lastUrl = null;
     const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
     const dec = new AC(1, 44100, 44100);
     const one = u => fetch(u).then(r => r.arrayBuffer()).then(x => new Promise((res, rej) => dec.decodeAudioData(x, res, rej)));
-    Promise.all([one('clips/finale-real.mp3'), one('clips/finale-d3.mp3')])
+    Promise.all([one('clips/finale-real.mp3'), one('clips/finale-ours.mp3')])
       .then(b => { bufs = b; $('pstat').textContent = ''; })
       .catch(() => { loadErr = true; $('pstat').textContent = 'Could not load the audio. Reload the page to try again.'; });
     $('pstat').textContent = 'Loading audio…';
@@ -295,7 +306,7 @@ $('howto').textContent = 'Real tuning is measured against the player\'s own A ('
 
 function renderList() {
   const v = shown();
-  $('list').innerHTML = '<tr><th>#</th><th>Time</th><th>Note</th><th>Score</th><th>Issues</th></tr>' + v.map(n => `<tr data-i="${n.i}" tabindex="0"><td class="n">${n.i + 1}</td><td class="n">${n.on.toFixed(2)}</td><td>${n.name}</td><td><span class="score s-${cls(n.score)}">${n.score}</span></td><td>${n.kinds.join(', ') || '<span class="ok">ok</span>'}</td></tr>`).join('');
+  $('list').innerHTML = '<tr><th>#</th><th>Time</th><th>Note</th><th>Score</th><th>Issues</th></tr>' + v.map(n => `<tr data-i="${n.i}" tabindex="0"><td class="n">${n.i + 1}</td><td class="n">${n.on.toFixed(2)}</td><td>${n.name}</td><td><span class="score s-${cls(n.score)}">${n.score}</span>${n.prev !== undefined && n.prev !== null && n.prev !== n.score ? ` <span class="small">${n.score > n.prev ? '▲' : '▼'} ${n.prev}</span>` : ''}</td><td>${n.kinds.join(', ') || '<span class="ok">ok</span>'}</td></tr>`).join('');
   $('list').querySelectorAll('tr[data-i]').forEach(r => { r.onclick = () => select(+r.dataset.i, true); r.onkeydown = e => { if (e.key === 'Enter') select(+r.dataset.i, true); }; });
 }
 function render() { renderFilters(); renderList(); const v = shown(); if (v.length && !v.includes(N[sel])) sel = N.indexOf(v[0]); select(sel, true); }

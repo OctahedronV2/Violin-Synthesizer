@@ -86,6 +86,7 @@ struct PlayerParams
     double vibWander = 0.15; // relative random wander of rate and width
     double liftAfter = 0.35; // an idle string's finger lifts after this long, s
     double liftDamp = 0.25, liftDampTime = 0.03;
+    double openMute = 0.1, openMuteTime = 0.15; // muting an open string the bow just left (loss per round trip, s)
     double chordWindow = 0.03; // s
     // loudness balance across strings: a violinist plays the low strings with less bow so a melody
     // stays even. Fitted so mf notes match TinySOL's register balance (G -1.5, D -2.3, E -5.6 dB vs A)
@@ -156,7 +157,7 @@ struct Player
         double lastBowed = -10.0;
         double setPitchAt = -1e9;
         bool lifted = true;
-        double dampEnv = 0.0;
+        double dampEnv = 0.0, muteEnv = 0.0;
         double fScale = 1.0;
         double landAt = -10.0; // when the bow last landed on this string while moving
         double ear = 1.0; // force correction from listening
@@ -396,6 +397,9 @@ struct Player
             fingerNote (s, pitch, false);
             st[s].bowed = true;
         }
+        // leaving a ringing open string for another: a free finger or the hand mutes it
+        if (! chord && lastString >= 0 && lastString != s && st[lastString].lifted && ! st[lastString].bowed)
+            st[lastString].muteEnv = 1.0;
         lastString = s;
         lastVel = vel127;
         if (log)
@@ -539,7 +543,8 @@ struct Player
                 S.dampEnv = 1.0;
             }
             S.dampEnv *= std::exp (-dt / pp.liftDampTime);
-            double dmp = pp.liftDamp * S.dampEnv;
+            S.muteEnv *= std::exp (-dt / std::max (1e-4, pp.openMuteTime));
+            double dmp = std::max (pp.liftDamp * S.dampEnv, pp.openMute * S.muteEnv);
             if (stopping && S.bowed && std::abs (v) < 0.02)
                 dmp = std::max (dmp, stD);
             vn->s[s].damp = dmp;

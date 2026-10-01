@@ -25,7 +25,7 @@ sys.path.insert(0, '/mnt/project-files/research/world-class/references/tool')
 import violinscore as vs
 
 
-VALLEY = 10.0  # dB under the peaks on both sides that marks a bow change
+VALLEY = 5.0  # dB under the louder level on both sides that marks a bow change (10 ms level)
 
 
 def transcribe(path):
@@ -40,13 +40,17 @@ def transcribe(path):
     gate = loud - 40
     sm = median_filter(np.nan_to_num(m, nan=-100), size=9)
     lab = np.where((sm > 0) & (rms > gate), np.round(sm), -1).astype(int)
-    # level valleys: frames that are 10 dB under the peak level on both sides (within 150 ms)
-    rs = median_filter(rms, size=3)
+    # level valleys on a 10 ms level (the tracker's 46 ms window smears bow-change dips away),
+    # centred like the pitch frames: VALLEY dB under the louder level on both sides within 150 ms
+    n = len(rms)
+    c = np.arange(n) * vs.HOP + 1024
+    cs = np.concatenate([[0.0], np.cumsum(x ** 2)])
+    lo_, hi_ = np.clip(c - 220, 0, len(x)), np.clip(c + 220, 0, len(x))
+    rs = 10 * np.log10((cs[hi_] - cs[lo_]) / np.maximum(hi_ - lo_, 1) + 1e-14)
     W = int(0.15 * FR)
-    n = len(rs)
     valley = np.zeros(n, bool)
     for i in range(W, n - W):
-        if rs[i] == rs[i - 3:i + 4].min():
+        if rs[i] == rs[i - 3:i + 4].min() and rs[i] > gate - 20:
             if rs[i - W:i].max() - rs[i] > VALLEY and rs[i + 1:i + W + 1].max() - rs[i] > VALLEY:
                 valley[i] = True
     # notes: runs of a stable label, cut at valleys
@@ -59,6 +63,11 @@ def transcribe(path):
             notes.append(dict(on=st / FR, off=end / FR, note=cur, sep_after=sep))
     while i < n:
         if valley[i] and cur > 0:
+            if i - st < 8 and notes and abs(notes[-1]['off'] - st / FR) < 1e-9:
+                # the dip lands just after the pitch change: it is that change's bow change
+                notes[-1]['sep_after'] = True
+                i += 1
+                continue
             close(i, True)
             cur = -1
             i += 1

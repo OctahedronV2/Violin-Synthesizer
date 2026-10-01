@@ -133,6 +133,9 @@ struct Params
     double aT = 1.0e-6, bT = 0.22, cT = 1.0e-4, tauG = 25.0, ya = 0.4, xi = 2.0; // van Walstijn 2026, Table 1
     // bow
     int bowPoints = 4;
+    // the player tunes the strings while bowing, so the bow's flattening is tuned out: every
+    // string (open or stopped) sits tuneCents sharp of its unbowed pitch
+    double tuneCents = 6.0, earCarry = 0.7;
     double slipNoise = 0.04, slipNoiseHz = 3000.0, slipNoiseExp = 0.5, slipNoiseFade = 0.0;
     // 0: the rough friction acts on the string (couples into the slip timing: jitter);
     // 1: the same force fluctuation goes straight to the bridge (hiss without jitter)
@@ -270,14 +273,16 @@ struct String
         apA = dispA;
         const double Bn = P->dispersion ? d.B * (f1 / d.f0) * (f1 / d.f0) : 0.0;
         // total round trip: N = fs / (frequency of partial 1)
-        const double fp1 = f1 * std::sqrt (1 + Bn);
+        const double fp1 = f1 * std::pow (2.0, P->tuneCents / 1200.0) * std::sqrt (1 + Bn);
         const double w = 2 * pi * fp1 / fs;
         const double pdLoss = std::atan2 (dark * std::sin (w), 1.0 - dark * std::cos (w)) / w;
         const double pdAp = M > 0 ? M * apPhaseDelay (apA, w) : 0.0;
         N = fs / fp1 - pdLoss - pdAp;
         period = fs / fp1;
-        if (resetEar || ! fingered)
+        if (! fingered)
             fingerCents = 0.0;
+        else if (resetEar) // the finger lands where the last correction left it (earCarry of it)
+            fingerCents *= P->earCarry;
         setBeta (beta);
     }
 
@@ -688,6 +693,7 @@ struct Violin
     }
 
     // One sample. bowString < 0: no bow. Returns the total force on the bridge.
+    double Fs[4] = { 0, 0, 0, 0 }; // each string's force on the bridge this sample (debug stems)
     double tick (const double* vBow, const double* force)
     {
         double sumZA = 0, sumZ = 0;
@@ -707,6 +713,7 @@ struct Violin
             {
                 const double Z = p.perString ? s[i].d.Z : 0.2;
                 const double Fi = Z * (2 * s[i].aBr - v);
+                Fs[i] = Fi;
                 F += Fi;
                 s[i].tick (v - s[i].aBr, vBow[i], force[i]);
                 hiss += s[i].hiss;
@@ -718,7 +725,8 @@ struct Violin
             for (int i = 0; i < 4; ++i)
             {
                 const double Z = p.perString ? s[i].d.Z : 0.2;
-                F += 2 * Z * s[i].aBr;
+                Fs[i] = 2 * Z * s[i].aBr;
+                F += Fs[i];
                 s[i].tick (-s[i].aBr, vBow[i], force[i]);
                 hiss += s[i].hiss;
             }

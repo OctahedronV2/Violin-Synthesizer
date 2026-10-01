@@ -55,7 +55,7 @@ int main (int argc, char** argv)
         p.friction = opts["friction"] == "hyperbolic" ? Friction::hyperbolic : opts["friction"] == "thermalHyp" ? Friction::thermalHyp : Friction::thermal;
 #define O(name) p.name = opt (#name, p.name)
     O (muS); O (muD); O (v0); O (aT); O (bT); O (cT); O (tauG); O (ya); O (xi);
-    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade); O (slipNoise); O (slipNoiseHz); O (slipNoiseExp); O (slipNoiseFade); O (slipNoiseOut);
+    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade); O (tuneCents); O (earCarry); O (slipNoise); O (slipNoiseHz); O (slipNoiseExp); O (slipNoiseFade); O (slipNoiseOut);
     O (torsionSpeed); O (torsionImpedance); O (torsionQ); O (fingerLoss); O (admScale);
 #undef O
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
@@ -77,7 +77,7 @@ int main (int argc, char** argv)
     O (releaseTime); O (crossTime); O (bowLength); O (shiftBase); O (shiftPerSemi);
     O (shiftLighten); O (vibDelay); O (vibBloom); O (vibWidthLo); O (vibWidthHi);
     O (vibRate); O (vibRateDyn); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
-    O (chordWindow); O (speedMap); O (contactFollow); O (speedPP); O (speedFF); O (slurFollow); O (slurMaxNotes); O (slurMaxTime); O (slurAccent); O (shapeIOI); O (stopBelow); O (forceSus); O (forceTau); O (forceHold); O (stopAccel); O (stopForce); O (stopTime); O (strokeSus); O (quickIOI); O (quickRun); O (quickP); O (qForceSus); O (qForceTau); O (qForceHold); O (qStrokeSus); O (qStrokeTau); O (qStopForce); O (qStopTime); O (qStopAccel); O (stopDamp); O (qStopDamp); O (quickContact); O (strokeTau); O (dynGlide); O (reg55); O (reg61); O (reg67); O (reg73); O (reg79); O (reg85); O (reg91); O (reg97); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (noiseStart); O (noiseRise); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
+    O (chordWindow); O (speedMap); O (contactFollow); O (speedPP); O (speedFF); O (slurFollow); O (slurMaxNotes); O (slurMaxTime); O (slurAccent); O (shapeIOI); O (stopBelow); O (forceSus); O (forceTau); O (forceHold); O (stopAccel); O (stopForce); O (stopTime); O (strokeSus); O (quickIOI); O (quickRun); O (quickP); O (qForceSus); O (qForceTau); O (qForceHold); O (qStrokeSus); O (qStrokeTau); O (qStopForce); O (qStopTime); O (qStopAccel); O (stopDamp); O (openMute); O (openMuteTime); O (qStopDamp); O (quickContact); O (strokeTau); O (dynGlide); O (reg55); O (reg61); O (reg67); O (reg73); O (reg79); O (reg85); O (reg91); O (reg97); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (noiseStart); O (noiseRise); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
 #undef O
     q.seed = seed;
     player->log = opt ("log", 0) != 0;
@@ -112,6 +112,7 @@ int main (int argc, char** argv)
     size_t e = 0;
     const auto t0 = std::chrono::steady_clock::now();
     const bool slips = opt ("slips", 0) != 0;
+    const int solo = (int) opt ("solo", -1);
     long slipCount[4] = {};
     for (long i = 0; i < n; ++i)
     {
@@ -128,7 +129,9 @@ int main (int argc, char** argv)
         player->tick (vb, fb);
         for (int k = 0; k < over; ++k)
         {
-            const double F = violin->tick (vb, fb);
+            double F = violin->tick (vb, fb);
+            if (solo >= 0)
+                F = violin->Fs[solo]; // debug: one string's own bridge force
             if (over == 4)
             {
                 dec2.push (F);
