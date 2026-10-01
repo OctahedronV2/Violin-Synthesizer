@@ -1,0 +1,412 @@
+// Octavio 2 player, M0: a minimal Live-mode violinist.
+//
+// Turns note-on / note-off events into physical gestures for the four strings: one bow (signed
+// speed in m/s, force per string in N, contact point) and a left hand (finger position per string
+// as a pitch in semitones, finger damping). Everything musical lives here; the strings only do
+// physics. Live mode: it decides at note-on and never looks ahead (Studio mode comes in M4).
+//
+// What M0 does:
+//  - velocity -> dynamics d (0..1) -> bow speed, contact point and force together, the force
+//    placed inside the Schelleng window for that speed, contact and string (Schoonderwaldt)
+//  - string choice: greedy cost (low position, few crossings, little hand movement)
+//  - overlap = slur (same bow; finger change, shift or string crossing); else a new stroke
+//  - bow changes through zero with limited acceleration, alternate directions, bow budget
+//    (62 cm of hair) forces a change mid-note when the hair runs out
+//  - shifts slide the finger with a raised-cosine curve, the bow lightens during the slide
+//  - vibrato as finger motion: delayed bloom, width from dynamics, seeded rate/width wander,
+//    none on open strings
+//  - release = bow lifts off while moving, the string rings; idle fingers lift with a damped touch
+//  - double stops on two strings when notes start together
+
+#pragma once
+#include "Strings.h"
+
+namespace o2
+{
+struct PlayerParams
+{
+    // dynamics from velocity: d = clamp((vel - velLo) / (velHi - velLo)) ^ velCurve
+    double velLo = 20, velHi = 125, velCurve = 1.0;
+    // bow speed (m/s) = speedLo + speedRange * d^speedCurve
+    double speedLo = 0.05, speedRange = 0.35, speedCurve = 1.3;
+    // contact point, mm from the bridge: pp .. ff
+    double contactPP = 32.0, contactFF = 14.0;
+    // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
+    double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
+    double posLo = 0.30, posRange = 0.40;
+    double accel = 8.0; // bow acceleration limit, m/s^2 (higher at ff)
+    double accelFF = 20.0;
+    double landTime = 0.006; // bow lands on the string (force rise), s
+    double biteFF = 0.35, biteTime = 0.05; // extra force at the start of loud strokes
+    double changeDip = 0.25; // force reduction at a bow change
+    double releaseTime = 0.05; // lift-off force time constant, s
+    double crossTime = 0.02; // string crossing: force moves to the new string, s
+    double bowLength = 0.62; // hair, m
+    // left hand
+    double shiftBase = 0.045, shiftPerSemi = 0.006; // slide time, s
+    double shiftLighten = 0.2; // bow force reduction during a slide
+    double vibDelay = 0.14, vibBloom = 0.3; // s
+    double vibWidthLo = 8.0, vibWidthHi = 30.0; // cents peak-to-peak at d = 0 / 1
+    double vibRate = 5.6, vibRateDyn = 0.6; // Hz, plus per unit d
+    double vibWander = 0.15; // relative random wander of rate and width
+    double liftAfter = 0.35; // an idle string's finger lifts after this long, s
+    double liftDamp = 0.25, liftDampTime = 0.03;
+    double chordWindow = 0.03; // s
+    unsigned seed = 1;
+};
+
+struct Player
+{
+    static constexpr double openPitch[4] = { 55, 62, 69, 76 };
+    static constexpr double stringLength = 0.325; // m
+    PlayerParams pp;
+    Violin* vn = nullptr;
+    double fs = 48000.0; // control rate = output rate
+    double t = 0.0;
+    Rng rng;
+
+    struct Held
+    {
+        int pitch;
+        double vel, on;
+        int str;
+    };
+    Held held[16];
+    int nHeld = 0;
+
+    // bow
+    double dir = 1.0; // +1 down, -1 up
+    double v = 0.0, vTarget = 0.0; // signed m/s
+    double V = 0.0; // stroke speed magnitude
+    double hair = 0.0; // hair position from the frog, m
+    double accel = 8.0;
+    bool changing = false, releasing = false;
+    double strokeStart = -1.0, lastStop = -10.0;
+    double d = 0.6; // dynamics of the current stroke
+    double contactMM = 22.0;
+
+    struct Str
+    {
+        bool bowed = false; // the bow is (or should be) on this string
+        double force = 0.0, forceTarget = 0.0;
+        double pitch = 0.0; // finger, semitones (MIDI)
+        double target = 0.0;
+        double slideFrom = 0.0, slideT0 = -1.0, slideDur = 0.0;
+        double noteOn = -1.0;
+        double vibPhase = 0.0, vibRate = 5.6, vibWidth = 0.0, vibWidthTarget = 0.0;
+        double wanderR = 0.0, wanderW = 0.0;
+        double lastBowed = -10.0;
+        double setPitchAt = -1e9;
+        bool lifted = true;
+        double dampEnv = 0.0;
+        double fScale = 1.0;
+    } st[4];
+
+    double handSemis = 0.0; // hand position: semitones above the open string of the first finger
+    int lastString = 2;
+
+    void init (Violin& v_, double fs_)
+    {
+        vn = &v_;
+        fs = fs_;
+        rng.s ^= 0x2545F4914F6CDD1Dull * (pp.seed + 1);
+        for (int i = 0; i < 4; ++i)
+        {
+            st[i].pitch = st[i].target = openPitch[i];
+            st[i].fScale = 1.0;
+        }
+    }
+
+    double dynFromVel (double vel127) const
+    {
+        const double x = std::clamp ((vel127 - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0);
+        return std::pow (x, pp.velCurve);
+    }
+
+    // ---------------------------------------------------------------- string choice
+    int chooseString (int pitch, int avoid1 = -1, int avoid2 = -1) const
+    {
+        int best = -1;
+        double bestCost = 1e30;
+        for (int s = 0; s < 4; ++s)
+        {
+            if (s == avoid1 || s == avoid2)
+                continue;
+            const double semis = pitch - openPitch[s];
+            const double top = s == 3 ? 28 : 16;
+            if (semis < 0 || semis > top)
+                continue;
+            double c = 0.12 * semis + 0.6 * std::max (0.0, semis - 7.0);
+            c += 0.9 * std::abs (s - lastString);
+            if (semis > 0)
+                c += 0.15 * std::abs (semis - handSemis);
+            if (semis == 0 && pitch != 55)
+                c += 0.8; // open strings can't vibrate: a violinist mostly stops the note
+            if (c < bestCost)
+            {
+                bestCost = c;
+                best = s;
+            }
+        }
+        if (best < 0) // out of range: nearest string
+            best = pitch < 55 ? 0 : 3;
+        return best;
+    }
+
+    // ---------------------------------------------------------------- bow targets from dynamics
+    double betaFor (int s) const
+    {
+        const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
+        return std::clamp (contactMM * 1e-3 / L, 0.02, 0.3);
+    }
+
+    double forceFor (int s, double speed) const
+    {
+        const double beta = betaFor (s);
+        const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
+        const double fMax = pp.cUpper * speed / beta * z;
+        const double fMin = pp.cLower * speed / (beta * beta) * z * z;
+        const double p = pp.posLo + pp.posRange * d;
+        return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
+    }
+
+    void setStroke (double vel127)
+    {
+        d = dynFromVel (vel127);
+        V = pp.speedLo + pp.speedRange * std::pow (d, pp.speedCurve);
+        contactMM = pp.contactPP + (pp.contactFF - pp.contactPP) * d;
+        accel = pp.accel + (pp.accelFF - pp.accel) * d;
+    }
+
+    // ---------------------------------------------------------------- left hand
+    void fingerNote (int s, int pitch, bool slurred)
+    {
+        Str& S = st[s];
+        const double semis = pitch - openPitch[s];
+        const double from = S.lifted ? openPitch[s] : S.pitch;
+        const double jump = std::abs (pitch - from);
+        // a shift: same string, finger already down, the hand moves more than a tone
+        const bool shift = ! S.lifted && semis > 0 && jump > 2.0 && std::abs (semis - handSemis) > 2.0;
+        S.target = pitch;
+        if (shift)
+        {
+            S.slideFrom = S.pitch;
+            S.slideT0 = t;
+            S.slideDur = pp.shiftBase + pp.shiftPerSemi * jump;
+        }
+        else
+        {
+            S.slideT0 = -1.0;
+            S.pitch = pitch;
+            vn->s[s].setNote (pitch);
+            S.setPitchAt = t;
+        }
+        if (semis > 0)
+            handSemis = semis;
+        S.lifted = semis == 0;
+        S.noteOn = t;
+        // vibrato restarts on a new bow, continues (phase kept) over a slur in one position
+        if (! slurred || shift)
+            S.vibWidth = 0.0;
+        S.vibWidthTarget = semis > 0 ? pp.vibWidthLo + (pp.vibWidthHi - pp.vibWidthLo) * d : 0.0;
+        S.wanderR = pp.vibWander * rng.gauss() * 0.5;
+        S.wanderW = pp.vibWander * rng.gauss() * 0.5;
+        S.vibRate = (pp.vibRate + pp.vibRateDyn * d) * (1.0 + S.wanderR);
+    }
+
+    // ---------------------------------------------------------------- events
+    void noteOn (int pitch, double vel127)
+    {
+        const bool anyHeld = nHeld > 0;
+        const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
+        int s;
+        if (chord)
+        {
+            // double stop: another string, adjacent to the chord's
+            int used = held[nHeld - 1].str;
+            s = chooseString (pitch, used);
+            for (int k = 0; k < 4; ++k) // prefer an adjacent string if it can play the note
+                if (std::abs (k - used) == 1 && pitch >= openPitch[k] && pitch - openPitch[k] <= 16)
+                {
+                    if (std::abs (s - used) != 1)
+                        s = k;
+                    break;
+                }
+            fingerNote (s, pitch, true);
+            st[s].bowed = true;
+            st[s].fScale = 1.0;
+        }
+        else if (anyHeld)
+        {
+            // legato: same bow. The new note replaces what was sounding.
+            s = chooseString (pitch);
+            for (int k = 0; k < 4; ++k)
+                if (k != s)
+                    st[k].bowed = false;
+            const bool cross = ! st[s].bowed;
+            fingerNote (s, pitch, true);
+            st[s].bowed = true;
+            (void) cross;
+            // a slur keeps the stroke's speed; velocity nudges the dynamics
+            const double dNew = dynFromVel (vel127);
+            d = 0.7 * d + 0.3 * dNew;
+            nHeld = 0; // slurred-over notes no longer sound
+        }
+        else
+        {
+            // a new stroke
+            s = chooseString (pitch);
+            for (int k = 0; k < 4; ++k)
+                st[k].bowed = false;
+            setStroke (vel127);
+            const bool bowMoving = std::abs (v) > 0.01;
+            if (bowMoving)
+                dir = -dir; // bow change
+            else if (t - lastStop > 0.8)
+                dir = hair > 0.5 * pp.bowLength ? -1.0 : 1.0; // retake: start where the bow is
+            else
+                dir = -dir;
+            changing = bowMoving;
+            releasing = false;
+            strokeStart = t;
+            fingerNote (s, pitch, false);
+            st[s].bowed = true;
+        }
+        lastString = s;
+        if (nHeld < 16)
+            held[nHeld++] = { pitch, vel127, t, s };
+    }
+
+    void noteOff (int pitch)
+    {
+        int k = 0;
+        bool found = false;
+        int str = -1;
+        for (int i = 0; i < nHeld; ++i)
+        {
+            if (! found && held[i].pitch == pitch)
+            {
+                found = true;
+                str = held[i].str;
+                continue;
+            }
+            held[k++] = held[i];
+        }
+        nHeld = k;
+        if (! found)
+            return;
+        if (nHeld == 0)
+        {
+            releasing = true;
+            lastStop = t;
+        }
+        else if (str >= 0)
+            st[str].bowed = false; // one note of a double stop ends
+    }
+
+    // ---------------------------------------------------------------- per output sample
+    // Writes the gestures for this sample: signed bow velocity and force per string.
+    void tick (double* vBow, double* force)
+    {
+        const double dt = 1.0 / fs;
+        // bow budget: change bow before the hair runs out
+        if (! releasing && nHeld > 0)
+        {
+            const double margin = std::abs (v) * 0.04 + 0.01;
+            if ((dir > 0 && hair > pp.bowLength - margin) || (dir < 0 && hair < margin))
+            {
+                dir = -dir;
+                changing = true;
+            }
+        }
+        // bow velocity: accelerate towards the target with limited acceleration
+        vTarget = releasing ? v * 0.0 : dir * V;
+        if (releasing)
+        {
+            // keep moving while the hair leaves the string, then slow down
+            bool off = true;
+            for (auto& S : st)
+                off = off && S.force < 0.02 * S.forceTarget + 1e-4;
+            vTarget = off ? 0.0 : v;
+        }
+        const double a = accel * dt;
+        v += std::clamp (vTarget - v, -a, a);
+        if (changing && std::abs (v - vTarget) < 1e-4)
+            changing = false;
+        hair = std::clamp (hair + v * dt, 0.0, pp.bowLength);
+
+        for (int s = 0; s < 4; ++s)
+        {
+            Str& S = st[s];
+            // left hand: slide, vibrato
+            double pitch = S.target;
+            if (S.slideT0 >= 0.0)
+            {
+                const double u = (t - S.slideT0) / S.slideDur;
+                if (u >= 1.0)
+                    S.slideT0 = -1.0;
+                else
+                    pitch = S.slideFrom + (S.target - S.slideFrom) * 0.5 * (1.0 - std::cos (pi * u));
+            }
+            const bool sliding = S.slideT0 >= 0.0;
+            if (S.vibWidthTarget > 0.0 && S.bowed)
+            {
+                const double age = t - S.noteOn;
+                const double env = std::clamp ((age - pp.vibDelay) / pp.vibBloom, 0.0, 1.0);
+                const double w = S.vibWidthTarget * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
+                S.vibWidth += (w - S.vibWidth) * std::min (1.0, dt / 0.05);
+                S.vibPhase += 2 * pi * S.vibRate * dt;
+                if (S.vibPhase > 2 * pi)
+                {
+                    S.vibPhase -= 2 * pi;
+                    // per-cycle wander: no two cycles alike
+                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d) * (1.0 + S.wanderR + 0.04 * rng.gauss());
+                }
+            }
+            else
+                S.vibWidth *= 1.0 - std::min (1.0, dt / 0.08);
+            if (! sliding && S.vibWidth > 0.0)
+                pitch += 0.5 * S.vibWidth / 100.0 * std::sin (S.vibPhase);
+            if (std::abs (pitch - S.pitch) > 0.001 || (sliding && std::abs (pitch - S.pitch) > 1e-5))
+            {
+                S.pitch = pitch;
+                vn->s[s].setPitch (pitch);
+            }
+            // idle fingers lift (damped touch), the string then rings open (sympathetic)
+            if (S.bowed)
+                S.lastBowed = t;
+            else if (! S.lifted && t - S.lastBowed > pp.liftAfter && nHeld > 0)
+            {
+                S.lifted = true;
+                S.target = S.pitch = openPitch[s];
+                vn->s[s].setNote (openPitch[s]);
+                S.dampEnv = 1.0;
+            }
+            S.dampEnv *= std::exp (-dt / pp.liftDampTime);
+            vn->s[s].damp = pp.liftDamp * S.dampEnv;
+
+            // bow force on this string
+            double ft = 0.0;
+            if (S.bowed && ! releasing)
+            {
+                ft = forceFor (s, std::max (std::abs (v), 0.3 * V));
+                const double age = t - strokeStart;
+                ft *= 1.0 + pp.biteFF * d * d * std::exp (-age / pp.biteTime);
+                if (changing)
+                    ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
+                if (sliding)
+                    ft *= 1.0 - pp.shiftLighten;
+            }
+            S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
+            const double tau = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
+            S.force += (ft - S.force) * std::min (1.0, dt / tau);
+            if (S.force < 1e-5 && ft == 0.0)
+                S.force = 0.0;
+            force[s] = S.force;
+            vBow[s] = S.force > 0.0 ? v : 0.0;
+            vn->s[s].setBeta (betaFor (s));
+        }
+        t += dt;
+    }
+};
+} // namespace o2
