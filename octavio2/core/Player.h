@@ -48,9 +48,9 @@ struct PlayerParams
     // their own stroke shape and stop (q* below, same meaning as the unprefixed settings), pressure
     // higher in the Schelleng window (quickP added to p) and the bow nearer the bridge (contact x
     // quickContact). Slower shaped notes (up to shapeIOI) keep the settings above.
-    double quickIOI = 0.2, quickRun = 2, quickP = 0.0, quickContact = 1.0;
-    double qForceSus = 0.4883, qForceTau = 0.07482, qForceHold = 0.0159, qStrokeSus = 0.7078, qStrokeTau = 0.1498;
-    double qStopForce = 0.5138, qStopTime = 0.035, qStopAccel = 25.0;
+    double quickIOI = 0.3, quickRun = 3, quickP = 0.04922, quickContact = 1.383;
+    double qForceSus = 0.1172, qForceTau = 0.2024, qForceHold = 0.001039, qStrokeSus = 0.6583, qStrokeTau = 0.2016;
+    double qStopForce = 0.4649, qStopTime = 0.04107, qStopAccel = 40.32;
     double forceSus = 0.4883, forceTau = 0.07482, forceHold = 0.0159;
     double dynGlide = 0.04; // s: speed, contact and force move to a new dynamic this smoothly
     // register: dB of extra bow speed by pitch (G3 .. E7 every 6 semitones), so a velocity plays
