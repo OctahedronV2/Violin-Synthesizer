@@ -55,7 +55,7 @@ int main (int argc, char** argv)
         p.friction = opts["friction"] == "hyperbolic" ? Friction::hyperbolic : opts["friction"] == "thermalHyp" ? Friction::thermalHyp : Friction::thermal;
 #define O(name) p.name = opt (#name, p.name)
     O (muS); O (muD); O (v0); O (aT); O (bT); O (cT); O (tauG); O (ya); O (xi);
-    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade);
+    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade); O (slipNoise); O (slipNoiseHz); O (slipNoiseExp); O (slipNoiseFade);
     O (torsionSpeed); O (torsionImpedance); O (torsionQ); O (fingerLoss); O (admScale);
 #undef O
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
@@ -77,7 +77,7 @@ int main (int argc, char** argv)
     O (releaseTime); O (crossTime); O (bowLength); O (shiftBase); O (shiftPerSemi);
     O (shiftLighten); O (vibDelay); O (vibBloom); O (vibWidthLo); O (vibWidthHi);
     O (vibRate); O (vibRateDyn); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
-    O (chordWindow); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
+    O (chordWindow); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (noiseStart); O (noiseRise); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
 #undef O
     q.seed = seed;
     player->log = opt ("log", 0) != 0;

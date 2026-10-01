@@ -133,6 +133,7 @@ struct Params
     double aT = 1.0e-6, bT = 0.22, cT = 1.0e-4, tauG = 25.0, ya = 0.4, xi = 2.0; // van Walstijn 2026, Table 1
     // bow
     int bowPoints = 4;
+    double slipNoise = 0.08, slipNoiseHz = 3000.0, slipNoiseExp = 0.5, slipNoiseFade = 0.0;
     double bowWidth = 0.01, hairStiffness = 110000.0, hairDamping = 10.0, grain = 0.03, grainHz = 3000.0, grainFade = 0.05;
     int grainMode = 0;
     double grainLen = 1e-4;
@@ -169,6 +170,8 @@ struct String
     int M = 0;
     double apA = 0.0, apX[8] = {}, apY[8] = {};
     double fingerG = 1.0;
+    double slipLp[4] = {}, slipNoiseA = 0.0;
+    double noiseGain = 1.0; // set by the player: how settled the stroke is (less hiss while the note starts)
     double damp = 0.0; // extra loss per round trip from a finger touching or lifting (0..1), set by the player
     double dBr = 2, dN = 2; // one-way bow->bridge, nut round trip
     // bridge wave
@@ -196,6 +199,7 @@ struct String
         d = sd;
         P = &p;
         fs = p.fs;
+        slipNoiseA = std::exp (-2 * pi * p.slipNoiseHz / fs);
         fitDispersion();
         setNote (12.0 * std::log2 (d.f0 / 440.0) + 69.0);
     }
@@ -384,7 +388,20 @@ struct String
         else
         {
             stick[k] = false;
-            const double f = (dh > 0 ? 1.0 : -1.0) * mu * force;
+            // sliding rosin is rough: the friction force fluctuates broadband while it slides
+            // (hair and rosin asperities), more the faster it slides. slipNoise is the relative
+            // rms at 0.1 m/s of sliding speed.
+            double rough = 1.0;
+            if (P->slipNoise > 0.0)
+            {
+                // high-passed at slipNoiseHz: the hiss of sliding hair, kept out of the band
+                // that would jitter the slip timing
+                const double a = slipNoiseA, wn = rng.gauss();
+                slipLp[k] = a * slipLp[k] + (1 - a) * wn;
+                const double fadeN = noiseGain;
+                rough = std::max (0.0, 1.0 + fadeN * P->slipNoise * std::pow (std::abs (dh) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]));
+            }
+            const double f = (dh > 0 ? 1.0 : -1.0) * mu * force * rough;
             v = vh + f / a;
             q = std::abs (f * (vBow - v)) / lineLen; // W/m
         }

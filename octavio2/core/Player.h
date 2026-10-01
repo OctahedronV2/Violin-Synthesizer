@@ -58,6 +58,7 @@ struct PlayerParams
     // a string the bow lands on while already moving (crossing, double stop) gets a short extra
     // force so it is captured into Helmholtz motion at once instead of multiple slipping
     double crossBite = 0.8, crossBiteTime = 0.05;
+    double noiseStart = 0.3, noiseRise = 0.08; // slip hiss while a note starts, then full
     double bite = 0.25; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
@@ -410,6 +411,10 @@ struct Player
             }
             S.dampEnv *= std::exp (-dt / pp.liftDampTime);
             vn->s[s].damp = pp.liftDamp * S.dampEnv;
+            {
+                const double age = t - std::max (S.noteOn, S.landAt);
+                vn->s[s].noiseGain = pp.noiseStart + (1.0 - pp.noiseStart) * std::clamp (age / pp.noiseRise, 0.0, 1.0);
+            }
 
             // bow force on this string
             double ft = 0.0;
