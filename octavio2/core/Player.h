@@ -37,7 +37,7 @@ struct PlayerParams
     // auto bowing in Live mode: an overlapping note is slurred unless the slur already holds
     // slurMaxNotes notes or slurMaxTime seconds, or the note is accented (velocity up by
     // slurAccent or more): then the bow changes. 0 turns a rule off.
-    double slurMaxNotes = 4, slurMaxTime = 1.5, slurAccent = 12;
+    double slurMaxNotes = 0, slurMaxTime = 0, slurAccent = 0; // off: Jake heard notes no longer ringing out (2026-10-01)
     // detache in quick passages (the previous note started less than shapeIOI s before): each
     // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
     // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
@@ -56,7 +56,7 @@ struct PlayerParams
     double accelFF = 20.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
-    double changeDip = 0.6; // force reduction at a bow change
+    double changeDip = 0.25; // force reduction at a bow change
     double releaseTime = 0.05; // lift-off force time constant, s
     double crossTime = 0.02; // string crossing: force moves to the new string, s
     double bowLength = 0.62; // hair, m
