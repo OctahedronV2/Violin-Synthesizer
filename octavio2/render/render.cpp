@@ -77,7 +77,7 @@ int main (int argc, char** argv)
     O (releaseTime); O (crossTime); O (bowLength); O (shiftBase); O (shiftPerSemi);
     O (shiftLighten); O (vibDelay); O (vibBloom); O (vibWidthLo); O (vibWidthHi);
     O (vibRate); O (vibRateDyn); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
-    O (chordWindow); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait);
+    O (chordWindow); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
 #undef O
     q.seed = seed;
     player->log = opt ("log", 0) != 0;

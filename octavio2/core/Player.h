@@ -33,11 +33,11 @@ struct PlayerParams
     double contactPP = 32.0, contactFF = 14.0;
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
-    double posLo = 0.50, posRange = 0.40;
+    double posLo = 0.45, posRange = 0.40;
     double accel = 8.0; // bow acceleration limit, m/s^2 (higher at ff)
     double accelFF = 20.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
-    double biteFF = 0.35, biteTime = 0.05; // extra force at the start of loud strokes
+    double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
     double changeDip = 0.25; // force reduction at a bow change
     double releaseTime = 0.05; // lift-off force time constant, s
     double crossTime = 0.02; // string crossing: force moves to the new string, s
@@ -57,11 +57,11 @@ struct PlayerParams
     double speedG = 0.43, speedD = 0.50, speedA = 1.0, speedE = 0.75;
     // a string the bow lands on while already moving (crossing, double stop) gets a short extra
     // force so it is captured into Helmholtz motion at once instead of multiple slipping
-    double crossBite = 0.5, crossBiteTime = 0.03;
-    double bite = 0.5; // extra force at the start of every stroke (Guettler: capture needs force)
+    double crossBite = 0.8, crossBiteTime = 0.05;
+    double bite = 0.25; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
-    double earUp = 0.25, earDown = 0.15, earMax = 2.5, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05;
+    double earUp = 0.25, earDown = 0.15, earMax = 2.5, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
 };
 
@@ -117,6 +117,7 @@ struct Player
         double ear = 1.0; // force correction from listening
         long slipMark = 0;
         bool captured = true;
+        int earHigh = 0;
         double earT = 0.0;
     } st[4];
 
@@ -427,7 +428,7 @@ struct Player
             if (S.bowed && ! releasing && S.force > 0.0)
             {
                 S.earT += dt;
-                if (S.earT >= pp.earWindow)
+                if (S.earT >= std::max (pp.earWindow, pp.earPeriods / vn->s[s].f1))
                 {
                     const long n = vn->s[s].slipTotal - S.slipMark;
                     const double spp = n / (S.earT * vn->s[s].f1);
@@ -442,7 +443,8 @@ struct Player
                         if (log && c > 0.1)
                             std::fprintf (stderr, "slow capture %.3f s at %.2f string %d pitch %.1f\n", c, t, s, S.target);
                     }
-                    if (spp > 1.4)
+                    S.earHigh = spp > 1.4 ? S.earHigh + 1 : 0;
+                    if (S.earHigh >= 2)
                         S.ear = std::min (pp.earMax, S.ear * (1.0 + pp.earUp));
                     else if (spp < 0.4 && t - std::max (strokeStart, std::max (S.landAt, S.noteOn)) > pp.earWait)
                         S.ear = std::max (pp.earMin, S.ear * (1.0 - pp.earDown));
