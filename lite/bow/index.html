@@ -84,12 +84,16 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
     <input type="range" id="contact" min="0" max="1000">
     <div class="tip">Distance from the bridge, as a share of the string. Nearer the bridge is brighter and needs more pressure.</div>
   </div>
-  <label class="chk"><input type="checkbox" id="body" checked> Violin body (off: the bare string's pull on the bridge, a buzzy sawtooth)</label>
+  <div class="slider">
+    <div class="top"><label for="body">Body amount</label><output id="o-body"></output></div>
+    <input type="range" id="body" min="0" max="1000">
+    <div class="tip">0%: the bare string's pull on the bridge, a buzzy sawtooth. 100%: the real violin body. Above that, the body's peaks and dips are exaggerated, up to 8 times as deep.</div>
+  </div>
 </section>
 
 <section style="display:grid;gap:8px">
   <h2 style="font-size:17px;margin:0">Real violin for comparison</h2>
-  <p class="muted" style="margin:0">The open A string (A4) of a real violin, bowed and recorded with no room (University of Iowa Musical Instrument Samples). The body above is measured from this same violin, so play A4 with the body on to compare.</p>
+  <p class="muted" style="margin:0">The open A string (A4) of a real violin, bowed and recorded with no room (University of Iowa Musical Instrument Samples). The body above is measured from this same violin, so play A4 with the body at 100% to compare.</p>
   <audio controls preload="none" src="real-a4.mp3" style="width:100%"></audio>
 </section>
 
@@ -106,7 +110,84 @@ const BODY = 3;
 const $ = (id) => document.getElementById(id);
 let ctx = null, node = null, host = null, snap = null;
 const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
-$('body').addEventListener('change', () => send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 }));
+// Body amount: scales the body's response in decibels (0 = none, 1 = the real body, 8 = eight times the peaks and dips).
+const BODY_MAX = 8;
+let bodyAmount = 1, bodyBase = null, bodyTimer = 0;
+const amountFrom = (s) => BODY_MAX * s * s, amountTo = (a) => Math.sqrt(a / BODY_MAX);
+function applyBody() {
+  send({ type: 'param', index: BODY, value: bodyAmount > 0.005 ? 1 : 0 });
+  if (!bodyBase || bodyAmount <= 0.005) return;
+  const ir = Math.abs(bodyAmount - 1) < 0.005 ? bodyBase.slice() : shapeBody(bodyBase, bodyAmount, ctx.sampleRate);
+  if (node) node.port.postMessage({ type: 'ir', ir }, [ir.buffer]); else if (host) host.handle({ type: 'ir', ir });
+}
+$('body').value = Math.round(amountTo(1) * 1000);
+$('o-body').textContent = '100%';
+$('body').addEventListener('input', () => {
+  const s = $('body').value / 1000;
+  bodyAmount = amountFrom(s);
+  if (Math.abs(bodyAmount - 1) < 0.04) bodyAmount = 1; // snap to the real body
+  $('o-body').textContent = Math.round(bodyAmount * 100) + '%';
+  clearTimeout(bodyTimer); bodyTimer = setTimeout(applyBody, 120);
+});
+
+// In-place radix-2 FFT.
+function fft(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = (inverse ? 2 : -2) * Math.PI / len, wr = Math.cos(a), wi = Math.sin(a);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const p = i + k, q = p + len / 2;
+        const xr = re[q] * cr - im[q] * ci, xi = re[q] * ci + im[q] * cr;
+        re[q] = re[p] - xr; im[q] = im[p] - xi; re[p] += xr; im[p] += xi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+// The body with its decibel response scaled by `amount`, rebuilt as a minimum-phase response.
+function shapeBody(base, amount, rate) {
+  const n = 32768, re = new Float64Array(n), im = new Float64Array(n);
+  re.set(base.subarray(0, Math.min(base.length, n)));
+  fft(re, im, false);
+  let peak = 0;
+  for (let k = 0; k < n; k++) peak = Math.max(peak, Math.hypot(re[k], im[k]));
+  const floor = peak * 1e-3; // dips deeper than -60 dB are clipped before scaling
+  for (let k = 0; k < n; k++) { re[k] = Math.log(Math.max(Math.hypot(re[k], im[k]), floor)); im[k] = 0; }
+  // Level: the average over the violin's notes (G3 to E6) of each note's loudness, taking
+  // the note as a sawtooth heard through the body, stays as it was with the real body.
+  const level = () => {
+    let sum = 0;
+    for (let note = 55; note <= 88; note++) {
+      const f0 = 440 * Math.pow(2, (note - 69) / 12);
+      let p = 0;
+      for (let h = 1; h * f0 < 12000; h++) p += Math.exp(2 * re[Math.round(h * f0 / rate * n)]) / (h * h);
+      sum += Math.log(p);
+    }
+    return sum / 34;
+  };
+  const before = level();
+  for (let k = 0; k < n; k++) re[k] *= amount;
+  const shift = 0.5 * (before - level());
+  for (let k = 0; k < n; k++) re[k] += shift;
+  fft(re, im, true); // real cepstrum
+  for (let k = 1; k < n / 2; k++) { re[k] *= 2; re[n - k] = 0; }
+  for (let k = 0; k < n; k++) im[k] = 0;
+  fft(re, im, false);
+  for (let k = 0; k < n; k++) { const m = Math.exp(re[k]), ph = im[k]; re[k] = m * Math.cos(ph); im[k] = m * Math.sin(ph); }
+  fft(re, im, true);
+  const len = 24576, fade = 2048, out = new Float32Array(len);
+  for (let i = 0; i < len; i++) out[i] = re[i] * (i < len - fade ? 1 : 0.5 + 0.5 * Math.cos(Math.PI * (i - (len - fade)) / fade));
+  return out;
+}
 const val = {};
 const to = (p, v) => p.log ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
 const from = (p, s) => p.log ? p.min * Math.pow(p.max / p.min, s) : p.min + s * (p.max - p.min);
@@ -227,7 +308,10 @@ $('start').addEventListener('click', async () => {
       sp.connect(ctx.destination);
     }
     P.forEach((p, i) => send({ type: 'param', index: i, value: val[p.id] }));
-    send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 });
+    const ratio = irRate / ctx.sampleRate;
+    bodyBase = new Float32Array(Math.floor(ir.length / ratio));
+    for (let i = 0; i < bodyBase.length; i++) { const x = i * ratio, k = Math.floor(x), f = x - k; bodyBase[i] = ((ir[k] || 0) * (1 - f) + (ir[k + 1] || 0) * f) * ratio; }
+    applyBody();
     $('start').textContent = 'Sound on'; $('status').textContent = `Running at ${ctx.sampleRate / 1000} kHz`;
   } catch (err) { $('status').innerHTML = `<span class="err">Could not start: ${err.message}</span>`; $('start').disabled = false; }
 });

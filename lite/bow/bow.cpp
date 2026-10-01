@@ -34,6 +34,8 @@ EXPORT (bs_prepare) void bs_prepare (double sr) { bs.prepare (sr); }
 EXPORT (bs_body_buffer) float* bs_body_buffer() { return bs.body.irBuf; }
 EXPORT (bs_body_capacity) int bs_body_capacity() { return lite::Body::maxParts * lite::Body::B; }
 EXPORT (bs_body_load) void bs_body_load (int n) { bs.loadBody (n); }
+EXPORT (bs_body_gain) double bs_body_gain() { return bs.bodyGain; }
+EXPORT (bs_set_body_gain) void bs_set_body_gain (double g) { bs.bodyGain = g; }
 EXPORT (bs_set) void bs_set (int i, double v) { bs.setParam (i, v); }
 EXPORT (bs_get) double bs_get (int i) { return bs.params[i]; }
 EXPORT (bs_note_on) void bs_note_on (int n) { bs.noteOn (n); }
