@@ -68,9 +68,9 @@ textarea{width:100%;min-height:90px;font:12px var(--mono);background:var(--panel
   <div class="row">
     <button id="start" class="primary">Start sound</button>
     <select id="demo" aria-label="Demo phrase">
-      <option value="lyric.mid">Slow lyric melody</option>
-      <option value="brahms.mid">Brahms Hungarian Dance 5</option>
-      <option value="showcase.mid">10-articulation opening</option>
+      <option value="lyric">Slow lyric melody</option>
+      <option value="brahms">Brahms Hungarian Dance 5</option>
+      <option value="showcase">10-articulation opening</option>
     </select>
     <button id="play" disabled>Play</button>
     <label class="chk"><input type="checkbox" id="loop" checked> Loop</label>
@@ -294,9 +294,8 @@ $('play').addEventListener('click', async () => {
   if ($('play').textContent === 'Pause') { send({ type: 'stop' }); $('play').textContent = 'Play'; return; }
   const f = $('demo').value;
   try {
-    if (!demoCache[f]) demoCache[f] = parseMidi(await (await fetch(f)).arrayBuffer());
-    let ev = demoCache[f];
-    if (f === 'showcase.mid') ev = ev.filter((x) => x.t < 21);
+    if (!demoCache.all) demoCache.all = await (await fetch('demos.json')).json();
+    const ev = demoCache.all[f];
     send({ type: 'play', events: ev, loop: $('loop').checked });
     $('play').textContent = 'Pause';
   } catch (err) { status('Could not load the phrase: ' + err.message, true); }
