@@ -84,11 +84,27 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
     <input type="range" id="contact" min="0" max="1000">
     <div class="tip">Distance from the bridge, as a share of the string. Nearer the bridge is brighter and needs more pressure.</div>
   </div>
+  <label class="chk"><input type="checkbox" id="widebow" checked> Real bow (a centimetre of springy hair with a little rosin grain; off: the bow touches at a single point and is perfectly smooth)</label>
   <div class="slider">
     <div class="top"><label for="body">Body amount</label><output id="o-body"></output></div>
     <input type="range" id="body" min="0" max="1000">
     <div class="tip">0%: the bare string's pull on the bridge, a buzzy sawtooth. 100%: the real violin body. Above that, the body's peaks and dips are exaggerated, up to 8 times as deep.</div>
   </div>
+</section>
+
+<section style="display:grid;gap:12px">
+  <h2 style="font-size:17px;margin:0">What changed: a real bow</h2>
+  <div class="row"><button id="dl" hidden>Download all clips (zip)</button><span id="dlStatus" class="hint"></span></div>
+  <p class="muted" style="margin:0">Open A4 at 0.5 N, 0.2 m/s, contact 12%, through the Iowa violin body, all at the same loudness. Compare with the real violin below.</p>
+  <div style="display:grid;gap:2px"><strong>Point bow (before)</strong><span class="muted">The bow touches the string at a single point, as before. Every cycle is identical.</span><audio controls preload="none" src="clip-point.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Real bow (now)</strong><span class="muted">The hair touches along about a centimetre, gives a little, and its rosin grips a touch unevenly. Each cycle now differs slightly, as on the real violin.</span><audio controls preload="none" src="clip-wide.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Point bow, no body</strong><audio controls preload="none" src="clip-point-bare.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Real bow, no body</strong><audio controls preload="none" src="clip-wide-bare.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>G3, point bow</strong><audio controls preload="none" src="clip-g3p.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>G3, real bow</strong><audio controls preload="none" src="clip-g3.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>E5, point bow</strong><audio controls preload="none" src="clip-e5p.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>E5, real bow</strong><audio controls preload="none" src="clip-e5.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>A4, real bow, more pressure (1.0 N)</strong><span class="muted">More pressure brings in more grit, as it does on a real violin.</span><audio controls preload="none" src="clip-heavy.mp3" style="width:100%"></audio></div>
 </section>
 
 <section style="display:grid;gap:8px">
@@ -102,11 +118,25 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
 <script src="worklet.js"></script>
 <script>
 const P = [
-  { id: 'force', min: 0.02, max: 3.0, def: 0.6, unit: 'N', log: true },
+  { id: 'force', min: 0.02, max: 3.0, def: 0.5, unit: 'N', log: true },
   { id: 'speed', min: 0.02, max: 1.0, def: 0.2, unit: 'm/s', log: true },
   { id: 'contact', min: 0.03, max: 0.3, def: 0.12, unit: '', log: false },
 ];
-const BODY = 3;
+// Clip download through the viewer (plain download links do nothing in the artifact viewer).
+(async () => {
+  const downloads = window.claude && (await window.claude.use('downloads'));
+  if (!downloads) return;
+  $('dl').hidden = false;
+  $('dl').addEventListener('click', async () => {
+    try {
+      const data = await fetch('clips.zip').then((r) => r.arrayBuffer());
+      await downloads.save({ filename: 'bow-on-string-clips.zip', data });
+      $('dlStatus').textContent = 'Saved.';
+    } catch (e) { $('dlStatus').textContent = e && e.code === 'declined' ? '' : 'Could not save the clips here.'; }
+  });
+})();
+const BODY = 3, WIDE = 4;
+const sendWide = () => send({ type: 'param', index: WIDE, value: $('widebow').checked ? 1 : 0 });
 const $ = (id) => document.getElementById(id);
 let ctx = null, node = null, host = null, snap = null;
 const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
@@ -120,6 +150,7 @@ function applyBody() {
   const ir = Math.abs(bodyAmount - 1) < 0.005 ? bodyBase.slice() : shapeBody(bodyBase, bodyAmount, ctx.sampleRate);
   if (node) node.port.postMessage({ type: 'ir', ir }, [ir.buffer]); else if (host) host.handle({ type: 'ir', ir });
 }
+$('widebow').addEventListener('change', sendWide);
 $('body').value = Math.round(amountTo(1) * 1000);
 $('o-body').textContent = '100%';
 $('body').addEventListener('input', () => {
@@ -244,6 +275,7 @@ function classify(s) {
   if (!s || !s.bowing) return ['', 'Not bowing', 'Press a key.'];
   if (s.slips === 0) return ['warn', 'Starting, or stuck to the bow', 'If this stays, the string is locked to the hair: ease the pressure.'];
   if (Math.abs(s.slips - 1) < 0.06 && s.irregularity < 0.12) return ['good', 'Helmholtz motion', 'One stick and one slip every period: the clean, bright bowed tone.'];
+  if (Math.abs(s.slips - 1) < 0.35 && s.irregularity < 0.7) return ['warn', 'Helmholtz motion, a little rough', 'Mostly one slip per period, but the hairs let go unevenly: some grit, like a firm real bow. Ease the pressure for a purer tone.'];
   if (s.slips > 1.5 && s.irregularity < 0.3) return ['warn', 'Too light: ' + s.slips.toFixed(1) + ' slips per period', 'The string lets go more than once a period: a thin, hollow or octave-high tone. Add pressure or slow the bow.'];
   const heavy = val.force > 0.5 * (2 * 0.2 * val.speed / (val.contact * 0.5));
   return ['bad', heavy ? 'Too heavy: raucous' : 'Irregular', heavy ? 'The bow crushes the string and the slips come at random: a crunchy, scratchy tone. Ease the pressure or speed up.' : 'The slips are not settling. Try a little more pressure.'];
@@ -312,6 +344,7 @@ $('start').addEventListener('click', async () => {
     bodyBase = new Float32Array(Math.floor(ir.length / ratio));
     for (let i = 0; i < bodyBase.length; i++) { const x = i * ratio, k = Math.floor(x), f = x - k; bodyBase[i] = ((ir[k] || 0) * (1 - f) + (ir[k + 1] || 0) * f) * ratio; }
     applyBody();
+    sendWide();
     $('start').textContent = 'Sound on'; $('status').textContent = `Running at ${ctx.sampleRate / 1000} kHz`;
   } catch (err) { $('status').innerHTML = `<span class="err">Could not start: ${err.message}</span>`; $('start').disabled = false; }
 });

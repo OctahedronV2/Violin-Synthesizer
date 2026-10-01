@@ -2,8 +2,8 @@
 //
 // While a key is held the bow moves at a constant speed and presses with a
 // constant force at a fixed contact point. When the key is released the bow
-// lifts off and the string rings down on its own. No envelope, vibrato, noise,
-// body or room: only the stick-slip at the bow, to find Helmholtz motion.
+// lifts off and the string rings down on its own. No envelope, vibrato, added
+// noise or room: only the stick-slip at the bow, heard through a violin body.
 //
 // Freestanding like LiteCore.h (whose maths, delay line and friction it uses),
 // so the browser build and the plugin run the same code.
@@ -22,13 +22,15 @@ struct BowString
         pSpeed, // m/s
         pContact, // fraction of the string length from the bridge
         pBody, // 0: the bare string's force on the bridge, 1: heard through a violin body
+        pWideBow, // 0: the bow touches at one point, 1: along a centimetre of springy hair
         numParams
     };
     static constexpr ParamInfo kInfo[numParams] = {
-        { "force", "Bow", "Bow pressure", "N", 0.02, 3.0, 0.6 },
+        { "force", "Bow", "Bow pressure", "N", 0.02, 3.0, 0.5 },
         { "speed", "Bow", "Bow speed", "m/s", 0.02, 1.0, 0.2 },
         { "contact", "Bow", "Contact point", "of string", 0.03, 0.3, 0.12 },
         { "body", "Body", "Violin body", "", 0.0, 1.0, 1.0 },
+        { "widebow", "Bow", "Real bow", "", 0.0, 1.0, 1.0 }, // width, hair give and rosin grain
     };
 
     // The string: an A string, the same for every note (the finger only shortens it).
@@ -53,6 +55,27 @@ struct BowString
     static constexpr double torsionSpeed = 5.0, torsionImpedance = 3.0, torsionQ = 2.0;
     bool torsion = false; // tried 2026-10-01: no clearer Helmholtz motion here, so off
     Delay tBridge, tNut;
+    // Bow width: the hair ribbon touches the string along about a centimetre, not at
+    // one point. Modelled as bowPoints contact points spread over bowWidth metres,
+    // each with its own stick-slip and a share of the force. 1 point = the old point bow.
+    static constexpr int maxBowPoints = 4;
+    static constexpr double waveSpeed = 2 * 0.325 * 440.0; // A string, m/s
+    int bowPoints = 3; // when pWideBow is on
+    double bowWidth = 0.01;
+    Delay gapR[maxBowPoints - 1], gapL[maxBowPoints - 1]; // between neighbouring points, towards nut / towards bridge
+    bool stickK[maxBowPoints] = {};
+    // Rosin grain: the hairs and rosin give a force that is never quite steady.
+    // Each point's force wobbles by `grain` (relative, rms) with noise below grainHz.
+    double grain = 0.03, grainHz = 3000.0; // only with pWideBow
+    Rng rng;
+    double grainLp[maxBowPoints] = {};
+    // Bow hair give: the hair at each contact point is a spring (hairStiffness N/m for the
+    // whole ribbon) with damping hairDamping kg/s, so it can stretch a little with the string.
+    // 0 = rigid hair.
+    // Tuned 2026-10-01 so open A4 matches a real violin's cycle-to-cycle variation and
+    // noise between harmonics (Iowa recording) while keeping Helmholtz motion as easy to find.
+    double hairStiffness = 2000.0, hairDamping = 5.0;
+    double hairY[maxBowPoints] = {};
     double lp = 0.0, N = 100.0, g = 0.99, darkness = 0.25;
     bool stick = false, bowing = false;
     int heldNotes[16] = {}, numHeld = 0;
@@ -86,6 +109,10 @@ struct BowString
         nut.clear();
         tBridge.clear();
         tNut.clear();
+        for (auto& d : gapR)
+            d.clear();
+        for (auto& d : gapL)
+            d.clear();
         lp = 0.0;
         stick = bowing = false;
         numHeld = 0;
@@ -165,36 +192,93 @@ struct BowString
     double tick (double& bowPointVelocity)
     {
         const double beta = params[pContact];
+        const int K = torsion || params[pWideBow] < 0.5 ? 1 : m::clamp (bowPoints, 1, maxBowPoints);
+        // Spacing between contact points, one-way samples (at least 2 for the delay read).
+        const double gap = K > 1 ? m::max (2.0, bowWidth * fs / waveSpeed / (K - 1)) : 0.0;
         // With the twist, the bow moves 4/3 as fast so the string bends as far as without it.
         const double makeup = torsion ? (1.0 + torsionImpedance) / torsionImpedance : 1.0;
         const double vBow = bowing ? params[pSpeed] * makeup : 0.0;
-        const double force = bowing ? params[pForce] : 0.0;
-        const double inB = bridge.read (beta * N), inN = nut.read ((1.0 - beta) * N);
+        const double force = bowing ? params[pForce] / K : 0.0;
+        const double inB = bridge.read (beta * N), inN = nut.read ((1.0 - beta) * N - 2.0 * (K - 1) * gap);
         lp = (1 - darkness) * inB + darkness * lp;
         const double vinB = -g * lp, vinN = -inN;
-        double vh = vinB + vinN, z = impedance, tinB = 0.0, tinN = 0.0;
-        const double zt = impedance * torsionImpedance;
-        if (torsion)
-        {
-            // Both waves meet the bow: the surface moves with their sum, and the
-            // bow sees the two impedances in series.
-            const double nt = N / torsionSpeed, r = m::exp (-m::pi / torsionQ);
-            tinB = -r * tBridge.read (beta * nt);
-            tinN = -r * tNut.read ((1.0 - beta) * nt);
-            vh += tinB + tinN;
-            z = impedance * zt / (impedance + zt);
-        }
         const bool wasSticking = stick;
-        const double v = friction (vBow, vh, force, z, muS, muD, v0, stick);
-        const double f = 2.0 * z * (v - vh); // friction force on the string
-        const double dv = f / (2.0 * impedance);
-        bridge.push (vinN + dv);
-        nut.push (vinB + dv);
-        if (torsion)
+        if (K == 1 || torsion)
         {
-            const double dt = f / (2.0 * zt);
-            tBridge.push (tinN + dt);
-            tNut.push (tinB + dt);
+            double vh = vinB + vinN, z = impedance, tinB = 0.0, tinN = 0.0;
+            const double zt = impedance * torsionImpedance;
+            if (torsion)
+            {
+                // Both waves meet the bow: the surface moves with their sum, and the
+                // bow sees the two impedances in series.
+                const double nt = N / torsionSpeed, r = m::exp (-m::pi / torsionQ);
+                tinB = -r * tBridge.read (beta * nt);
+                tinN = -r * tNut.read ((1.0 - beta) * nt);
+                vh += tinB + tinN;
+                z = impedance * zt / (impedance + zt);
+            }
+            const double v = friction (vBow, vh, force * grainFactor (0), z, muS, muD, v0, stick);
+            const double f = 2.0 * z * (v - vh); // friction force on the string
+            const double dv = f / (2.0 * impedance);
+            bridge.push (vinN + dv);
+            nut.push (vinB + dv);
+            if (torsion)
+            {
+                const double dt = f / (2.0 * zt);
+                tBridge.push (tinN + dt);
+                tNut.push (tinB + dt);
+            }
+            bowPointVelocity = v;
+        }
+        else
+        {
+            // Waves arriving at each point: from the bridge side and from the nut side.
+            double fromB[maxBowPoints], fromN[maxBowPoints];
+            for (int k = 0; k < K; ++k)
+            {
+                fromB[k] = k == 0 ? vinB : gapR[k - 1].read (gap);
+                fromN[k] = k == K - 1 ? vinN : gapL[k].read (gap);
+            }
+            double vSum = 0.0;
+            for (int k = 0; k < K; ++k)
+            {
+                const double vh = fromB[k] + fromN[k];
+                double dv;
+                if (hairStiffness > 0.0)
+                {
+                    // The hair's damper sits in series with the string: the junction sees both.
+                    const double c = hairDamping / K, kk = hairStiffness / K;
+                    const double a = 1.0 / (1.0 / (2.0 * impedance) + 1.0 / c);
+                    const double vb = vBow - kk * hairY[k] / c;
+                    const double vv = friction (vb, vh, force * grainFactor (k), 0.5 * a, muS, muD, v0, stickK[k]);
+                    const double f = a * (vv - vh);
+                    dv = f / (2.0 * impedance);
+                    hairY[k] += -(f + kk * hairY[k]) / c / fs;
+                    if (! bowing)
+                        hairY[k] = 0.0;
+                }
+                else
+                    dv = friction (vBow, vh, force * grainFactor (k), impedance, muS, muD, v0, stickK[k]) - vh; // f / (2Z)
+                const double v = vh + dv;
+                const double toB = fromN[k] + dv, toN = fromB[k] + dv;
+                if (k == 0)
+                    bridge.push (toB);
+                else
+                    gapL[k - 1].push (toB);
+                if (k == K - 1)
+                    nut.push (toN);
+                else
+                    gapR[k].push (toN);
+                vSum += v;
+            }
+            // Across the bow width the points slip at slightly different moments; count the
+            // string as slipping while it moves backwards on average, and sticking again once
+            // it is back up near the bow's speed.
+            bowPointVelocity = vSum / K;
+            if (bowPointVelocity < 0.0)
+                stick = false;
+            else if (bowPointVelocity > 0.5 * vBow)
+                stick = true;
         }
 
         // Slip onsets: Helmholtz motion lets go of the bow once per period.
@@ -210,8 +294,17 @@ struct BowString
             ++slipCount;
             sinceSlip = 0.0;
         }
-        bowPointVelocity = v;
         return inB - vinB;
+    }
+
+    double grainFactor (int k)
+    {
+        if (grain <= 0.0 || params[pWideBow] < 0.5)
+            return 1.0;
+        // one-pole low-passed white noise, scaled to unit rms
+        const double a = m::exp (-2 * m::pi * grainHz / fs);
+        grainLp[k] = a * grainLp[k] + (1 - a) * rng.gauss();
+        return m::max (0.0, 1.0 + grain * grainLp[k] * m::sqrt ((1 + a) / (1 - a)));
     }
 
     void process (float* left, float* right, int n)
