@@ -180,6 +180,7 @@ struct String
     // diagnostics
     double vBowPt = 0.0;
     bool stickAll = false, slipped = false;
+    long slipTotal = 0;
     int stuckFor = 0;
     long samples = 0, lastSlip = 0;
     double fingerCents = 0.0;
@@ -510,6 +511,7 @@ struct String
         if (force > 0 && wasStick && ! stickAll && stuckFor >= 0.03 * period)
         {
             slipped = true;
+            ++slipTotal;
             // The player's ear: on a stopped note the finger creeps to cancel the pitch the bow
             // pulls (flattening). Open strings cannot be corrected.
             const double iv = (double) (samples - lastSlip);

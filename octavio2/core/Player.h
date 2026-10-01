@@ -33,7 +33,7 @@ struct PlayerParams
     double contactPP = 32.0, contactFF = 14.0;
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
-    double posLo = 0.30, posRange = 0.40;
+    double posLo = 0.50, posRange = 0.40;
     double accel = 8.0; // bow acceleration limit, m/s^2 (higher at ff)
     double accelFF = 20.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
@@ -52,6 +52,16 @@ struct PlayerParams
     double liftAfter = 0.35; // an idle string's finger lifts after this long, s
     double liftDamp = 0.25, liftDampTime = 0.03;
     double chordWindow = 0.03; // s
+    // loudness balance across strings: a violinist plays the low strings with less bow so a melody
+    // stays even. Fitted so mf notes match TinySOL's register balance (G -1.5, D -2.3, E -5.6 dB vs A)
+    double speedG = 0.43, speedD = 0.50, speedA = 1.0, speedE = 0.75;
+    // a string the bow lands on while already moving (crossing, double stop) gets a short extra
+    // force so it is captured into Helmholtz motion at once instead of multiple slipping
+    double crossBite = 0.5, crossBiteTime = 0.03;
+    double bite = 0.5; // extra force at the start of every stroke (Guettler: capture needs force)
+    // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
+    // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
+    double earUp = 0.25, earDown = 0.15, earMax = 2.5, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05;
     unsigned seed = 1;
 };
 
@@ -64,6 +74,9 @@ struct Player
     double fs = 48000.0; // control rate = output rate
     double t = 0.0;
     Rng rng;
+    bool log = false;
+    long capN = 0, capSlow = 0, capVerySlow = 0;
+    double capSum = 0.0;
 
     struct Held
     {
@@ -100,6 +113,11 @@ struct Player
         bool lifted = true;
         double dampEnv = 0.0;
         double fScale = 1.0;
+        double landAt = -10.0; // when the bow last landed on this string while moving
+        double ear = 1.0; // force correction from listening
+        long slipMark = 0;
+        bool captured = true;
+        double earT = 0.0;
     } st[4];
 
     double handSemis = 0.0; // hand position: semitones above the open string of the first finger
@@ -205,6 +223,7 @@ struct Player
             handSemis = semis;
         S.lifted = semis == 0;
         S.noteOn = t;
+        S.captured = false;
         // vibrato restarts on a new bow, continues (phase kept) over a slur in one position
         if (! slurred || shift)
             S.vibWidth = 0.0;
@@ -235,6 +254,8 @@ struct Player
             fingerNote (s, pitch, true);
             st[s].bowed = true;
             st[s].fScale = 1.0;
+            if (std::abs (v) > 0.01)
+                st[s].landAt = t;
         }
         else if (anyHeld)
         {
@@ -246,7 +267,8 @@ struct Player
             const bool cross = ! st[s].bowed;
             fingerNote (s, pitch, true);
             st[s].bowed = true;
-            (void) cross;
+            if (cross)
+                st[s].landAt = t;
             // a slur keeps the stroke's speed; velocity nudges the dynamics
             const double dNew = dynFromVel (vel127);
             d = 0.7 * d + 0.3 * dNew;
@@ -317,10 +339,13 @@ struct Player
             {
                 dir = -dir;
                 changing = true;
+                if (log)
+                    std::fprintf (stderr, "budget change %.3f\n", t);
             }
         }
         // bow velocity: accelerate towards the target with limited acceleration
-        vTarget = releasing ? v * 0.0 : dir * V;
+        const double balance[4] = { pp.speedG, pp.speedD, pp.speedA, pp.speedE };
+        vTarget = dir * V * balance[lastString];
         if (releasing)
         {
             // keep moving while the hair leaves the string, then slow down
@@ -389,13 +414,50 @@ struct Player
             double ft = 0.0;
             if (S.bowed && ! releasing)
             {
-                ft = forceFor (s, std::max (std::abs (v), 0.3 * V));
+                ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
+                ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
-                ft *= 1.0 + pp.biteFF * d * d * std::exp (-age / pp.biteTime);
+                ft *= 1.0 + (pp.bite + pp.biteFF * d * d) * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
                 if (sliding)
                     ft *= 1.0 - pp.shiftLighten;
+            }
+            // listening: every few ms compare the slip rate with the note's frequency
+            if (S.bowed && ! releasing && S.force > 0.0)
+            {
+                S.earT += dt;
+                if (S.earT >= pp.earWindow)
+                {
+                    const long n = vn->s[s].slipTotal - S.slipMark;
+                    const double spp = n / (S.earT * vn->s[s].f1);
+                    if (! S.captured && spp > 0.8 && spp < 1.25)
+                    {
+                        S.captured = true;
+                        const double c = t - std::max (S.noteOn, S.landAt);
+                        ++capN;
+                        capSum += c;
+                        capSlow += c > 0.05;
+                        capVerySlow += c > 0.1;
+                        if (log && c > 0.1)
+                            std::fprintf (stderr, "slow capture %.3f s at %.2f string %d pitch %.1f\n", c, t, s, S.target);
+                    }
+                    if (spp > 1.4)
+                        S.ear = std::min (pp.earMax, S.ear * (1.0 + pp.earUp));
+                    else if (spp < 0.4 && t - std::max (strokeStart, std::max (S.landAt, S.noteOn)) > pp.earWait)
+                        S.ear = std::max (pp.earMin, S.ear * (1.0 - pp.earDown));
+                    else
+                        S.ear += (1.0 - S.ear) * std::min (1.0, S.earT / pp.earRelax);
+                    S.slipMark = vn->s[s].slipTotal;
+                    S.earT = 0.0;
+                }
+                ft *= S.ear;
+            }
+            else
+            {
+                S.slipMark = vn->s[s].slipTotal;
+                S.earT = 0.0;
+                S.ear += (1.0 - S.ear) * std::min (1.0, dt / pp.earRelax);
             }
             S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
             const double tau = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);

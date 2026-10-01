@@ -77,9 +77,10 @@ int main (int argc, char** argv)
     O (releaseTime); O (crossTime); O (bowLength); O (shiftBase); O (shiftPerSemi);
     O (shiftLighten); O (vibDelay); O (vibBloom); O (vibWidthLo); O (vibWidthHi);
     O (vibRate); O (vibRateDyn); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
-    O (chordWindow);
+    O (chordWindow); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait);
 #undef O
     q.seed = seed;
+    player->log = opt ("log", 0) != 0;
     const double sr = 48000.0;
     player->init (*violin, sr);
 
@@ -141,9 +142,22 @@ int main (int argc, char** argv)
         }
         if (tt >= start)
             out.push_back ((float) dec.out());
+        static long win[4] = {};
+        for (int s = 0; s < 4; ++s)
+            win[s] += 0;
+        if (opt ("trace", 0) != 0 && i % 480 == 0 && tt >= opt ("traceFrom", 0) && tt < opt ("traceTo", 1e9))
+        {
+            std::fprintf (stderr, "%.2f v %+.3f", tt, player->v);
+            for (int s = 0; s < 4; ++s)
+                std::fprintf (stderr, " | %c F %.3f b%d p %.2f slips %ld", "GDAE"[s], fb[s], (int) player->st[s].bowed, player->st[s].pitch, slipCount[s] - win[s]);
+            for (int s = 0; s < 4; ++s)
+                win[s] = slipCount[s];
+            std::fprintf (stderr, "\n");
+        }
     }
     const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
     std::fprintf (stderr, "rendered %.1f s in %.1f s (%.1fx realtime)\n", length, secs, length / secs);
+    std::fprintf (stderr, "capture: %ld notes, mean %.1f ms, %.1f%% over 50 ms, %.1f%% over 100 ms\n", player->capN, 1000 * player->capSum / std::max (1L, player->capN), 100.0 * player->capSlow / std::max (1L, player->capN), 100.0 * player->capVerySlow / std::max (1L, player->capN));
     if (slips)
         std::fprintf (stderr, "slips G %ld D %ld A %ld E %ld\n", slipCount[0], slipCount[1], slipCount[2], slipCount[3]);
     writeWav (argv[2], out, (int) sr);
