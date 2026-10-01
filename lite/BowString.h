@@ -21,25 +21,39 @@ struct BowString
         pForce, // N
         pSpeed, // m/s
         pContact, // fraction of the string length from the bridge
+        pBody, // 0: the bare string's force on the bridge, 1: heard through a violin body
         numParams
     };
     static constexpr ParamInfo kInfo[numParams] = {
         { "force", "Bow", "Bow pressure", "N", 0.02, 3.0, 0.6 },
         { "speed", "Bow", "Bow speed", "m/s", 0.02, 1.0, 0.2 },
         { "contact", "Bow", "Contact point", "of string", 0.03, 0.3, 0.12 },
+        { "body", "Body", "Violin body", "", 0.0, 1.0, 1.0 },
     };
 
     // The string: an A string, the same for every note (the finger only shortens it).
     static constexpr double impedance = 0.2; // kg/s
     static constexpr double muS = 0.8, muD = 0.3, v0 = 0.1; // rosin friction curve
-    static constexpr double ringSeconds = 2.5; // decay of the low harmonics
-    static constexpr double darkness = 0.25; // loss pole: how fast upper harmonics die
+    // String losses, as decay times: the low harmonics ring ringSeconds, and at
+    // ringHighHz they die in ringHighSeconds (measured violin strings: about 3 s
+    // and 0.25 s at 4 kHz). Set in Hz, so the tone is the same at any sample rate.
+    static constexpr double ringSeconds = 2.5;
+    static constexpr double ringHighSeconds = 0.25, ringHighHz = 4000.0;
     static constexpr double outputScale = 0.2;
 
     double params[numParams];
     double hostRate = 48000.0, fs = 96000.0;
     Delay bridge, nut;
-    double lp = 0.0, N = 100.0, g = 0.99;
+    Body body; // impulse response loaded by the host into body.irBuf, then loadBody()
+    double bodyGain = 1.0;
+    // Twisting (torsional) waves: the bow drags the string's surface, which both
+    // bends and twists the string. The twist travels 5x faster, carries a share
+    // of the motion and dies within a couple of its own periods, which damps the
+    // ripples that a point bow otherwise traps between itself and the bridge.
+    static constexpr double torsionSpeed = 5.0, torsionImpedance = 3.0, torsionQ = 2.0;
+    bool torsion = false; // tried 2026-10-01: no clearer Helmholtz motion here, so off
+    Delay tBridge, tNut;
+    double lp = 0.0, N = 100.0, g = 0.99, darkness = 0.25;
     bool stick = false, bowing = false;
     int heldNotes[16] = {}, numHeld = 0;
 
@@ -70,10 +84,24 @@ struct BowString
         }
         bridge.clear();
         nut.clear();
+        tBridge.clear();
+        tNut.clear();
         lp = 0.0;
         stick = bowing = false;
         numHeld = 0;
         setNote (69);
+    }
+
+    // The body response is in body.irBuf[0..length) at the host rate. Its level is
+    // set so a note sounds about as loud with the body as without.
+    void loadBody (int length)
+    {
+        body.initTables();
+        body.load (length);
+        double e = 0.0;
+        for (int i = 0; i < body.irLength; ++i)
+            e += (double) body.irBuf[i] * body.irBuf[i];
+        bodyGain = e > 0.0 ? 0.35 / m::sqrt (e) : 1.0;
     }
 
     void setParam (int i, double v)
@@ -86,6 +114,13 @@ struct BowString
     {
         const double f0 = m::midiHz (note);
         g = m::pow (10.0, -3.0 / (ringSeconds * f0));
+        {
+            // one-pole loss filter: gain g at DC, and the ringHigh decay at ringHighHz
+            const double r = m::pow (10.0, -3.0 / f0 * (1.0 / ringHighSeconds - 1.0 / ringSeconds));
+            const double cw = m::cos (2 * m::pi * ringHighHz / fs), r2 = r * r;
+            const double A = 1.0 - r2, B = 1.0 - r2 * cw;
+            darkness = A <= 1.0e-12 ? 0.0 : (B - m::sqrt (m::max (B * B - A * A, 0.0))) / A;
+        }
         const double w = 2 * m::pi * f0 / fs;
         const double pd = m::atan2 (darkness * m::sin (w), 1.0 - darkness * m::cos (w)) / w;
         N = fs / f0 - pd; // round trip, less the loss filter's own delay
@@ -130,17 +165,37 @@ struct BowString
     double tick (double& bowPointVelocity)
     {
         const double beta = params[pContact];
-        const double vBow = bowing ? params[pSpeed] : 0.0;
+        // With the twist, the bow moves 4/3 as fast so the string bends as far as without it.
+        const double makeup = torsion ? (1.0 + torsionImpedance) / torsionImpedance : 1.0;
+        const double vBow = bowing ? params[pSpeed] * makeup : 0.0;
         const double force = bowing ? params[pForce] : 0.0;
         const double inB = bridge.read (beta * N), inN = nut.read ((1.0 - beta) * N);
         lp = (1 - darkness) * inB + darkness * lp;
         const double vinB = -g * lp, vinN = -inN;
-        const double vh = vinB + vinN;
+        double vh = vinB + vinN, z = impedance, tinB = 0.0, tinN = 0.0;
+        const double zt = impedance * torsionImpedance;
+        if (torsion)
+        {
+            // Both waves meet the bow: the surface moves with their sum, and the
+            // bow sees the two impedances in series.
+            const double nt = N / torsionSpeed, r = m::exp (-m::pi / torsionQ);
+            tinB = -r * tBridge.read (beta * nt);
+            tinN = -r * tNut.read ((1.0 - beta) * nt);
+            vh += tinB + tinN;
+            z = impedance * zt / (impedance + zt);
+        }
         const bool wasSticking = stick;
-        const double v = friction (vBow, vh, force, impedance, muS, muD, v0, stick);
-        const double dv = v - vh;
+        const double v = friction (vBow, vh, force, z, muS, muD, v0, stick);
+        const double f = 2.0 * z * (v - vh); // friction force on the string
+        const double dv = f / (2.0 * impedance);
         bridge.push (vinN + dv);
         nut.push (vinB + dv);
+        if (torsion)
+        {
+            const double dt = f / (2.0 * zt);
+            tBridge.push (tinN + dt);
+            tNut.push (tinB + dt);
+        }
 
         // Slip onsets: Helmholtz motion lets go of the bow once per period.
         sinceSlip += 1.0;
@@ -176,7 +231,8 @@ struct BowString
             dcX = y;
             scope[scopePos] = (float) vel;
             scopePos = (scopePos + 1) % scopeSize;
-            left[i] = right[i] = (float) (outputScale * dcY);
+            const float bodied = (float) (bodyGain * body.process ((float) dcY));
+            left[i] = right[i] = (float) (outputScale * (params[pBody] > 0.5 ? bodied : dcY));
         }
     }
 

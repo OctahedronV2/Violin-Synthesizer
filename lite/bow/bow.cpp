@@ -31,6 +31,9 @@ float scopeCopy[lite::BowString::scopeSize];
 #define EXPORT(name) extern "C" __attribute__ ((export_name (#name)))
 
 EXPORT (bs_prepare) void bs_prepare (double sr) { bs.prepare (sr); }
+EXPORT (bs_body_buffer) float* bs_body_buffer() { return bs.body.irBuf; }
+EXPORT (bs_body_capacity) int bs_body_capacity() { return lite::Body::maxParts * lite::Body::B; }
+EXPORT (bs_body_load) void bs_body_load (int n) { bs.loadBody (n); }
 EXPORT (bs_set) void bs_set (int i, double v) { bs.setParam (i, v); }
 EXPORT (bs_get) double bs_get (int i) { return bs.params[i]; }
 EXPORT (bs_note_on) void bs_note_on (int n) { bs.noteOn (n); }

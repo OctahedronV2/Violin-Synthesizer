@@ -1,11 +1,20 @@
 // Runs the bare bowed string (bow.wasm) in an AudioWorklet. The page can also
 // load this file as a plain script and use BowHost with a ScriptProcessorNode.
 class BowHost {
-  async init(wasmBytes, sampleRate) {
+  async init(wasmBytes, ir, irRate, sampleRate) {
     const { instance } = await WebAssembly.instantiate(wasmBytes, {});
     const e = (this.e = instance.exports);
     e.__wasm_call_ctors();
     e.bs_prepare(sampleRate);
+    // The body response is measured at irRate; resample it to the context's rate.
+    const ratio = irRate / sampleRate;
+    const n = Math.min(Math.floor(ir.length / ratio), e.bs_body_capacity());
+    const buf = new Float32Array(e.memory.buffer, e.bs_body_buffer(), n);
+    for (let i = 0; i < n; i++) {
+      const x = i * ratio, k = Math.floor(x), f = x - k;
+      buf[i] = ((ir[k] || 0) * (1 - f) + (ir[k + 1] || 0) * f) * ratio;
+    }
+    e.bs_body_load(n);
     this.frames = 0;
   }
   handle(m) {
@@ -43,7 +52,7 @@ if (typeof registerProcessor === 'function') {
       this.next = 0;
       this.port.onmessage = async (ev) => {
         if (ev.data.type === 'init') {
-          try { await this.host.init(ev.data.wasm, sampleRate); this.ready = true; this.port.postMessage({ type: 'ready' }); }
+          try { await this.host.init(ev.data.wasm, ev.data.ir, ev.data.irRate, sampleRate); this.ready = true; this.port.postMessage({ type: 'ready' }); }
           catch (err) { this.port.postMessage({ type: 'error', message: String(err) }); }
         } else this.host.handle(ev.data);
       };

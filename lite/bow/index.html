@@ -50,7 +50,7 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
 <div class="wrap">
 <header style="display:grid;gap:6px">
   <h1>Bow on String</h1>
-  <p class="muted">One violin string and a bow, nothing else. While a key is held, the bow moves at a constant speed with constant pressure. Find the settings where the string settles into Helmholtz motion.</p>
+  <p class="muted">One violin string and a bow, heard through a violin body (or bare). While a key is held, the bow moves at a constant speed with constant pressure. Find the settings where the string settles into Helmholtz motion.</p>
 </header>
 
 <div class="row">
@@ -84,6 +84,13 @@ label.chk{display:inline-flex;gap:6px;align-items:center}
     <input type="range" id="contact" min="0" max="1000">
     <div class="tip">Distance from the bridge, as a share of the string. Nearer the bridge is brighter and needs more pressure.</div>
   </div>
+  <label class="chk"><input type="checkbox" id="body" checked> Violin body (off: the bare string's pull on the bridge, a buzzy sawtooth)</label>
+</section>
+
+<section style="display:grid;gap:8px">
+  <h2 style="font-size:17px;margin:0">Real violin for comparison</h2>
+  <p class="muted" style="margin:0">The open A string (A4) of a real violin, bowed and recorded with no room (University of Iowa Musical Instrument Samples). The body above is measured from this same violin, so play A4 with the body on to compare.</p>
+  <audio controls preload="none" src="real-a4.mp3" style="width:100%"></audio>
 </section>
 
 </div>
@@ -95,6 +102,8 @@ const P = [
   { id: 'speed', min: 0.02, max: 1.0, def: 0.2, unit: 'm/s', log: true },
   { id: 'contact', min: 0.03, max: 0.3, def: 0.12, unit: '', log: false },
 ];
+const BODY = 3;
+$('body').addEventListener('change', () => send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 }));
 const $ = (id) => document.getElementById(id);
 let ctx = null, node = null, host = null, snap = null;
 const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
@@ -193,22 +202,32 @@ $('start').addEventListener('click', async () => {
   try {
     ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     await ctx.resume();
-    const wasm = await fetch('bow.wasm').then((r) => { if (!r.ok) throw new Error('bow.wasm ' + r.status); return r.arrayBuffer(); });
+    const get = (f) => fetch(f).then((r) => { if (!r.ok) throw new Error(f + ' ' + r.status); return r.arrayBuffer(); });
+    const [wasm, irBuf] = await Promise.all([get('bow.wasm'), get('iowa.wav')]);
+    // iowa.wav: 32-bit float mono
+    const dv = new DataView(irBuf); let p = 12, ir = null, irRate = 48000;
+    while (p + 8 <= dv.byteLength) {
+      const id = String.fromCharCode(dv.getUint8(p), dv.getUint8(p + 1), dv.getUint8(p + 2), dv.getUint8(p + 3)), len = dv.getUint32(p + 4, true);
+      if (id === 'fmt ') irRate = dv.getUint32(p + 12, true);
+      if (id === 'data') { ir = new Float32Array(irBuf.slice(p + 8, p + 8 + len)); break; }
+      p += 8 + len + (len & 1);
+    }
     if (ctx.audioWorklet) {
       await ctx.audioWorklet.addModule('worklet.js');
       node = new AudioWorkletNode(ctx, 'bow', { numberOfInputs: 0, outputChannelCount: [2] });
       await new Promise((res, rej) => {
         node.port.onmessage = (ev) => { const m = ev.data; if (m.type === 'ready') res(); else if (m.type === 'error') rej(new Error(m.message)); else if (m.type === 'scope') snap = m; };
-        node.port.postMessage({ type: 'init', wasm });
+        node.port.postMessage({ type: 'init', wasm, ir, irRate });
       });
       node.connect(ctx.destination);
     } else {
-      host = new BowHost(); await host.init(wasm, ctx.sampleRate);
+      host = new BowHost(); await host.init(wasm, ir, irRate, ctx.sampleRate);
       const sp = ctx.createScriptProcessor(1024, 0, 2);
       sp.onaudioprocess = (e) => { host.render(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1), e.outputBuffer.length); snap = host.snapshot(); };
       sp.connect(ctx.destination);
     }
     P.forEach((p, i) => send({ type: 'param', index: i, value: val[p.id] }));
+    send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 });
     $('start').textContent = 'Sound on'; $('status').textContent = `Running at ${ctx.sampleRate / 1000} kHz`;
   } catch (err) { $('status').innerHTML = `<span class="err">Could not start: ${err.message}</span>`; $('start').disabled = false; }
 });
