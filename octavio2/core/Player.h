@@ -41,7 +41,10 @@ struct PlayerParams
     // detache in quick passages (the previous note started less than shapeIOI s before): each
     // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
     // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
-    double shapeIOI = 0.0, strokeSus = 0.4, strokeTau = 0.12; // off: it didn't deepen the dips
+    double shapeIOI = 0.0, strokeSus = 0.4, strokeTau = 0.12;
+    // ... and the bow force is released after the attack (Guettler's martele/detache: high force
+    // to start, then a diminuendo by releasing force while the speed holds) to forceSus of it
+    double forceSus = 1.0, forceTau = 0.08, forceHold = 0.03;
     double dynGlide = 0.04; // s: speed, contact and force move to a new dynamic this smoothly
     // register: dB of extra bow speed by pitch (G3 .. E7 every 6 semitones), so a velocity plays
     // about equally loud anywhere on the instrument (fitted on the dry render)
@@ -51,13 +54,17 @@ struct PlayerParams
     double contactFollow = 0.0; // contact distance scales with the stopped length ^ this
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
-    double posLo = 0.45, posRange = 0.40;
+    double posLo = 0.38, posRange = 0.40;
     double accel = 8.0; // bow acceleration limit, m/s^2 (higher at ff)
     double accelFF = 20.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
     double changeDip = 0.25; // force reduction at a bow change
     double releaseTime = 0.05; // lift-off force time constant, s
+    // a short separate note (held less than stopBelow s) ends with the bow stopping on the string
+    // (decelerating at stopAccel m/s^2, force x stopForce) for stopTime s before it lifts: the
+    // stopped hair damps the string, so quick detache notes end crisply instead of ringing on
+    double stopBelow = 0.35, stopAccel = 25.0, stopForce = 0.6, stopTime = 0.04;
     double crossTime = 0.02; // string crossing: force moves to the new string, s
     double bowLength = 0.62; // hair, m
     // left hand
@@ -75,12 +82,12 @@ struct PlayerParams
     double speedG = 0.43, speedD = 0.50, speedA = 1.0, speedE = 0.75;
     // a string the bow lands on while already moving (crossing, double stop) gets a short extra
     // force so it is captured into Helmholtz motion at once instead of multiple slipping
-    double crossBite = 0.8, crossBiteTime = 0.05;
+    double crossBite = 0.3, crossBiteTime = 0.05;
     double noiseStart = 0.3, noiseRise = 0.08; // slip hiss while a note starts, then full
-    double bite = 0.25; // extra force at the start of every stroke (Guettler: capture needs force)
+    double bite = 0.1; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
-    double earUp = 0.25, earDown = 0.15, earMax = 2.5, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
+    double earUp = 0.25, earDown = 0.15, earMax = 1.3, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
 };
 
@@ -112,7 +119,8 @@ struct Player
     double V = 0.0; // stroke speed magnitude
     double hair = 0.0; // hair position from the frog, m
     double accel = 8.0;
-    bool changing = false, releasing = false;
+    bool changing = false, releasing = false, stopping = false;
+    double stopT = 0.0;
     double strokeStart = -1.0, lastStop = -10.0;
     double d = 0.6; // dynamics of the current stroke
     double dTarget = 0.6, noteNow = 69.0;
@@ -358,6 +366,7 @@ struct Player
                 dir = -dir;
             changing = bowMoving;
             releasing = false;
+            stopping = false;
             strokeStart = t;
             fingerNote (s, pitch, false);
             st[s].bowed = true;
@@ -389,7 +398,13 @@ struct Player
             return;
         if (nHeld == 0)
         {
-            releasing = true;
+            if (pp.stopBelow > 0 && t - strokeStart < pp.stopBelow)
+            {
+                stopping = true;
+                stopT = t;
+            }
+            else
+                releasing = true;
             lastStop = t;
         }
         else if (str >= 0)
@@ -432,7 +447,16 @@ struct Player
                 off = off && S.force < 0.02 * S.forceTarget + 1e-4;
             vTarget = off ? 0.0 : v;
         }
-        const double a = accel * dt;
+        if (stopping)
+        {
+            vTarget = 0.0;
+            if (t - stopT > pp.stopTime)
+            {
+                stopping = false;
+                releasing = true;
+            }
+        }
+        const double a = (stopping ? pp.stopAccel : accel) * dt;
         v += std::clamp (vTarget - v, -a, a);
         if (changing && std::abs (v - vTarget) < 1e-4)
             changing = false;
@@ -504,6 +528,10 @@ struct Player
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
                 if (sliding)
                     ft *= 1.0 - pp.shiftLighten;
+                if (stopping)
+                    ft *= pp.stopForce;
+                if (shaped && age > pp.forceHold)
+                    ft *= pp.forceSus + (1.0 - pp.forceSus) * std::exp (-(age - pp.forceHold) / pp.forceTau);
             }
             // listening: every few ms compare the slip rate with the note's frequency
             if (S.bowed && ! releasing && S.force > 0.0)
