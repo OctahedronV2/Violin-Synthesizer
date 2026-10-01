@@ -99,6 +99,8 @@ int main (int argc, char** argv)
         ev.push_back ({ n.off, 0, n.note, 0 });
         tEnd = std::max (tEnd, n.off);
     }
+    for (auto& c : ccs)
+        ev.push_back ({ c.t, 2, c.cc, c.value * 127.0 });
     std::stable_sort (ev.begin(), ev.end(), [] (const Ev& a, const Ev& b) { return a.t < b.t || (a.t == b.t && a.type < b.type); });
 
     const double start = opt ("start", 0.0);
@@ -119,7 +121,9 @@ int main (int argc, char** argv)
         const double tt = i / sr;
         while (e < ev.size() && ev[e].t <= tt)
         {
-            if (ev[e].type == 1)
+            if (ev[e].type == 2)
+                player->controller (ev[e].pitch, ev[e].vel);
+            else if (ev[e].type == 1)
                 player->noteOn (ev[e].pitch, ev[e].vel);
             else
                 player->noteOff (ev[e].pitch);

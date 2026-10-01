@@ -95,7 +95,13 @@ def main():
     br = mono(os.path.join(DATA, 'body-directional-right-48k.wav'))
     n = len(F)
     diffuse = ss.fftconvolve(F, body)[:n]
-    dry = rms_norm(diffuse)
+    # --gain g: a fixed gain instead of the -20 dB RMS level, so short renders of the start of a
+    # piece come out at the same level as the whole piece (fitnotes.py)
+    if '--gain' in sys.argv:
+        dry = diffuse * float(sys.argv[sys.argv.index('--gain') + 1])
+    else:
+        dry = rms_norm(diffuse)
+        print('gain %.6g' % (10 ** (-20 / 20) / max(np.sqrt(np.mean(diffuse ** 2)), 1e-12)))
     sf.write(base + '.dry.wav', dry.astype(np.float32), FS)
     direct = np.stack([ss.fftconvolve(F, bl)[:n], ss.fftconvolve(F, br)[:n]], 1)
     if hall == 'none':

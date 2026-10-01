@@ -1,6 +1,14 @@
 """Note-by-note, stroke-by-stroke comparison of a render with the real recording it copies.
 
-    python3 notecompare.py real.flac render.dry.wav played.mid [player.log] --out notes.json [--upto s]
+    python3 notecompare.py real.flac render.dry.wav played.mid [player.log] --out notes.json [--upto s] [--realmid t.mid] [--refs r o] [--played p.json]
+
+--realmid: the transcription the real recording is measured against, when played.mid has had its
+notes moved (fitnotes.py); both files must hold the same notes in the same order.
+--played: our note times as JSON ([{on, off, pitch}], fitnotes.py), for when played.mid joins
+notes that the transcription has apart.
+--refs: fixed levels (dB) to measure the real and our recording against, instead of each one's
+98th-percentile level, so a short render reads the same levels as the whole piece. The levels
+used are saved in the JSON as refs.
 
 The MIDI is what the render played: the transcription of the real recording, so each MIDI note
 is one real note. For every note, in both recordings:
@@ -34,7 +42,7 @@ FR = vs.FR
 W = 2048  # YIN window; its frames are centred W/2 after their index time
 
 
-def analyse(path, upto):
+def analyse(path, upto, ref=None):
     x = vs.load(path)
     if upto:
         x = x[:int(upto * FS)]
@@ -50,8 +58,9 @@ def analyse(path, upto):
         a, b = max(0, i * HOP - 220), min(len(x), i * HOP + 220)
         lv[i] = 10 * np.log10(np.mean(x[a:b] ** 2) + 1e-14)
     m = min(len(f0), n)
-    lv = lv[:m] - np.percentile(lv[:m], 98)
-    return dict(f0=f0[:m], ap=ap[:m], lv=np.maximum(lv, -60.0))
+    ref = float(np.percentile(lv[:m], 98)) if ref is None else ref
+    lv = lv[:m] - ref
+    return dict(f0=f0[:m], ap=ap[:m], lv=np.maximum(lv, -60.0), ref=ref)
 
 
 def read_notes(mid):
@@ -118,7 +127,9 @@ def measure(A, k, nxt_on, prev, a4):
     off = (f0[seg2] > 0) & ~near[seg2] & (lv[seg2] > -40)
     r['wrongBy'] = round(float(np.nanmedian(c[seg2][off])) / 100, 1) if off.sum() >= 3 else None
     # level shape
-    a = max(0, i_on - 4)
+    # the peak is looked for from the note's start (or, once it speaks, from there), so a louder
+    # note ringing before it does not count
+    a = max(0, i_on - 4, (speak or 0) - 2)
     w = lv[a:hi]
     pk = int(np.argmax(w)) + a
     r['peak'] = round(float(lv[pk]), 1)
@@ -137,7 +148,9 @@ def measure(A, k, nxt_on, prev, a4):
         j = int(np.argmax(hl))
         r['gap'], r['gapAt'] = round(float(hl[j]), 1), round((g0 + j) / FR - k['on'], 3)
     # level at 25, 50, 75 and 100% of the held part, re the peak
-    r['contour'] = [round(float(lv[min(n - 1, lo + int(q * (hi - lo)) - (1 if q == 1 else 0))] - lv[pk]), 1) for q in (0.25, 0.5, 0.75, 1.0)]
+    # (each the median of 25 ms around the point, so one frame's flicker does not count)
+    at = lambda j: float(np.median(lv[max(lo, j - 2):min(hi, j + 3)])) if hi > lo else float(lv[j])
+    r['contour'] = [round(at(min(n - 1, lo + int(q * (hi - lo)) - (1 if q == 1 else 0))) - float(lv[pk]), 1) for q in (0.25, 0.5, 0.75, 1.0)]
     # separation from the previous note
     r['sep'] = None
     if prev is not None and k['on'] - prev['off'] < 0.4:
@@ -227,26 +240,40 @@ def main():
     args = [a for a in sys.argv[1:]]
     out = args[args.index('--out') + 1] if '--out' in args else 'notes.json'
     upto = float(args[args.index('--upto') + 1]) if '--upto' in args else None
-    pos = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or not args[i - 1].startswith('--'))]
+    pos = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or not args[i - 1].startswith('--'))
+           and (i < 2 or args[i - 2] != '--refs')]
     real, ours, mid = pos[:3]
     logp = pos[3] if len(pos) > 3 else None
-    R, O = analyse(real, upto), analyse(ours, upto)
+    refs = [float(v) for v in args[args.index('--refs') + 1:args.index('--refs') + 3]] if '--refs' in args else [None, None]
+    R, O = analyse(real, upto, refs[0]), analyse(ours, upto, refs[1])
     v = R['f0'] > 0
     a4r = 440 * 2 ** (np.median(vs.midi_of(R['f0'][v]) - np.round(vs.midi_of(R['f0'][v]))) / 12)
     notes = [k for k in read_notes(mid) if upto is None or k['on'] < upto - 0.1]
+    if '--played' in args:
+        notes = [dict(k, chord=False) for k in json.load(open(args[args.index('--played') + 1]))]
+        for i in range(1, len(notes)):
+            if abs(notes[i]['on'] - notes[i - 1]['on']) < 0.02:
+                notes[i]['chord'] = notes[i - 1]['chord'] = True
+        notes = [k for k in notes if upto is None or k['on'] < upto - 0.1]
+    rnotes = notes
+    if '--realmid' in args:
+        rnotes = read_notes(args[args.index('--realmid') + 1])[:len(notes)]
+        assert len(rnotes) == len(notes) and all(a['pitch'] == b['pitch'] for a, b in zip(rnotes, notes))
     log = read_log(logp)
     res = []
-    for i, k in enumerate(notes):
-        nxt = next((o['on'] for o in notes[i + 1:] if o['on'] > k['on'] + 0.02), k['off'] + 0.3)
-        prev = next((o for o in reversed(notes[:i]) if o['on'] < k['on'] - 0.02), None)
+    for i, (k, ko) in enumerate(zip(rnotes, notes)):
+        nxt = next((o['on'] for o in rnotes[i + 1:] if o['on'] > k['on'] + 0.02), k['off'] + 0.3)
+        prev = next((o for o in reversed(rnotes[:i]) if o['on'] < k['on'] - 0.02), None)
+        nxto = next((o['on'] for o in notes[i + 1:] if o['on'] > ko['on'] + 0.02), ko['off'] + 0.3)
+        prevo = next((o for o in reversed(notes[:i]) if o['on'] < ko['on'] - 0.02), None)
         mr = measure(R, k, nxt, prev, a4r)
-        mo = measure(O, k, nxt, prev, 440.0)
-        lg = min(log, key=lambda e: abs(e['t'] - k['on']) + (0 if e['pitch'] == k['pitch'] else 1)) if log else None
-        if lg is not None and abs(lg['t'] - k['on']) > 0.03:
+        mo = measure(O, ko, nxto, prevo, 440.0)
+        lg = min(log, key=lambda e: abs(e['t'] - ko['on']) + (0 if e['pitch'] == ko['pitch'] else 1)) if log else None
+        if lg is not None and abs(lg['t'] - ko['on']) > 0.03:
             lg = None
         rk = stroke_of(mr, k, prev)
-        midi_slur = prev is not None and prev['off'] >= k['on'] - 0.001
-        ok = lg['kind'] if lg else stroke_of(mo, k, prev)
+        midi_slur = prevo is not None and prevo['off'] >= ko['on'] - 0.001
+        ok = lg['kind'] if lg else stroke_of(mo, ko, prevo)
         iss, score = diagnose(k, mr, mo, ok, rk, lg, midi_slur)
         a, b = k['on'] - 0.15, min(k['off'], nxt) + 0.15
         res.append(dict(i=i, on=round(k['on'], 3), off=round(k['off'], 3), pitch=k['pitch'], vel=k['vel'], chord=k['chord'],
@@ -265,7 +292,7 @@ def main():
             if r[who]['stroke'] == 'stroke' or j == 0:
                 n_ += 1
             r[who]['strokeNo'] = n_
-    json.dump(dict(a4real=round(a4r, 1), hop=2 / FR, notes=res), open(out, 'w'))
+    json.dump(dict(a4real=round(a4r, 1), refs=[round(R['ref'], 2), round(O['ref'], 2)], hop=2 / FR, notes=res), open(out, 'w'))
     sc = np.array([r['score'] for r in res])
     print('%d notes, mean score %.0f, %d with issues, %d below 60' % (len(res), sc.mean(), sum(1 for r in res if r['issues']), (sc < 60).sum()))
     kinds = {}

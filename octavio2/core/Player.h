@@ -139,6 +139,7 @@ struct Player
     double lastOn = -10.0;
     int shortRun = 0; // consecutive note starts less than quickIOI apart
     bool shaped = false, quick = false;
+    double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0;
     // the stroke shape in use (set at each new stroke from the normal or the quick settings)
     double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
@@ -237,7 +238,7 @@ struct Player
         const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
-        const double p = std::min (0.95, pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0));
+        const double p = std::clamp (pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
         return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
     }
 
@@ -409,6 +410,24 @@ struct Player
             held[nHeld++] = { pitch, vel127, t, s };
     }
 
+    // CC11 expression: a level trim on top of the notes' dynamics, 100 = as played, 0.4 dB per step
+    // (bow speed scales the string's amplitude, and force follows the speed). CC 21: tuning of the
+    // sounding note in cents, 64 = none, 1 cent per step (per-note intonation from a score editor).
+    // CC 22: bow pressure, 64 = as played, moves the force within the playable window by up to
+    // +-0.3 of its width. CC 23: extra force at the stroke's start for a quicker catch, 64 = none,
+    // 127 = double the force at the very start.
+    void controller (int cc, double v127)
+    {
+        if (cc == 11)
+            exprTarget = std::pow (10.0, (v127 - 100.0) * 0.4 / 20.0);
+        else if (cc == 21)
+            centsTrim = v127 - 64.0;
+        else if (cc == 22)
+            pressTrim = (v127 - 64.0) / 64.0 * 0.3;
+        else if (cc == 23)
+            biteTrim = std::max (0.0, v127 - 64.0) / 64.0;
+    }
+
     void noteOff (int pitch)
     {
         int k = 0;
@@ -471,7 +490,8 @@ struct Player
         double shape = 1.0;
         if (shaped)
             shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
-        vTarget = dir * V * shape * balance[lastString];
+        expr += (exprTarget - expr) * std::min (1.0, dt / 0.015);
+        vTarget = dir * V * shape * balance[lastString] * expr;
         if (releasing)
         {
             // keep moving while the hair leaves the string, then slow down
@@ -499,7 +519,7 @@ struct Player
         {
             Str& S = st[s];
             // left hand: slide, vibrato
-            double pitch = S.target;
+            double pitch = S.target + (S.bowed ? centsTrim / 100.0 : 0.0);
             if (S.slideT0 >= 0.0)
             {
                 const double u = (t - S.slideT0) / S.slideDur;
@@ -560,7 +580,7 @@ struct Player
                 ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
-                ft *= 1.0 + (pp.bite + pp.biteFF * d * d) * std::exp (-age / pp.biteTime);
+                ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim) * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
                 if (sliding)
