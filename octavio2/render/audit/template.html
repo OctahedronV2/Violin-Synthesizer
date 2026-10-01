@@ -36,8 +36,9 @@ h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color:
 .stat { display: grid; }
 .stat .v { font-family: var(--mono); font-size: 1.3rem; }
 .stat .k { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.roll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.roll { position: relative; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
 .roll canvas { display: block; cursor: pointer; }
+.head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; }
 .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .78rem; color: var(--muted); margin-top: 8px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
@@ -87,7 +88,14 @@ td.n { font-family: var(--mono); }
 
   <section class="panel">
     <h2>Score: real strokes above, ours below. Colour is the note's score</h2>
-    <div class="roll" id="roll"><canvas id="cv" tabindex="0" aria-label="Note timeline"></canvas></div>
+    <div class="btns">
+      <button class="b real" id="wr" type="button">Play whole Finale: real</button>
+      <button class="b ours" id="wo" type="button">Play whole Finale: ours</button>
+      <button class="b" id="wsw" type="button">Switch real ⇄ ours</button>
+      <button class="b" id="wstop" type="button">Stop</button>
+      <span class="small" id="wstat" aria-live="polite" style="align-self:center"></span>
+    </div>
+    <div class="roll" id="roll"><canvas id="cv" tabindex="0" aria-label="Note timeline"></canvas><div class="head" id="head" hidden></div></div>
     <div class="legend">
       <span><span class="sw" style="background:var(--good)"></span>80–100 close</span>
       <span><span class="sw" style="background:var(--warn)"></span>50–79 off</span>
@@ -284,19 +292,46 @@ function seg(b, a, e) {
   for (let i = 0; i < f; i++) { x[i] *= i / f; x[x.length - 1 - i] *= i / f; }
   return x;
 }
-function stopAll() { player.pause(); $('pstat').textContent = ''; }
+function stopAll() { player.pause(); whole = null; $('pstat').textContent = ''; $('wstat').textContent = ''; }
 function play(which) {
   if (!bufs) { $('pstat').textContent = loadErr ? 'Could not load the audio. Reload the page to try again.' : 'Still loading the audio, try again in a moment.'; return; }
   const n = N[sel], c = $('ctx').checked ? 1 : 0, a = Math.max(0, n.win[0] - c), e = n.win[1] + c, sr = bufs[0].sampleRate;
   const parts = which === 'ab' ? [seg(bufs[0], a, e), new Float32Array(Math.round(0.35 * sr)), seg(bufs[1], a, e)] : [seg(bufs[which], a, e)];
-  player.pause();
+  player.pause(); whole = null; $('wstat').textContent = '';
   if (lastUrl) URL.revokeObjectURL(lastUrl);
   lastUrl = URL.createObjectURL(wav(parts, sr));
   player.src = lastUrl;
   const label = which === 'ab' ? 'real, then ours' : which ? 'ours' : 'real';
   player.play().then(() => { $('pstat').textContent = 'Playing ' + label; }).catch(() => { $('pstat').textContent = 'The browser blocked playback. Tap the button again.'; });
 }
-player.addEventListener('ended', () => { $('pstat').textContent = ''; });
+player.addEventListener('ended', () => { $('pstat').textContent = ''; $('wstat').textContent = ''; whole = null; });
+
+// the whole Finale: plays the recording file itself, with a playhead on the score above;
+// Switch jumps to the other recording at the same moment
+let whole = null;
+function playWhole(which, at) {
+  player.pause();
+  if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
+  whole = which;
+  player.src = which === 'real' ? 'clips/finale-real.mp3' : 'clips/finale-ours.mp3';
+  const go = () => { player.play().then(() => { $('wstat').textContent = 'Playing the whole Finale: ' + which; $('pstat').textContent = ''; head(); })
+    .catch(() => { $('wstat').textContent = 'The browser blocked playback. Tap the button again.'; }); };
+  if (at) { player.addEventListener('loadedmetadata', function f() { player.removeEventListener('loadedmetadata', f); player.currentTime = at; }); }
+  go();
+}
+function head() {
+  const h = $('head');
+  if (!whole || player.paused) { h.hidden = true; return; }
+  h.hidden = false;
+  const x = player.currentTime * PX, r = $('roll');
+  h.style.left = x + 'px';
+  if (x < r.scrollLeft + 40 || x > r.scrollLeft + r.clientWidth - 60) r.scrollLeft = Math.max(0, x - 40);
+  requestAnimationFrame(head);
+}
+$('wr').onclick = () => playWhole('real', 0);
+$('wo').onclick = () => playWhole('ours', 0);
+$('wsw').onclick = () => { const t = whole ? player.currentTime : 0; playWhole(whole === 'real' ? 'ours' : 'real', t); };
+$('wstop').onclick = stopAll;
 $('pr').onclick = () => play(0);
 $('po').onclick = () => play(1);
 $('pab').onclick = () => play('ab');

@@ -18,8 +18,9 @@ if '--history' in a:
     hp = a[a.index('--history') + 1]
     H = json.load(open(hp)) if os.path.exists(hp) else []
     sc = [n['score'] for n in d['notes']]
-    H.append(dict(desc=a[a.index('--desc') + 1] if '--desc' in a else '', mean=round(sum(sc) / len(sc)), under50=sum(s < 50 for s in sc),
-                  strokes=d['notes'][-1]['ours']['strokeNo']))
-    json.dump(H, open(hp, 'w'))
+    if '--noappend' not in a:  # --noappend: rebuild the page without adding a fix-log step
+      H.append(dict(desc=a[a.index('--desc') + 1] if '--desc' in a else '', mean=round(sum(sc) / len(sc)), under50=sum(s < 50 for s in sc),
+                    strokes=d['notes'][-1]['ours']['strokeNo']))
+      json.dump(H, open(hp, 'w'))
     d['history'] = H
 open(a[2], 'w').write(t.replace('/*DATA*/null', json.dumps(d)))
