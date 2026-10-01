@@ -1,0 +1,215 @@
+<title>Bow on String</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one column. The scope of the string's motion is the hero, the indicator sits on it, three big sliders and a keyboard below. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#16202a; --muted:#5b6876; --line:#cdd5de;
+  --accent:#1f6f8b; --good:#1e8a55; --warn:#b8660b; --bad:#c0392b; --trace:#1f6f8b; --key:#fbfcfd; --keyb:#1c2630; --keyon:#f3c27a;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:"Manrope",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --good:#4cc68a; --warn:#f0a44a; --bad:#ef6f5e; --trace:#5cb8d6; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --good:#4cc68a; --warn:#f0a44a; --bad:#ef6f5e; --trace:#5cb8d6; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);padding:20px 16px 48px}
+.wrap{max-width:680px;margin:0 auto;display:grid;gap:16px}
+h1{font-family:var(--display);font-size:clamp(26px,6vw,36px);margin:0;line-height:1.1}
+p{margin:0;max-width:62ch}
+.muted{color:var(--muted)}
+button{font:600 15px var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--panel);border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.scopebox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:8px}
+canvas{width:100%;height:180px;display:block}
+.state{font:700 17px var(--display);display:flex;gap:8px;align-items:center}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--line);flex:none}
+.state.good .dot{background:var(--good)} .state.warn .dot{background:var(--warn)} .state.bad .dot{background:var(--bad)}
+.hint{font-size:13px;color:var(--muted)}
+.cap{font:12px var(--mono);color:var(--muted)}
+.slider{display:grid;gap:2px}
+.slider .top{display:flex;justify-content:space-between;align-items:baseline}
+.slider label{font-weight:700}
+.slider output{font:600 15px var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+.slider .tip{font-size:13px;color:var(--muted)}
+input[type=range]{width:100%;height:34px;accent-color:var(--accent)}
+.kbwrap{overflow-x:auto;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
+.kb{position:relative;height:110px;touch-action:none;user-select:none;-webkit-user-select:none}
+.k{position:absolute;top:0;border:1px solid var(--line);border-top:none}
+.k.w{background:var(--key);height:110px;border-radius:0 0 6px 6px;z-index:1}
+.k.b{background:var(--keyb);height:66px;z-index:2;border-radius:0 0 4px 4px;border-color:var(--keyb)}
+.k.on{background:var(--keyon)!important}
+.k span{position:absolute;bottom:6px;left:0;right:0;text-align:center;font:10px var(--mono);color:#5b6876}
+label.chk{display:inline-flex;gap:6px;align-items:center}
+.err{color:var(--bad);font-weight:600}
+</style>
+
+<div class="wrap">
+<header style="display:grid;gap:6px">
+  <h1>Bow on String</h1>
+  <p class="muted">One violin string and a bow, nothing else. While a key is held, the bow moves at a constant speed with constant pressure. Find the settings where the string settles into Helmholtz motion.</p>
+</header>
+
+<div class="row">
+  <button id="start" class="primary">Start sound</button>
+  <label class="chk"><input type="checkbox" id="hold" checked> Hold note (tap a key to start, tap again to stop)</label>
+  <span id="status" class="hint"></span>
+</div>
+
+<div class="kbwrap"><div class="kb" id="kb" aria-label="Keyboard, G3 to E6"></div></div>
+<p class="hint">Computer keys: Z row = C4, Q row = C5.</p>
+
+<section class="scopebox" aria-label="String motion">
+  <div class="state" id="state"><span class="dot"></span><span id="stateText">Press Start, then a key</span></div>
+  <canvas id="scope" width="1200" height="360" role="img" aria-label="String velocity at the bow over three periods"></canvas>
+  <div class="cap">String velocity under the bow, three periods. Helmholtz motion: a long flat stretch at the bow's speed (the string sticks to the hair), then one short fast swing back (it slips), once per period.</div>
+</section>
+
+<section style="display:grid;gap:14px">
+  <div class="slider">
+    <div class="top"><label for="force">Bow pressure</label><output id="o-force"></output></div>
+    <input type="range" id="force" min="0" max="1000">
+    <div class="tip" id="fmaxTip"></div>
+  </div>
+  <div class="slider">
+    <div class="top"><label for="speed">Bow speed</label><output id="o-speed"></output></div>
+    <input type="range" id="speed" min="0" max="1000">
+    <div class="tip">Faster bow, louder note. A faster bow also tolerates more pressure.</div>
+  </div>
+  <div class="slider">
+    <div class="top"><label for="contact">Contact point</label><output id="o-contact"></output></div>
+    <input type="range" id="contact" min="0" max="1000">
+    <div class="tip">Distance from the bridge, as a share of the string. Nearer the bridge is brighter and needs more pressure.</div>
+  </div>
+</section>
+
+</div>
+
+<script src="worklet.js"></script>
+<script>
+const P = [
+  { id: 'force', min: 0.02, max: 3.0, def: 0.6, unit: 'N', log: true },
+  { id: 'speed', min: 0.02, max: 1.0, def: 0.2, unit: 'm/s', log: true },
+  { id: 'contact', min: 0.03, max: 0.3, def: 0.12, unit: '', log: false },
+];
+const $ = (id) => document.getElementById(id);
+let ctx = null, node = null, host = null, snap = null;
+const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
+const val = {};
+const to = (p, v) => p.log ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
+const from = (p, s) => p.log ? p.min * Math.pow(p.max / p.min, s) : p.min + s * (p.max - p.min);
+const show = (p, v) => p.id === 'contact' ? (v * 100).toFixed(1) + '% (1/' + (1 / v).toFixed(1) + ')' : v.toFixed(v < 0.1 ? 3 : 2) + ' ' + p.unit;
+P.forEach((p, i) => {
+  const s = $(p.id);
+  const set = (v) => { val[p.id] = v; $('o-' + p.id).textContent = show(p, v); send({ type: 'param', index: i, value: v }); updateTip(); };
+  s.value = Math.round(to(p, p.def) * 1000); set(p.def);
+  s.addEventListener('input', () => set(from(p, s.value / 1000)));
+});
+function updateTip() {
+  if (val.speed === undefined || val.contact === undefined) return;
+  const fmax = 2 * 0.2 * val.speed / (val.contact * 0.5);
+  $('fmaxTip').textContent = `Clean tone needs enough pressure to catch the string but less than about ${fmax.toFixed(2)} N here (Schelleng's limit for this speed and contact point). Above that it crunches.`;
+}
+
+// ---- keyboard G3..E6, monophonic
+const LO = 55, HI = 88, WHITE = [0, 2, 4, 5, 7, 9, 11], NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const keyEls = {}; let latched = null;
+(function buildKeyboard() {
+  const kb = $('kb'), ww = 34, bw = 22; let x = 0;
+  for (let n = LO; n <= HI; n++) {
+    const pc = n % 12, white = WHITE.includes(pc), el = document.createElement('div');
+    el.className = 'k ' + (white ? 'w' : 'b');
+    if (white) { el.style.left = x + 'px'; el.style.width = ww + 'px'; if (pc === 0 || n === LO) el.innerHTML = `<span>${NAMES[pc]}${Math.floor(n / 12) - 1}</span>`; x += ww; }
+    else { el.style.left = (x - bw / 2) + 'px'; el.style.width = bw + 'px'; }
+    el.dataset.note = n; kb.appendChild(el); keyEls[n] = el;
+  }
+  kb.style.width = x + 'px';
+  const noteAt = (e) => { const t = document.elementFromPoint(e.clientX, e.clientY); return t && t.closest('.k') ? +t.closest('.k').dataset.note : null; };
+  const down = new Map();
+  kb.addEventListener('pointerdown', (e) => { kb.setPointerCapture(e.pointerId); const n = noteAt(e); if (n == null) return; press(n); down.set(e.pointerId, n); });
+  kb.addEventListener('pointermove', (e) => { if (!down.has(e.pointerId) || $('hold').checked) return; const n = noteAt(e), o = down.get(e.pointerId); if (n != null && n !== o) { on(n); off(o); down.set(e.pointerId, n); } });
+  const up = (e) => { if (!down.has(e.pointerId)) return; if (!$('hold').checked) off(down.get(e.pointerId)); down.delete(e.pointerId); };
+  kb.addEventListener('pointerup', up); kb.addEventListener('pointercancel', up);
+})();
+function on(n) { if (!node && !host) return; keyEls[n].classList.add('on'); send({ type: 'on', note: n }); }
+function off(n) { keyEls[n] && keyEls[n].classList.remove('on'); send({ type: 'off', note: n }); }
+function press(n) {
+  if (!$('hold').checked) { on(n); return; }
+  if (latched === n) { off(n); latched = null; return; }
+  if (latched !== null) { on(n); off(latched); } else on(n); // a new key moves the finger; the bow keeps going
+  latched = n;
+}
+$('hold').addEventListener('change', () => { if (!$('hold').checked && latched !== null) { off(latched); latched = null; } });
+const KEYMAP = {};
+'zsxdcvgbhnjm,l.;/'.split('').forEach((c, i) => KEYMAP[c] = 60 + i);
+'q2w3er5t6y7ui9o0p'.split('').forEach((c, i) => KEYMAP[c] = 72 + i);
+addEventListener('keydown', (e) => { if (e.repeat || e.metaKey || e.ctrlKey) return; const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined && keyEls[n]) { e.preventDefault(); press(n); } });
+addEventListener('keyup', (e) => { const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined && keyEls[n] && !$('hold').checked) off(n); });
+
+// ---- indicator and scope
+function classify(s) {
+  if (!s || !s.bowing) return ['', 'Not bowing', 'Press a key.'];
+  if (s.slips === 0) return ['warn', 'Starting, or stuck to the bow', 'If this stays, the string is locked to the hair: ease the pressure.'];
+  if (Math.abs(s.slips - 1) < 0.06 && s.irregularity < 0.12) return ['good', 'Helmholtz motion', 'One stick and one slip every period: the clean, bright bowed tone.'];
+  if (s.slips > 1.5 && s.irregularity < 0.3) return ['warn', 'Too light: ' + s.slips.toFixed(1) + ' slips per period', 'The string lets go more than once a period: a thin, hollow or octave-high tone. Add pressure or slow the bow.'];
+  const heavy = val.force > 0.5 * (2 * 0.2 * val.speed / (val.contact * 0.5));
+  return ['bad', heavy ? 'Too heavy: raucous' : 'Irregular', heavy ? 'The bow crushes the string and the slips come at random: a crunchy, scratchy tone. Ease the pressure or speed up.' : 'The slips are not settling. Try a little more pressure.'];
+}
+function draw() {
+  requestAnimationFrame(draw);
+  const c = $('scope'), dpr = window.devicePixelRatio || 1;
+  const cw = Math.round(c.clientWidth * dpr), ch = Math.round(c.clientHeight * dpr);
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+  const g = c.getContext('2d'), W = c.width, H = c.height, css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = css.getPropertyValue('--line'); g.lineWidth = dpr;
+  g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  const [cls, title, hint] = classify(snap);
+  $('state').className = 'state ' + cls; $('stateText').textContent = title + (hint ? ' · ' : '');
+  $('stateText').innerHTML = `${title}<span class="hint" style="font-family:var(--body);font-weight:400;margin-left:6px">${hint}</span>`;
+  if (!snap) return;
+  const s = snap.scope, per = snap.period, span = Math.min(s.length - 2, Math.round(3 * per));
+  // trigger on the latest slip (the largest drop) at least `span` samples back from the end
+  let trig = s.length - span - 1, best = 0;
+  for (let i = Math.max(1, s.length - span - Math.round(per) - 1); i <= s.length - span - 1; i++) { const d = s[i - 1] - s[i]; if (d > best) { best = d; trig = i; } }
+  let peak = Math.max(val.speed * 1.2, 1e-4);
+  for (let i = trig; i < trig + span; i++) peak = Math.max(peak, Math.abs(s[i]));
+  const y = (v) => H / 2 - (v / peak) * (H / 2 - 12);
+  // bow speed reference
+  g.setLineDash([5 * dpr, 4 * dpr]); g.strokeStyle = css.getPropertyValue('--warn');
+  g.beginPath(); g.moveTo(0, y(val.speed)); g.lineTo(W, y(val.speed)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = css.getPropertyValue('--muted'); g.font = (12 * dpr) + 'px JetBrains Mono, monospace'; g.fillText('bow speed', 10, y(val.speed) - 10);
+  g.strokeStyle = css.getPropertyValue('--trace'); g.lineWidth = 2 * dpr; g.beginPath();
+  for (let i = 0; i < span; i++) { const X = (i / (span - 1)) * W, Y = y(s[trig + i]); i ? g.lineTo(X, Y) : g.moveTo(X, Y); }
+  g.stroke();
+}
+requestAnimationFrame(draw);
+
+$('start').addEventListener('click', async () => {
+  $('start').disabled = true; $('status').textContent = 'Loading…';
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    await ctx.resume();
+    const wasm = await fetch('bow.wasm').then((r) => { if (!r.ok) throw new Error('bow.wasm ' + r.status); return r.arrayBuffer(); });
+    if (ctx.audioWorklet) {
+      await ctx.audioWorklet.addModule('worklet.js');
+      node = new AudioWorkletNode(ctx, 'bow', { numberOfInputs: 0, outputChannelCount: [2] });
+      await new Promise((res, rej) => {
+        node.port.onmessage = (ev) => { const m = ev.data; if (m.type === 'ready') res(); else if (m.type === 'error') rej(new Error(m.message)); else if (m.type === 'scope') snap = m; };
+        node.port.postMessage({ type: 'init', wasm });
+      });
+      node.connect(ctx.destination);
+    } else {
+      host = new BowHost(); await host.init(wasm, ctx.sampleRate);
+      const sp = ctx.createScriptProcessor(1024, 0, 2);
+      sp.onaudioprocess = (e) => { host.render(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1), e.outputBuffer.length); snap = host.snapshot(); };
+      sp.connect(ctx.destination);
+    }
+    P.forEach((p, i) => send({ type: 'param', index: i, value: val[p.id] }));
+    $('start').textContent = 'Sound on'; $('status').textContent = `Running at ${ctx.sampleRate / 1000} kHz`;
+  } catch (err) { $('status').innerHTML = `<span class="err">Could not start: ${err.message}</span>`; $('start').disabled = false; }
+});
+</script>
