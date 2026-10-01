@@ -1,6 +1,6 @@
 """Octavio 2 finishing step (until M1 moves it into the core): bridge force -> sound.
 
-    python3 finish.py force.wav out_base [--hall arvedi-near-seat|detmold|church|none] [--mp3]
+    python3 finish.py force.wav out_base [--hall arvedi-near-seat|detmold|church|none] [--bright dB] [--mp3]
 
 Writes
   out_base.dry.wav   mono, full-band balanced body, -20 dB RMS: what the scorer measures
@@ -61,6 +61,17 @@ def split(ir):
     return D, T
 
 
+def high_shelf(x, f0, db):
+    """RBJ high shelf (S = 1): db above f0."""
+    A = 10 ** (db / 40)
+    w = 2 * np.pi * f0 / FS
+    al = np.sin(w) / 2 * np.sqrt(2)
+    c = np.cos(w)
+    b = [A * ((A + 1) + (A - 1) * c + 2 * np.sqrt(A) * al), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - 2 * np.sqrt(A) * al)]
+    a = [(A + 1) - (A - 1) * c + 2 * np.sqrt(A) * al, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - 2 * np.sqrt(A) * al]
+    return ss.lfilter(b, a, x)
+
+
 def rms_norm(x, db=-20.0):
     return x * (10 ** (db / 20) / max(np.sqrt(np.mean(x ** 2)), 1e-12))
 
@@ -71,6 +82,11 @@ def main():
     if '--hall' in sys.argv:
         hall = sys.argv[sys.argv.index('--hall') + 1]
     F = mono(src)
+    # the bow's steady push leaves a slow drift (below 5 Hz) in the bridge force that the body IRs
+    # pass; it carried most of the energy and made level matching ~8 dB too quiet
+    F = ss.sosfilt(ss.butter(4, 60, 'hp', fs=FS, output='sos'), F)
+    if '--bright' in sys.argv:  # experiment: dB of high shelf above 1.5 kHz
+        F = high_shelf(F, 1500.0, float(sys.argv[sys.argv.index('--bright') + 1]))
     body = mono(os.path.join(DATA, 'body-fullband-balanced-48k.wav'))
     bl = mono(os.path.join(DATA, 'body-directional-left-48k.wav'))
     br = mono(os.path.join(DATA, 'body-directional-right-48k.wav'))
