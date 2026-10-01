@@ -99,9 +99,11 @@ td.n { font-family: var(--mono); }
         <button class="b real" id="pr" type="button">Play real</button>
         <button class="b ours" id="po" type="button">Play ours</button>
         <button class="b ab" id="pab" type="button">Real, then ours</button>
+        <button class="b" id="stop" type="button">Stop</button>
         <button class="b" id="prev" type="button">← Prev</button>
         <button class="b" id="next" type="button">Next →</button>
       </div>
+      <p class="small" id="pstat" aria-live="polite" style="min-height:1.2em;margin:0 0 6px"></p>
       <label class="small"><input type="checkbox" id="ctx"> Play with one second of context either side</label>
       <h2 style="margin-top:14px">What's wrong</h2>
       <ul class="issues" id="issues"></ul>
@@ -127,8 +129,6 @@ td.n { font-family: var(--mono); }
   </section>
 </div>
 
-<audio id="ar" preload="auto" src="clips/finale-real.mp3"></audio>
-<audio id="ao" preload="auto" src="clips/finale-d3.mp3"></audio>
 
 <script>
 const D = /*DATA*/null;
@@ -227,6 +227,7 @@ const ROWS = [
 function pct(v) { return v === null || v === undefined ? null : Math.round(v * 100) + '%'; }
 
 function select(i, scroll) {
+  if (i !== sel && typeof stopAll === 'function' && active.length) stopAll();
   sel = i; const n = N[i];
   $('nname').textContent = n.name + (n.chord ? ' (double stop)' : '');
   $('nscore').textContent = n.score; $('nscore').className = 'score s-' + cls(n.score);
@@ -241,21 +242,41 @@ function select(i, scroll) {
 function step(d) { const v = shown(); let k = v.indexOf(N[sel]); k = k < 0 ? 0 : Math.max(0, Math.min(v.length - 1, k + d)); select(N.indexOf(v[k]), true); }
 $('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
 
-// audio
-let timer = null;
-function stopAll() { clearTimeout(timer); $('ar').pause(); $('ao').pause(); }
-function playSeg(el, a, b) {
-  return new Promise(res => {
-    stopAll();
-    const go = () => { el.play().catch(() => {}); timer = setTimeout(() => { el.pause(); res(); }, (b - a) * 1000); };
-    const seek = () => { el.currentTime = Math.max(0, a); el.addEventListener('seeked', go, { once: true }); };
-    if (el.readyState >= 1) seek(); else el.addEventListener('loadedmetadata', seek, { once: true });
+// audio: both recordings decoded once, every segment played sample-accurately; a new press stops whatever is playing
+let ctx = null, bufs = null, loading = null, active = [];
+function loadAudio() {
+  if (bufs) return Promise.resolve(bufs);
+  if (!loading) {
+    $('pstat').textContent = 'Loading audio…';
+    loading = Promise.all(['clips/finale-real.mp3', 'clips/finale-d3.mp3'].map(u => fetch(u).then(r => r.arrayBuffer()).then(x => ctx.decodeAudioData(x))))
+      .then(b => { bufs = b; $('pstat').textContent = ''; return b; })
+      .catch(() => { loading = null; $('pstat').textContent = 'Could not load the audio. Try again.'; throw new Error('load'); });
+  }
+  return loading;
+}
+function stopAll() { active.forEach(s => { try { s.stop(); } catch (e) {} }); active = []; $('pstat').textContent = ''; }
+async function play(which) {
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === 'suspended') await ctx.resume();
+  stopAll();
+  const n = N[sel], c = $('ctx').checked ? 1 : 0, a = Math.max(0, n.win[0] - c), b = n.win[1] + c, dur = b - a;
+  let bb; try { bb = await loadAudio(); } catch (e) { return; }
+  stopAll();
+  const seq = which === 'ab' ? [[0, 'Real'], [1, 'Ours']] : [[which, which ? 'Ours' : 'Real']];
+  let t = ctx.currentTime + 0.05;
+  seq.forEach(([k, label], j) => {
+    const src = ctx.createBufferSource(); src.buffer = bb[k]; src.connect(ctx.destination);
+    src.start(t, a, dur); active.push(src);
+    const at = (t - ctx.currentTime) * 1000;
+    setTimeout(() => { if (active.includes(src)) $('pstat').textContent = 'Playing: ' + label; }, at);
+    src.onended = () => { active = active.filter(s => s !== src); if (!active.length) $('pstat').textContent = ''; };
+    t += dur + 0.35;
   });
 }
-const segOf = n => { const c = $('ctx').checked ? 1 : 0; return [n.win[0] - c, n.win[1] + c]; };
-$('pr').onclick = () => playSeg($('ar'), ...segOf(N[sel]));
-$('po').onclick = () => playSeg($('ao'), ...segOf(N[sel]));
-$('pab').onclick = async () => { const s = segOf(N[sel]); await playSeg($('ar'), ...s); await new Promise(r => setTimeout(r, 350)); playSeg($('ao'), ...s); };
+$('pr').onclick = () => play(0);
+$('po').onclick = () => play(1);
+$('pab').onclick = () => play('ab');
+$('stop').onclick = stopAll;
 
 $('howto').textContent = 'Real tuning is measured against the player\'s own A (' + D.a4real + ' Hz), ours against A = 440. "Speaks" is when the written pitch is first held for 15 ms. "Dip into this note" is how far the level falls at the change from the previous note: real bow changes here dip 5 dB or more, slurs less. "Clean tone after" is when our string settled into a clean, steady vibration (from the engine itself).';
 
