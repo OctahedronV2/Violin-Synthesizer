@@ -151,7 +151,7 @@ def step(S, i, m, g):
             n['tie'] = R_['stroke'] == 'slur'
     # a new stroke not distinct enough: end the note before it earlier
     if R_['stroke'] == 'stroke' and R_['sep'] is not None and O_['sep'] is not None and abs(R_['sep'] - O_['sep']) > 3:
-        n['gap'] = max(0.0, min(0.12, n['gap'] + g * 0.002 * (R_['sep'] - O_['sep'])))
+        n['gap'] = max(0.0, min(0.12, n['gap'] + g * 0.004 * (R_['sep'] - O_['sep'])))
     # a slow catch: more force at the start of the stroke; a scratchy note: less pressure
     cap = O_.get('capture')
     if cap is not None and cap > 50:
@@ -165,7 +165,7 @@ def step(S, i, m, g):
     dpk = O_['peak'] - R_['peak']
     n['dVel'] = max(-60.0, min(60.0, n['dVel'] - 0.5 * g * 2.5 * dpk))
     if O_['cents'] is not None and not m['chord']:
-        n['cents'] = max(-40.0, min(40.0, n['cents'] - 0.8 * g * O_['cents']))
+        n['cents'] = max(-63.0, min(63.0, n['cents'] - 0.8 * g * O_['cents']))
     if R_.get('contour') and O_.get('contour'):
         e = [(O_['peak'] + O_['contour'][k]) - (R_['peak'] + R_['contour'][k]) for k in range(4)]
         # the start: when our note peaks right at the start and the real one later, the start
@@ -173,7 +173,7 @@ def step(S, i, m, g):
         early = O_['attack'] is not None and O_['attack'] < 60 and (R_['attack'] or 0) > 120
         e = [O_['peak'] - (R_['peak'] + R_['contour'][0]) if early else e[0]] + e
         for k in range(5):
-            n['contour'][k] = max(-15.0, min(6.0, n['contour'][k] - 0.5 * g * e[k]))
+            n['contour'][k] = max(-30.0, min(6.0, n['contour'][k] - 0.5 * g * e[k]))
 
 
 def main():
