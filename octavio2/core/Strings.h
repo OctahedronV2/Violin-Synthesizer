@@ -134,6 +134,9 @@ struct Params
     // bow
     int bowPoints = 4;
     double slipNoise = 0.08, slipNoiseHz = 3000.0, slipNoiseExp = 0.5, slipNoiseFade = 0.0;
+    // 0: the rough friction acts on the string (couples into the slip timing: jitter);
+    // 1: the same force fluctuation goes straight to the bridge (hiss without jitter)
+    double slipNoiseOut = 1.0;
     double bowWidth = 0.01, hairStiffness = 110000.0, hairDamping = 10.0, grain = 0.03, grainHz = 3000.0, grainFade = 0.05;
     int grainMode = 0;
     double grainLen = 1e-4;
@@ -171,6 +174,7 @@ struct String
     double apA = 0.0, apX[8] = {}, apY[8] = {};
     double fingerG = 1.0;
     double slipLp[4] = {}, slipNoiseA = 0.0;
+    double hiss = 0.0; // rough-friction force sent straight to the bridge this sample
     double noiseGain = 1.0; // set by the player: how settled the stroke is (less hiss while the note starts)
     double damp = 0.0; // extra loss per round trip from a finger touching or lifting (0..1), set by the player
     double dBr = 2, dN = 2; // one-way bow->bridge, nut round trip
@@ -399,7 +403,11 @@ struct String
                 const double a = slipNoiseA, wn = rng.gauss();
                 slipLp[k] = a * slipLp[k] + (1 - a) * wn;
                 const double fadeN = noiseGain;
-                rough = std::max (0.0, 1.0 + fadeN * P->slipNoise * std::pow (std::abs (dh) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]));
+                const double r = fadeN * P->slipNoise * std::pow (std::abs (dh) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]);
+                if (P->slipNoiseOut > 0.0)
+                    hiss += P->slipNoiseOut * (dh > 0 ? 1.0 : -1.0) * mu * force * r;
+                else
+                    rough = std::max (0.0, 1.0 + r);
             }
             const double f = (dh > 0 ? 1.0 : -1.0) * mu * force * rough;
             v = vh + f / a;
@@ -443,6 +451,7 @@ struct String
         const double gap = gapSamples();
         const double Zs = P->perString ? d.Z : 0.2;
         slipped = false;
+        hiss = 0.0;
         const bool wasStick = stickAll;
         // Torsion: the bow drags the string's surface, so it also twists the string. Twist
         // waves travel torsionSpeed times faster with impedance torsionImpedance * Z (as seen
@@ -689,7 +698,7 @@ struct Violin
             sumZA += Z * s[i].aBr;
             sumZ += Z;
         }
-        double F = 0;
+        double F = 0, hiss = 0;
         if (p.admittance && ! bridge.modes.empty())
         {
             const double Yd = bridge.Yd;
@@ -700,6 +709,7 @@ struct Violin
                 const double Fi = Z * (2 * s[i].aBr - v);
                 F += Fi;
                 s[i].tick (v - s[i].aBr, vBow[i], force[i]);
+                hiss += s[i].hiss;
             }
             bridge.update (F);
         }
@@ -710,8 +720,10 @@ struct Violin
                 const double Z = p.perString ? s[i].d.Z : 0.2;
                 F += 2 * Z * s[i].aBr;
                 s[i].tick (-s[i].aBr, vBow[i], force[i]);
+                hiss += s[i].hiss;
             }
         }
+        F += hiss; // rough-friction hiss reaches the bridge directly (string delay ignored)
         fBridge = F;
         return F;
     }

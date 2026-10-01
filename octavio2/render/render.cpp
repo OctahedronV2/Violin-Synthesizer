@@ -55,7 +55,7 @@ int main (int argc, char** argv)
         p.friction = opts["friction"] == "hyperbolic" ? Friction::hyperbolic : opts["friction"] == "thermalHyp" ? Friction::thermalHyp : Friction::thermal;
 #define O(name) p.name = opt (#name, p.name)
     O (muS); O (muD); O (v0); O (aT); O (bT); O (cT); O (tauG); O (ya); O (xi);
-    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade); O (slipNoise); O (slipNoiseHz); O (slipNoiseExp); O (slipNoiseFade);
+    O (bowWidth); O (hairStiffness); O (hairDamping); O (grain); O (grainHz); O (grainFade); O (slipNoise); O (slipNoiseHz); O (slipNoiseExp); O (slipNoiseFade); O (slipNoiseOut);
     O (torsionSpeed); O (torsionImpedance); O (torsionQ); O (fingerLoss); O (admScale);
 #undef O
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
