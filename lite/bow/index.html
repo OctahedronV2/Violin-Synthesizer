@@ -103,10 +103,10 @@ const P = [
   { id: 'contact', min: 0.03, max: 0.3, def: 0.12, unit: '', log: false },
 ];
 const BODY = 3;
-$('body').addEventListener('change', () => send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 }));
 const $ = (id) => document.getElementById(id);
 let ctx = null, node = null, host = null, snap = null;
 const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
+$('body').addEventListener('change', () => send({ type: 'param', index: BODY, value: $('body').checked ? 1 : 0 }));
 const val = {};
 const to = (p, v) => p.log ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
 const from = (p, s) => p.log ? p.min * Math.pow(p.max / p.min, s) : p.min + s * (p.max - p.min);
