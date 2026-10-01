@@ -12,3 +12,15 @@ string per voice at 96 kHz -> 48 kHz -> body impulse response
 (`LITE_ROOM`, stereo wav, mixed by `room`) -> 16-bit wav normalised to `level` dB RMS.
 
 Every tunable number is a named parameter in `lite.cpp` (search for `P ("`).
+
+## Engine and front ends
+
+- `LiteCore.h` is the engine: freestanding C++ with its own maths, no allocation.
+  Its parameter table (`kParams`) is the single list of controls.
+- `lite.cpp` is the offline renderer (MIDI in, wav out).
+- `web/` is the playground: `build.sh` compiles the engine to `lite.wasm` with
+  plain clang, `worklet.js` runs it in an AudioWorklet, `index.html` builds a
+  slider for every parameter. The browser and the renderer produce the same
+  samples bit for bit (checked by rendering the lyric melody both ways).
+- A VST wrapper only has to forward notes and parameters to `lite::Engine` and
+  call `process()`.
