@@ -81,6 +81,11 @@ struct PlayerParams
     double shiftBase = 0.045, shiftPerSemi = 0.006; // slide time, s
     double shiftLighten = 0.2; // bow force reduction during a slide
     double vibDelay = 0.14, vibBloom = 0.3; // s
+    // held notes: the width grows as the note goes on (players warm a long note up with the
+    // left hand), from vibGrowStart x to at most vibGrowMax x the dynamic's width, by vibGrow
+    // per second; and when the note's length is known it relaxes over its last vibTaper seconds
+    // (fitted to the held notes of the anechoic Haydn Finale, 2nd violin, 2026-10-02)
+    double vibGrowStart = 0.4, vibGrow = 0.5, vibGrowMax = 2.4, vibTaper = 0.3;
     double vibWidthLo = 8.0, vibWidthHi = 30.0; // cents peak-to-peak at d = 0 / 1
     double vibRate = 5.6, vibRateDyn = 0.6; // Hz, plus per unit d
     double vibWander = 0.15; // relative random wander of rate and width
@@ -141,7 +146,7 @@ struct Player
     double lastOn = -10.0;
     int shortRun = 0; // consecutive note starts less than quickIOI apart
     bool shaped = false, quick = false;
-    double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0;
+    double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0, vibScale = 1.0;
     // the stroke shape in use (set at each new stroke from the normal or the quick settings)
     double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
@@ -156,6 +161,7 @@ struct Player
         double slideFrom = 0.0, slideT0 = -1.0, slideDur = 0.0;
         double noteOn = -1.0;
         double vibPhase = 0.0, vibRate = 5.6, vibWidth = 0.0, vibWidthTarget = 0.0;
+        double planEnd = -1.0; // when this note is due to end, if the host said (else -1)
         double wanderR = 0.0, wanderW = 0.0;
         double lastBowed = -10.0;
         double setPitchAt = -1e9;
@@ -303,6 +309,7 @@ struct Player
             handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
         S.lifted = semis == 0;
         S.noteOn = t;
+        S.planEnd = nextDur > 0.0 ? t + nextDur : -1.0;
         S.captured = false;
         // vibrato restarts on a new bow, continues (phase kept) over a slur in one position
         if (! slurred || shift)
@@ -427,7 +434,8 @@ struct Player
     // sounding note in cents, 64 = none, 1 cent per step (per-note intonation from a score editor).
     // CC 22: bow pressure, 64 = as played, moves the force within the playable window by up to
     // +-0.3 of its width. CC 23: extra force at the stroke's start for a quicker catch, 64 = none,
-    // 127 = double the force at the very start.
+    // 127 = double the force at the very start. CC 24: vibrato width, 64 = as played, 0 = none,
+    // 127 = about 4x (square law).
     void controller (int cc, double v127)
     {
         if (cc == 11)
@@ -438,6 +446,8 @@ struct Player
             pressTrim = (v127 - 64.0) / 64.0 * 0.3;
         else if (cc == 23)
             biteTrim = std::max (0.0, v127 - 64.0) / 64.0;
+        else if (cc == 24)
+            vibScale = (v127 / 64.0) * (v127 / 64.0);
     }
 
     void noteOff (int pitch)
@@ -547,7 +557,13 @@ struct Player
             {
                 const double age = t - S.noteOn;
                 const double env = std::clamp ((age - pp.vibDelay) / pp.vibBloom, 0.0, 1.0);
-                const double w = S.vibWidthTarget * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
+                double w = S.vibWidthTarget * vibScale * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
+                w *= std::min (pp.vibGrowMax, pp.vibGrowStart + pp.vibGrow * std::max (0.0, age - pp.vibDelay));
+                if (S.planEnd > 0.0 && pp.vibTaper > 0.0)
+                {
+                    const double k = std::clamp ((S.planEnd - t) / pp.vibTaper, 0.0, 1.0);
+                    w *= k * k * (3 - 2 * k);
+                }
                 S.vibWidth += (w - S.vibWidth) * std::min (1.0, dt / 0.05);
                 S.vibPhase += 2 * pi * S.vibRate * dt;
                 if (S.vibPhase > 2 * pi)

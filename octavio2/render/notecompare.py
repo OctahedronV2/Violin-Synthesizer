@@ -161,6 +161,21 @@ def measure(A, k, nxt_on, prev, a4):
         r['sep'] = round(float(min(lv[p0:i_on + 1].max() if i_on > p0 else lv[p0], lv[pk]) - valley), 1)
     loud = snd & (lv[seg] > r['peak'] - 15)
     r['rough'] = round(float(np.mean(ap[seg][loud] > 0.25)) if loud.sum() else 0.0, 2)
+    # vibrato width (cents peak to peak, 5-95%) at 25, 50, 75 and 100% of a held note, each over
+    # the 250 ms before that point; None where the pitch is not held
+    r['vib'] = None
+    if hi - lo >= int(0.4 * FR):
+        r['vib'] = []
+        for q in (0.25, 0.5, 0.75, 1.0):
+            e = lo + int(q * (hi - lo))
+            b = max(lo + 10, e - 50)
+            y, ok = c[b:e], near[b:e] & (f0[b:e] > 0)
+            if e - b < 30 or ok.sum() < 0.7 * (e - b):
+                r['vib'].append(None)
+                continue
+            x = np.arange(e - b)[ok]
+            y = y[ok] - np.polyval(np.polyfit(x, y[ok], 1), x)
+            r['vib'].append(round(float(np.percentile(y, 95) - np.percentile(y, 5)), 1))
     return r
 
 
@@ -224,6 +239,14 @@ def diagnose(k, R, O, ours_kind, real_kind, log, midi_slur=False):
         add('Dies away too early: ends %.0f dB under its peak, the real note %.0f dB.' % (-O['end'], -R['end']), 10)
     if log and log.get('cap') is not None and log['cap'] > 0.05:
         add('Took %d ms to reach a clean (Helmholtz) tone.' % (1000 * log['cap']), min(20, 200 * (log['cap'] - 0.05)))
+    if R.get('vib') and O.get('vib'):
+        pts = [(a, b) for a, b in zip(R['vib'], O['vib']) if a is not None and b is not None]
+        if pts:
+            e = float(np.mean([abs(a - b) for a, b in pts]))
+            if e > 6:
+                f = lambda v: '%.0f' % v
+                add('Vibrato differs by %.0f cents: the real one goes %s → %s cents wide through the note, ours %s → %s.' %
+                    (e, f(pts[0][0]), f(pts[-1][0]), f(pts[0][1]), f(pts[-1][1])), min(20, (e - 6) * 1.2))
     if R['speak'] is None:
         iss.append('Real note: pitch not clearly held (fast or chordal), timing and tuning checks are rough here.')
     return iss, max(0, round(100 - sev))
