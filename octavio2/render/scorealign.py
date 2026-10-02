@@ -108,6 +108,19 @@ def main():
             g = (S[j]['off'] - S[j]['on']) / max(1e-6, S[q]['on'] - S[p]['on'])
             out[j] = dict(on=on, off=on + g * (out[q]['on'] - out[p]['on']), pitch=S[j]['pitch'], vel=out[p]['vel'], added=True)
             rep.append('added %s at %.2f s (score note %d, not heard in the transcription)' % (nc_name(S[j]['pitch']), on, j + 1))
+    # notes the score starts together (double stops) start together: the transcription often
+    # hears only one of them, and its other note lands on a later sound
+    for j in range(len(S)):
+        grp = [k for k in range(len(S)) if abs(S[k]['on'] - S[j]['on']) < 1e-3 and out[k] is not None]
+        if len(grp) > 1 and grp[0] == j:
+            lead = min(grp, key=lambda k: out[k]['on'])
+            for k in grp:
+                if out[k]['on'] != out[lead]['on']:
+                    rep.append('%s at %.2f s moved to %.2f s: a double stop with the %s' % (nc_name(S[k]['pitch']), out[k]['on'], out[lead]['on'], nc_name(S[lead]['pitch'])))
+                out[k]['on'] = out[lead]['on']
+                out[k]['off'] = max(out[k]['off'], out[lead]['off'])
+            for k in grp:
+                out[k]['off'] = max(out[g]['off'] for g in grp)
     out = [o for o in out if o is not None]
     ev = sorted([(k['on'], 1, k['pitch'], k['vel']) for k in out] + [(k['off'], 0, k['pitch'], 0) for k in out])
     mf = mido.MidiFile(ticks_per_beat=480)

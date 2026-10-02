@@ -46,3 +46,4 @@ joined 47.70 s into the A#3 at 47.57 s (score note 147)
 joined 49.85 s into the A3 at 49.57 s (score note 150)
 joined 50.01 s into the A3 at 49.57 s (score note 150)
 added A#4 at 46.09 s (score note 141, not heard in the transcription)
+F#5 at 33.54 s moved to 32.42 s: a double stop with the A4
