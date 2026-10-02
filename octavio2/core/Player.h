@@ -130,9 +130,11 @@ struct Player
     double V = 0.0; // stroke speed magnitude
     double hair = 0.0; // hair position from the frog, m
     double accel = 8.0;
-    bool changing = false, releasing = false, stopping = false;
+    bool changing = false, releasing = true, stopping = false; // the bow starts off the string, at rest
     double stopT = 0.0;
     double strokeStart = -1.0, lastStop = -10.0;
+    double nextDur = 0.0; // set by the host before noteOn: how long the coming note lasts (0 = unknown)
+    double strokeCap = 0.0; // bow speed that makes the stroke fit the hair left (0 = none)
     double d = 0.6; // dynamics of the current stroke
     double dTarget = 0.6, noteNow = 69.0;
     int slurNotes = 0;
@@ -391,6 +393,16 @@ struct Player
                 dir = hair > 0.5 * pp.bowLength ? -1.0 : 1.0; // retake: start where the bow is
             else
                 dir = -dir;
+            // a stopped stroke can go either way: start it towards the longer part of the bow when
+            // the turn would leave almost no hair
+            const double room = dir > 0 ? pp.bowLength - hair : hair;
+            if (! bowMoving && room < 0.12)
+                dir = -dir;
+            // the stroke's length, when the host knows it (a score, Studio look-ahead): spread
+            // the bow so the note does not run out of hair (no slower than half speed)
+            strokeCap = 0.0;
+            if (nextDur > 0.0)
+                strokeCap = 0.9 * (dir > 0 ? pp.bowLength - hair : hair) / nextDur;
             changing = bowMoving;
             releasing = false;
             stopping = false;
@@ -404,7 +416,7 @@ struct Player
         lastString = s;
         lastVel = vel127;
         if (log)
-            std::fprintf (stderr, "on %.3f p%d s%d %s%s%s\n", t, pitch, s, strokeStart == t ? "stroke" : "slur", shaped ? " shaped" : "", quick ? " quick" : "");
+            std::fprintf (stderr, "on %.3f p%d s%d %s%s%s hair %.3f dir %+.0f\n", t, pitch, s, strokeStart == t ? "stroke" : "slur", shaped ? " shaped" : "", quick ? " quick" : "", hair, dir);
         lastOn = t;
         if (nHeld < 16)
             held[nHeld++] = { pitch, vel127, t, s };
@@ -477,7 +489,7 @@ struct Player
                 dir = -dir;
                 changing = true;
                 if (log)
-                    std::fprintf (stderr, "budget change %.3f\n", t);
+                    std::fprintf (stderr, "budget change %.3f hair %.3f dir %+.0f v %+.3f\n", t, hair, -dir, v);
             }
         }
         // bow velocity: accelerate towards the target with limited acceleration
@@ -492,6 +504,8 @@ struct Player
             shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
         expr += (exprTarget - expr) * std::min (1.0, dt / 0.015);
         vTarget = dir * V * shape * balance[lastString] * expr;
+        if (strokeCap > 0.0 && std::abs (vTarget) > strokeCap)
+            vTarget *= std::max (0.5, strokeCap / std::abs (vTarget));
         if (releasing)
         {
             // keep moving while the hair leaves the string, then slow down

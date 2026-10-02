@@ -89,18 +89,18 @@ int main (int argc, char** argv)
     {
         double t;
         int type, pitch;
-        double vel;
+        double vel, dur;
     };
     std::vector<Ev> ev;
     double tEnd = 0;
     for (auto& n : notes)
     {
-        ev.push_back ({ n.on, 1, n.note, n.vel * 127.0 });
-        ev.push_back ({ n.off, 0, n.note, 0 });
+        ev.push_back ({ n.on, 1, n.note, n.vel * 127.0, n.off - n.on });
+        ev.push_back ({ n.off, 0, n.note, 0, 0 });
         tEnd = std::max (tEnd, n.off);
     }
     for (auto& c : ccs)
-        ev.push_back ({ c.t, 2, c.cc, c.value * 127.0 });
+        ev.push_back ({ c.t, 2, c.cc, c.value * 127.0, 0 });
     std::stable_sort (ev.begin(), ev.end(), [] (const Ev& a, const Ev& b) { return a.t < b.t || (a.t == b.t && a.type < b.type); });
 
     const double start = opt ("start", 0.0);
@@ -124,7 +124,14 @@ int main (int argc, char** argv)
             if (ev[e].type == 2)
                 player->controller (ev[e].pitch, ev[e].vel);
             else if (ev[e].type == 1)
+            {
+                // the note's length, so the player can spread its bow (planned=0: Live, unknown)
+                double dur = ev[e].dur;
+                if (opt ("planned", 1) == 0)
+                    dur = 0.0;
+                player->nextDur = dur;
                 player->noteOn (ev[e].pitch, ev[e].vel);
+            }
             else
                 player->noteOff (ev[e].pitch);
             ++e;
