@@ -127,6 +127,7 @@ def measure(S, tag, opts, upto=54.0):
     return J['notes'], mid
 
 
+SKIP = None  # --skip N: notes scoring N or more when their group starts are not changed
 KEYS = ('dOn', 'dVel', 'cents', 'contour', 'slur', 'tie', 'gap', 'press', 'bite')
 
 
@@ -196,6 +197,8 @@ def main():
     A, B = int(a[a.index('--notes') + 1]), int(a[a.index('--notes') + 2])
     iters = int(a[a.index('--iters') + 1]) if '--iters' in a else 3
     group = int(a[a.index('--group') + 1]) if '--group' in a else 3
+    global SKIP
+    SKIP = int(a[a.index('--skip') + 1]) if '--skip' in a else None
     if 'gain' not in S:
         measure(S, 'full', opts)
     for g0 in range(A, B, group):
@@ -217,8 +220,14 @@ def fit(S, A, B, iters, opts):
     best = {}  # note -> (score, settings)
     gain = {i: 1.0 for i in range(A, B)}
     whole = None  # best whole iteration (score, settings)
+    skip = set()
     for it in range(iters + 1):
         meas, mid = measure(S, 'g', opts, upto)
+        if it == 0 and SKIP is not None:  # notes already good enough stay as they are
+            skip = {i for i in range(A, B) if meas[i]['score'] >= SKIP}
+            if len(skip) == B - A:
+                print('notes %d-%d: %s  (all %d+, left as they are)' % (A + 1, B, ' '.join('%d:%d' % (i + 1, meas[i]['score']) for i in range(A, B)), SKIP), flush=True)
+                return
         if whole is None or w(meas) > whole[0]:
             whole = (w(meas), [json.loads(json.dumps({k: N[i][k] for k in KEYS})) for i in range(A, B)])
         for i in range(A, B):
@@ -230,7 +239,7 @@ def fit(S, A, B, iters, opts):
                 n.update(json.loads(json.dumps(best[i][1])))
                 gain[i] *= 0.5
                 continue
-            if it < iters:
+            if it < iters and i not in skip:
                 step(S, i, meas[i], gain[i])
         if all(best[i][0] >= 97 for i in range(A, B)):
             break
