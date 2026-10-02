@@ -17,6 +17,8 @@ note with notecompare.py and moves each tuned note's settings towards the real n
   bite      more force at the start (CC23) when our note is slow to catch a clean tone
   press     bow pressure (CC22): less when ours is scratchy, more when it is very slow to catch
   vib       vibrato width (CC24), scaled towards the real note's average width
+  vend      how long before the end the vibrato relaxes (CC25): longer when ours keeps more
+            vibrato into the note's end than the real one, relative to its middle
 A note that scores worse than its best so far goes back to its best settings and takes half
 steps from there (a line search per note); at the end every note keeps its best settings and the
 result is rendered once more to confirm. The real recording is always measured against the
@@ -81,7 +83,8 @@ def write(S, out):
             ev.append((on - 0.0005, 2, 21, int(max(0, min(127, round(64 + n['cents']))))))
             ev.append((on - 0.0005, 2, 22, int(max(0, min(127, round(64 + 64 * n['press'] / 0.3))))))
             ev.append((on - 0.0005, 2, 23, int(max(64, min(127, round(64 + 64 * n['bite']))))))
-            ev.append((on - 0.0005, 2, 24, int(max(0, min(127, round(64 * n['vib'] ** 0.5))))))
+            ev.append((on - 0.0005, 2, 24, int(max(0, min(127, round(64 * n['vib'] ** (1 / 3)))))))
+            ev.append((on - 0.0005, 2, 25, int(max(0, min(127, round(100 * n['vend']))))))
         # the level curve: straight lines between its five points, sent every 10 ms
         L = max(0.0, n['off'] - on)
         steps = max(1, int(L / 0.01))
@@ -131,7 +134,7 @@ def measure(S, tag, opts, upto=54.0):
 
 ONLY = None  # --only vib,cents: tune just these settings
 SKIP = None  # --skip N: notes scoring N or more when their group starts are not changed
-KEYS = ('dOn', 'dVel', 'cents', 'contour', 'slur', 'tie', 'gap', 'press', 'bite', 'vib')
+KEYS = ('dOn', 'dVel', 'cents', 'contour', 'slur', 'tie', 'gap', 'press', 'bite', 'vib', 'vend')
 
 
 def step(S, i, m, g):
@@ -171,7 +174,14 @@ def step(S, i, m, g):
         pts = [(x, y) for x, y in zip(R_['vib'], O_['vib']) if x is not None and y is not None]
         if pts:
             r = sum(x for x, _ in pts) / max(3.0, sum(y for _, y in pts))
-            n['vib'] = max(0.0, min(3.9, max(0.05, n['vib']) * r ** (0.7 * g)))
+            n['vib'] = max(0.0, min(7.8, max(0.05, n['vib']) * r ** (0.7 * g)))
+        R4, O4 = R_['vib'], O_['vib']
+        if None not in (R4[2], R4[3], O4[2], O4[3]):
+            e = (O4[3] - R4[3]) - (O4[2] - R4[2])  # ours keeps more (or less) vibrato to the end
+            if e > 4:
+                n['vend'] = min(1.27, n['vend'] + g * 0.15)
+            elif e < -4:
+                n['vend'] = max(0.0, n['vend'] - g * 0.1)
     dpk = O_['peak'] - R_['peak']
     n['dVel'] = max(-60.0, min(60.0, n['dVel'] - 0.5 * g * 2.5 * dpk))
     if O_['cents'] is not None and not m['chord']:
@@ -193,7 +203,7 @@ def main():
     if '--init' in a:
         notes = read(a[a.index('--init') + 1])
         for i, n in enumerate(notes):
-            n.update(dOn=0.0, dVel=0.0, cents=0.0, contour=[0.0] * 5, tie=False, gap=0.0, press=0.0, bite=0.0, vib=1.0,
+            n.update(dOn=0.0, dVel=0.0, cents=0.0, contour=[0.0] * 5, tie=False, gap=0.0, press=0.0, bite=0.0, vib=1.0, vend=0.3,
                      slur=i > 0 and notes[i - 1]['off'] > n['on'] and n['on'] - notes[i - 1]['on'] > 0.02)
         json.dump(dict(notes=notes, src=os.path.abspath(a[a.index('--init') + 1])), open(path, 'w'))
         return
@@ -204,6 +214,7 @@ def main():
         n.setdefault('press', 0.0)
         n.setdefault('bite', 0.0)
         n.setdefault('vib', 1.0)
+        n.setdefault('vend', 0.3)
     A, B = int(a[a.index('--notes') + 1]), int(a[a.index('--notes') + 2])
     iters = int(a[a.index('--iters') + 1]) if '--iters' in a else 3
     group = int(a[a.index('--group') + 1]) if '--group' in a else 3
@@ -252,7 +263,7 @@ def fit(S, A, B, iters, opts):
                 gain[i] *= 0.5
                 continue
             if it < iters:
-                only = ['vib'] if i in skip else ONLY  # a note already good still gets its vibrato matched
+                only = ['vib', 'vend'] if i in skip else ONLY  # a note already good still gets its vibrato matched
                 keep = {k: json.loads(json.dumps(n[k])) for k in KEYS if only and k not in only}
                 step(S, i, meas[i], gain[i])
                 n.update(keep)  # --only: every other setting stays as it was

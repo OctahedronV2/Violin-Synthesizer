@@ -76,7 +76,7 @@ int main (int argc, char** argv)
     O (accel); O (accelFF); O (landTime); O (biteFF); O (biteTime); O (changeDip);
     O (releaseTime); O (crossTime); O (bowLength); O (shiftBase); O (shiftPerSemi);
     O (shiftLighten); O (vibDelay); O (vibBloom); O (vibWidthLo); O (vibWidthHi);
-    O (vibRate); O (vibRateDyn); O (vibGrowStart); O (vibGrow); O (vibGrowMax); O (vibTaper); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
+    O (vibRate); O (vibRateDyn); O (vibGrowStart); O (vibGrow); O (vibGrowMax); O (vibTaper); O (vibPosition); O (vibShort); O (vibWander); O (liftAfter); O (liftDamp); O (liftDampTime);
     O (chordWindow); O (speedMap); O (contactFollow); O (speedPP); O (speedFF); O (slurFollow); O (slurMaxNotes); O (slurMaxTime); O (slurAccent); O (shapeIOI); O (stopBelow); O (forceSus); O (forceTau); O (forceHold); O (stopAccel); O (stopForce); O (stopTime); O (strokeSus); O (quickIOI); O (quickRun); O (quickP); O (qForceSus); O (qForceTau); O (qForceHold); O (qStrokeSus); O (qStrokeTau); O (qStopForce); O (qStopTime); O (qStopAccel); O (stopDamp); O (openMute); O (openMuteTime); O (qStopDamp); O (quickContact); O (strokeTau); O (dynGlide); O (reg55); O (reg61); O (reg67); O (reg73); O (reg79); O (reg85); O (reg91); O (reg97); O (speedG); O (speedD); O (speedA); O (speedE); O (crossBite); O (crossBiteTime); O (noiseStart); O (noiseRise); O (bite); O (earUp); O (earDown); O (earMax); O (earMin); O (earRelax); O (earWindow); O (earWait); O (earPeriods);
 #undef O
     q.seed = seed;
