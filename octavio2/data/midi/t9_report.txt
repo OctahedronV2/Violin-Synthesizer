@@ -1,0 +1,48 @@
+joined 3.03 s into the G#4 at 0.42 s (score note 1)
+joined 6.91 s into the G#4 at 6.82 s (score note 10)
+joined 8.44 s into the E4 at 8.34 s (score note 15)
+joined 9.33 s into the G#3 at 9.05 s (score note 17)
+joined 9.67 s into the E4 at 9.62 s (score note 19)
+joined 9.97 s into the C#4 at 9.92 s (score note 20)
+joined 12.25 s into the A3 at 10.62 s (score note 22)
+joined 12.60 s into the A3 at 10.62 s (score note 22)
+dropped 17.59 s D4: not in the score here
+dropped 18.76 s C#4: not in the score here
+dropped 21.81 s A3: not in the score here
+joined 23.62 s into the G4 at 23.47 s (score note 64)
+dropped 24.89 s G3: not in the score here
+joined 26.95 s into the C#5 at 25.30 s (score note 77)
+27.55 s: transcribed D4, score has D5
+joined 27.60 s into the D5 at 27.55 s (score note 81)
+dropped 27.66 s D4: not in the score here
+joined 28.03 s into the A#4 at 27.98 s (score note 83)
+dropped 28.32 s D4: not in the score here
+28.78 s: transcribed D4, score has D5
+joined 29.85 s into the A#4 at 29.80 s (score note 95)
+dropped 30.03 s F4: not in the score here
+dropped 30.18 s D4: not in the score here
+dropped 30.64 s F4: not in the score here
+dropped 30.77 s D4: not in the score here
+32.14 s: transcribed D4, score has D5
+dropped 32.35 s D4: not in the score here
+32.42 s: transcribed A3, score has A4
+joined 33.46 s into the A4 at 32.42 s (score note 113)
+dropped 33.46 s F#5: not in the score here
+joined 33.54 s into the A4 at 32.42 s (score note 113)
+dropped 33.92 s A4: not in the score here
+dropped 35.81 s G5: not in the score here
+dropped 36.01 s G4: not in the score here
+joined 38.62 s into the C#5 at 38.34 s (score note 124)
+joined 39.61 s into the D5 at 39.26 s (score note 127)
+joined 39.72 s into the D5 at 39.26 s (score note 127)
+dropped 40.21 s C#5: not in the score here
+joined 41.33 s into the D5 at 40.89 s (score note 133)
+joined 41.91 s into the D5 at 40.89 s (score note 133)
+joined 41.96 s into the D5 at 40.89 s (score note 133)
+joined 45.47 s into the C5 at 45.36 s (score note 138)
+dropped 46.71 s A4: not in the score here
+dropped 46.85 s A4: not in the score here
+joined 47.70 s into the A#3 at 47.57 s (score note 147)
+joined 49.85 s into the A3 at 49.57 s (score note 150)
+joined 50.01 s into the A3 at 49.57 s (score note 150)
+added A#4 at 46.09 s (score note 141, not heard in the transcription)
