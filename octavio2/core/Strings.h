@@ -140,7 +140,8 @@ struct Params
     // 0: the rough friction acts on the string (couples into the slip timing: jitter);
     // 1: the same force fluctuation goes straight to the bridge (hiss without jitter)
     double slipNoiseOut = 1.0;
-    double bowWidth = 0.01, hairStiffness = 110000.0, hairDamping = 10.0, grain = 0.03, grainHz = 3000.0, grainFade = 0.05;
+    double bowWidth = 0.01, hairStiffness = 110000.0, hairDamping = 10.0, grain = 0.03, grainHz = 3000.0,
+           grainFade = 0.05;
     int grainMode = 0;
     double grainLen = 1e-4;
     // string
@@ -259,7 +260,8 @@ struct String
         note = n;
         f1 = 440.0 * std::pow (2.0, (n - 69.0) / 12.0);
         // intrinsic losses, set from decay times in seconds (so the same at any rate)
-        const double lo = P->perString ? d.t60lo : 2.5, hi = P->perString ? d.t60hi : 0.25, fh = P->perString ? d.fhi : 4000.0;
+        const double lo = P->perString ? d.t60lo : 2.5, hi = P->perString ? d.t60hi : 0.25,
+                     fh = P->perString ? d.fhi : 4000.0;
         g = std::pow (10.0, -3.0 / (lo * f1));
         {
             const double r = std::pow (10.0, -3.0 / f1 * (1.0 / hi - 1.0 / lo));
@@ -293,7 +295,8 @@ struct String
         const double gap = gapSamples();
         dBr = std::max (1.0, beta * period / 2.0);
         // the nut side loses the extra delay of the bow-width gaps
-        dN = std::max (1.0, N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
+        dN = std::max (1.0,
+                       N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
     }
 
     int bowPointsNow() const { return std::clamp (P->bowPoints, 1, 4); }
@@ -323,33 +326,34 @@ struct String
 
     double hyperbolic (int k, double vBow, double vh, double force, double a)
     {
-            const double muS = P->muS, muD = P->muD, v0 = P->v0;
-            const double dh = vBow - vh, adh = std::abs (dh);
-            auto root = [&] {
-                const double b = a * v0 + force * muD - a * adh, c = (force * muS - a * adh) * v0;
-                const double disc = b * b - 4 * a * c;
-                if (disc < 0)
-                    return -1.0;
-                const double r = (-b + std::sqrt (disc)) / (2 * a);
-                return r > 0 ? r : -1.0;
-            };
-            double slip;
-            if (a * adh <= muS * force)
+        const double muS = P->muS, muD = P->muD, v0 = P->v0;
+        const double dh = vBow - vh, adh = std::abs (dh);
+        auto root = [&]
+        {
+            const double b = a * v0 + force * muD - a * adh, c = (force * muS - a * adh) * v0;
+            const double disc = b * b - 4 * a * c;
+            if (disc < 0)
+                return -1.0;
+            const double r = (-b + std::sqrt (disc)) / (2 * a);
+            return r > 0 ? r : -1.0;
+        };
+        double slip;
+        if (a * adh <= muS * force)
+        {
+            if (stick[k])
+                return vBow;
+            slip = root();
+            if (slip < 0)
             {
-                if (stick[k])
-                    return vBow;
-                slip = root();
-                if (slip < 0)
-                {
-                    stick[k] = true;
-                    return vBow;
-                }
+                stick[k] = true;
+                return vBow;
             }
-            else
-                slip = root();
-            stick[k] = false;
-            return vBow - (dh > 0 ? slip : -slip);
-            }
+        }
+        else
+            slip = root();
+        stick[k] = false;
+        return vBow - (dh > 0 ? slip : -slip);
+    }
 
     // Friction at one contact point. a = junction impedance seen by the friction force
     // (force f gives velocity change f / a). Returns the contact point's velocity.
@@ -408,7 +412,8 @@ struct String
                 const double a = slipNoiseA, wn = rng.gauss();
                 slipLp[k] = a * slipLp[k] + (1 - a) * wn;
                 const double fadeN = noiseGain;
-                const double r = fadeN * P->slipNoise * std::pow (std::abs (dh) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]);
+                const double r
+                    = fadeN * P->slipNoise * std::pow (std::abs (dh) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]);
                 if (P->slipNoiseOut > 0.0)
                     hiss += P->slipNoiseOut * (dh > 0 ? 1.0 : -1.0) * mu * force * r;
                 else
@@ -466,7 +471,8 @@ struct String
         const double tPeriod = period / P->torsionSpeed;
         const double tGap = K > 1 ? std::max (1.0, gap / P->torsionSpeed) : 0.0;
         const double tR = std::exp (-pi / (2.0 * P->torsionQ)); // per reflection
-        const double tdB = std::max (1.0, beta * tPeriod), tdN = std::max (1.0, (1 - beta) * tPeriod - 2.0 * (K - 1) * tGap);
+        const double tdB = std::max (1.0, beta * tPeriod),
+                     tdN = std::max (1.0, (1 - beta) * tPeriod - 2.0 * (K - 1) * tGap);
         double fromB[4], fromN[4], tfromB[4] = {}, tfromN[4] = {};
         for (int k = 0; k < K; ++k)
         {
@@ -604,46 +610,16 @@ struct ModeData
     double f, Q, m;
 };
 static const ModeData kGenericModes[] = {
-    { 275.0, 20.0, 0.385830 },
-    { 405.0, 30.0, 0.589463 },
-    { 470.0, 40.0, 0.169314 },
-    { 540.0, 40.0, 0.147366 },
-    { 630.0, 30.0, 0.252627 },
-    { 741.5, 20.2, 0.665660 },
-    { 789.2, 15.0, 0.131346 },
-    { 813.6, 21.9, 0.203290 },
-    { 987.4, 19.1, 0.859700 },
-    { 1096.6, 15.0, 0.121965 },
-    { 1150.9, 21.7, 0.281240 },
-    { 1264.1, 47.7, 3.433160 },
-    { 1328.8, 54.4, 5.799740 },
-    { 1425.7, 42.1, 1.626120 },
-    { 1480.0, 54.3, 2.137150 },
-    { 1535.2, 18.4, 0.375290 },
-    { 1651.7, 40.1, 0.789210 },
-    { 1720.9, 53.0, 2.200850 },
-    { 1782.3, 30.1, 0.783300 },
-    { 1891.0, 50.6, 0.645450 },
-    { 1958.9, 33.2, 0.359480 },
-    { 2078.9, 31.9, 0.144790 },
-    { 2170.8, 38.4, 0.247660 },
-    { 2271.9, 38.3, 0.221230 },
-    { 2347.5, 23.7, 0.070150 },
-    { 2459.3, 37.9, 0.149470 },
-    { 2626.1, 33.3, 0.185440 },
-    { 2751.9, 52.6, 0.520100 },
-    { 2936.1, 15.0, 0.008093 },
-    { 3109.2, 29.8, 0.061600 },
-    { 3214.8, 50.0, 0.367640 },
-    { 3524.9, 22.7, 0.055620 },
-    { 3736.9, 59.1, 0.215670 },
-    { 3904.8, 15.0, 0.013355 },
-    { 4297.4, 33.9, 0.120830 },
-    { 4503.5, 58.1, 0.291340 },
-    { 4642.4, 47.0, 0.256360 },
-    { 5504.6, 15.0, 0.016383 },
-    { 6099.4, 109.5, 2.963900 },
-    { 6497.7, 22.5, 0.770950 }
+    { 275.0, 20.0, 0.385830 },  { 405.0, 30.0, 0.589463 },  { 470.0, 40.0, 0.169314 },   { 540.0, 40.0, 0.147366 },
+    { 630.0, 30.0, 0.252627 },  { 741.5, 20.2, 0.665660 },  { 789.2, 15.0, 0.131346 },   { 813.6, 21.9, 0.203290 },
+    { 987.4, 19.1, 0.859700 },  { 1096.6, 15.0, 0.121965 }, { 1150.9, 21.7, 0.281240 },  { 1264.1, 47.7, 3.433160 },
+    { 1328.8, 54.4, 5.799740 }, { 1425.7, 42.1, 1.626120 }, { 1480.0, 54.3, 2.137150 },  { 1535.2, 18.4, 0.375290 },
+    { 1651.7, 40.1, 0.789210 }, { 1720.9, 53.0, 2.200850 }, { 1782.3, 30.1, 0.783300 },  { 1891.0, 50.6, 0.645450 },
+    { 1958.9, 33.2, 0.359480 }, { 2078.9, 31.9, 0.144790 }, { 2170.8, 38.4, 0.247660 },  { 2271.9, 38.3, 0.221230 },
+    { 2347.5, 23.7, 0.070150 }, { 2459.3, 37.9, 0.149470 }, { 2626.1, 33.3, 0.185440 },  { 2751.9, 52.6, 0.520100 },
+    { 2936.1, 15.0, 0.008093 }, { 3109.2, 29.8, 0.061600 }, { 3214.8, 50.0, 0.367640 },  { 3524.9, 22.7, 0.055620 },
+    { 3736.9, 59.1, 0.215670 }, { 3904.8, 15.0, 0.013355 }, { 4297.4, 33.9, 0.120830 },  { 4503.5, 58.1, 0.291340 },
+    { 4642.4, 47.0, 0.256360 }, { 5504.6, 15.0, 0.016383 }, { 6099.4, 109.5, 2.963900 }, { 6497.7, 22.5, 0.770950 }
 };
 
 // ------------------------------------------------------------------ violin: four strings, one bridge
@@ -687,10 +663,7 @@ struct Violin
                 if (m.f < 0.45 * fs)
                     bridge.add (fs, m.f, m.Q, m.m / p.admScale);
     }
-    void setString (int i, const StringData& d)
-    {
-        s[i].init (d, p);
-    }
+    void setString (int i, const StringData& d) { s[i].init (d, p); }
 
     // One sample. bowString < 0: no bow. Returns the total force on the bridge.
     double Fs[4] = { 0, 0, 0, 0 }; // each string's force on the bridge this sample (debug stems)

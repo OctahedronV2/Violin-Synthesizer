@@ -37,7 +37,8 @@ struct PlayerParams
     // auto bowing in Live mode: an overlapping note is slurred unless the slur already holds
     // slurMaxNotes notes or slurMaxTime seconds, or the note is accented (velocity up by
     // slurAccent or more): then the bow changes. 0 turns a rule off.
-    double slurMaxNotes = 0, slurMaxTime = 0, slurAccent = 0; // off: Jake heard notes no longer ringing out (2026-10-01)
+    double slurMaxNotes = 0, slurMaxTime = 0,
+           slurAccent = 0; // off: Jake heard notes no longer ringing out (2026-10-01)
     // detache in quick passages (the previous note started less than shapeIOI s before): each
     // stroke speaks, then the bow eases to strokeSus of its speed (time constant strokeTau),
     // so the notes are shaped and separated instead of an even organ-like line. 0 = off.
@@ -96,6 +97,7 @@ struct PlayerParams
     double vibWidthLo = 8.0, vibWidthHi = 30.0; // cents peak-to-peak at d = 0 / 1
     double vibRate = 5.6, vibRateDyn = 0.6; // Hz, plus per unit d
     double vibWander = 0.15; // relative random wander of rate and width
+    double vibAmount = 1.0; // the plugin's Vibrato control: scales every note's width
     double liftAfter = 0.35; // an idle string's finger lifts after this long, s
     double liftDamp = 0.25, liftDampTime = 0.03;
     double openMute = 0.1, openMuteTime = 0.15; // muting an open string the bow just left (loss per round trip, s)
@@ -110,7 +112,8 @@ struct PlayerParams
     double bite = 0.07393; // extra force at the start of every stroke (Guettler: capture needs force)
     // the player's ear: Helmholtz health from the strings (slips per period). Multiple slipping
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
-    double earUp = 0.25, earDown = 0.15, earMax = 2.106, earMin = 0.4, earRelax = 0.3, earWindow = 0.005, earWait = 0.05, earPeriods = 6.0;
+    double earUp = 0.25, earDown = 0.15, earMax = 2.106, earMin = 0.4, earRelax = 0.3, earWindow = 0.005,
+           earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
 };
 
@@ -153,7 +156,8 @@ struct Player
     double lastOn = -10.0;
     int shortRun = 0; // consecutive note starts less than quickIOI apart
     bool shaped = false, quick = false;
-    double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0, vibScale = 1.0, vibEnd = -1.0;
+    double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0, vibScale = 1.0,
+           vibEnd = -1.0;
     // the stroke shape in use (set at each new stroke from the normal or the quick settings)
     double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
@@ -225,7 +229,9 @@ struct Player
             double c = 0.12 * semis + 0.6 * std::max (0.0, semis - 7.0);
             c += 0.9 * std::abs (s - lastString);
             if (semis > 0)
-                c += inReach (semis) ? 0.0 : 0.6 + 0.1 * std::min (std::abs (semis - handPos), std::abs (semis - handPos - 5.0));
+                c += inReach (semis)
+                    ? 0.0
+                    : 0.6 + 0.1 * std::min (std::abs (semis - handPos), std::abs (semis - handPos - 5.0));
             if (semis == 0 && pitch != 55)
                 c += 0.8; // open strings can't vibrate: a violinist mostly stops the note
             if (c < bestCost)
@@ -323,7 +329,9 @@ struct Player
         // vibrato restarts on a new bow, continues (phase kept) over a slur in one position
         if (! slurred || shift)
             S.vibWidth = 0.0;
-        S.vibWidthTarget = semis > 0 ? (pp.vibWidthLo + (pp.vibWidthHi - pp.vibWidthLo) * d) * std::pow (2.0, semis / 12.0 * pp.vibPosition) : 0.0;
+        S.vibWidthTarget = semis > 0
+            ? (pp.vibWidthLo + (pp.vibWidthHi - pp.vibWidthLo) * d) * std::pow (2.0, semis / 12.0 * pp.vibPosition)
+            : 0.0;
         S.wanderR = pp.vibWander * rng.gauss() * 0.5;
         S.wanderW = pp.vibWander * rng.gauss() * 0.5;
         S.vibRate = (pp.vibRate + pp.vibRateDyn * d) * (1.0 + S.wanderR);
@@ -356,9 +364,9 @@ struct Player
                 st[s].landAt = t;
         }
         const bool rebow = anyHeld && ! chord
-                           && ((pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
-                               || (pp.slurMaxTime > 0 && t - strokeStart > pp.slurMaxTime)
-                               || (pp.slurAccent > 0 && vel127 - lastVel >= pp.slurAccent));
+            && ((pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
+                || (pp.slurMaxTime > 0 && t - strokeStart > pp.slurMaxTime)
+                || (pp.slurAccent > 0 && vel127 - lastVel >= pp.slurAccent));
         if (rebow)
             nHeld = 0; // the held note ends with this bow
         if (chord)
@@ -432,7 +440,16 @@ struct Player
         lastString = s;
         lastVel = vel127;
         if (log)
-            std::fprintf (stderr, "on %.3f p%d s%d %s%s%s hair %.3f dir %+.0f\n", t, pitch, s, strokeStart == t ? "stroke" : "slur", shaped ? " shaped" : "", quick ? " quick" : "", hair, dir);
+            std::fprintf (stderr,
+                          "on %.3f p%d s%d %s%s%s hair %.3f dir %+.0f\n",
+                          t,
+                          pitch,
+                          s,
+                          strokeStart == t ? "stroke" : "slur",
+                          shaped ? " shaped" : "",
+                          quick ? " quick" : "",
+                          hair,
+                          dir);
         lastOn = t;
         if (nHeld < 16)
             held[nHeld++] = { pitch, vel127, t, s };
@@ -462,6 +479,15 @@ struct Player
             vibEnd = v127 / 100.0;
     }
 
+    // Studio look-ahead: a sounding note's end came into view (tEnd in the player's seconds), so
+    // its vibrato can relax before the end as it does when the length is known at the start
+    void notePlanEnd (int pitch, double tEnd)
+    {
+        for (int i = 0; i < nHeld; ++i)
+            if (held[i].pitch == pitch && held[i].str >= 0 && st[held[i].str].planEnd < 0.0)
+                st[held[i].str].planEnd = tEnd;
+    }
+
     void noteOff (int pitch)
     {
         int k = 0;
@@ -483,7 +509,11 @@ struct Player
         if (nHeld == 0)
         {
             if (log)
-                std::fprintf (stderr, "off %.3f p%d %s\n", t, pitch, pp.stopBelow > 0 && t - strokeStart < pp.stopBelow ? "stop" : "release");
+                std::fprintf (stderr,
+                              "off %.3f p%d %s\n",
+                              t,
+                              pitch,
+                              pp.stopBelow > 0 && t - strokeStart < pp.stopBelow ? "stop" : "release");
             if (pp.stopBelow > 0 && t - strokeStart < pp.stopBelow)
             {
                 stopping = true;
@@ -570,7 +600,7 @@ struct Player
                 const double age = t - S.noteOn;
                 const double q = S.vibSqueeze, delay = pp.vibDelay * q;
                 const double env = std::clamp ((age - delay) / (pp.vibBloom * q), 0.0, 1.0);
-                double w = S.vibWidthTarget * vibScale * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
+                double w = S.vibWidthTarget * vibScale * pp.vibAmount * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
                 w *= std::min (pp.vibGrowMax, pp.vibGrowStart + pp.vibGrow * std::max (0.0, age - delay));
                 const double taper = (vibEnd >= 0.0 ? vibEnd : pp.vibTaper) * q;
                 if (S.planEnd > 0.0 && taper > 0.0)
@@ -672,7 +702,8 @@ struct Player
                 S.ear += (1.0 - S.ear) * std::min (1.0, dt / pp.earRelax);
             }
             S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
-            const double tau = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
+            const double tau
+                = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
             S.force += (ft - S.force) * std::min (1.0, dt / tau);
             if (S.force < 1e-5 && ft == 0.0)
                 S.force = 0.0;

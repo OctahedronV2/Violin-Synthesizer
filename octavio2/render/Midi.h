@@ -30,8 +30,18 @@ inline bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, st
         return false;
     std::vector<uint8_t> d ((std::istreambuf_iterator<char> (f)), {});
     size_t p = 0;
-    auto u32 = [&] { uint32_t v = (d[p] << 24) | (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3]; p += 4; return v; };
-    auto u16 = [&] { uint32_t v = (d[p] << 8) | d[p + 1]; p += 2; return v; };
+    auto u32 = [&]
+    {
+        uint32_t v = (d[p] << 24) | (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3];
+        p += 4;
+        return v;
+    };
+    auto u16 = [&]
+    {
+        uint32_t v = (d[p] << 8) | d[p + 1];
+        p += 2;
+        return v;
+    };
     if (d.size() < 14 || std::memcmp (&d[0], "MThd", 4) != 0)
         return false;
     p = 4;
@@ -41,7 +51,14 @@ inline bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, st
     const int division = u16();
     p = 8 + hlen;
 
-    struct Raw { uint64_t tick; int order; uint8_t status, a, b; uint32_t tempo; bool isTempo; };
+    struct Raw
+    {
+        uint64_t tick;
+        int order;
+        uint8_t status, a, b;
+        uint32_t tempo;
+        bool isTempo;
+    };
     std::vector<Raw> raw;
     int order = 0;
     for (int t = 0; t < ntracks && p + 8 <= d.size(); ++t)
@@ -57,23 +74,39 @@ inline bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, st
         {
             uint32_t delta = 0;
             uint8_t c;
-            do { c = d[p++]; delta = (delta << 7) | (c & 0x7f); } while (c & 0x80);
+            do
+            {
+                c = d[p++];
+                delta = (delta << 7) | (c & 0x7f);
+            } while (c & 0x80);
             tick += delta;
             uint8_t st = d[p];
-            if (st & 0x80) ++p; else st = running;
+            if (st & 0x80)
+                ++p;
+            else
+                st = running;
             if (st == 0xff)
             {
                 const uint8_t type = d[p++];
                 uint32_t l = 0;
-                do { c = d[p++]; l = (l << 7) | (c & 0x7f); } while (c & 0x80);
+                do
+                {
+                    c = d[p++];
+                    l = (l << 7) | (c & 0x7f);
+                } while (c & 0x80);
                 if (type == 0x51 && l == 3)
-                    raw.push_back ({ tick, order++, 0, 0, 0, uint32_t ((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]), true });
+                    raw.push_back (
+                        { tick, order++, 0, 0, 0, uint32_t ((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]), true });
                 p += l;
             }
             else if (st == 0xf0 || st == 0xf7)
             {
                 uint32_t l = 0;
-                do { c = d[p++]; l = (l << 7) | (c & 0x7f); } while (c & 0x80);
+                do
+                {
+                    c = d[p++];
+                    l = (l << 7) | (c & 0x7f);
+                } while (c & 0x80);
                 p += l;
             }
             else
@@ -96,7 +129,11 @@ inline bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, st
     {
         sec += (r.tick - lastTick) * secPerTick;
         lastTick = r.tick;
-        if (r.isTempo) { secPerTick = r.tempo / 1e6 / division; continue; }
+        if (r.isTempo)
+        {
+            secPerTick = r.tempo / 1e6 / division;
+            continue;
+        }
         const int hi = r.status & 0xf0;
         if (hi == 0x90 && r.b > 0)
         {
