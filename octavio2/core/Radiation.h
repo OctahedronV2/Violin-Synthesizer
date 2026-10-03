@@ -17,8 +17,8 @@
 
 #include <algorithm>
 #include <array>
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -308,8 +308,9 @@ public:
         for (int e = 0; e < 2; ++e)
         {
             const double t = (double) (clock + e * n) / fs, tau = 2 * 3.14159265358979323846;
-            const double u[2] = { movement * (0.6 * std::sin (tau * 0.07 * t) + 0.4 * std::sin (tau * 0.13 * t + 1.0)),
-                                  movement * (0.6 * std::sin (tau * 0.083 * t + 2.0) + 0.4 * std::sin (tau * 0.17 * t + 4.0)) };
+            const double u[2]
+                = { movement * (0.6 * std::sin (tau * 0.07 * t) + 0.4 * std::sin (tau * 0.13 * t + 1.0)),
+                    movement * (0.6 * std::sin (tau * 0.083 * t + 2.0) + 0.4 * std::sin (tau * 0.17 * t + 4.0)) };
             for (int c = 0; c < 2; ++c)
             {
                 const double a = std::min (1.0, std::abs (u[c]));
@@ -332,8 +333,8 @@ public:
             float s[2];
             for (int c = 0; c < 2; ++c)
                 s[c] = (w0[c][0] + a * (w0[c][1] - w0[c][0])) * main[c][i]
-                       + (w1[c][0] + a * (w1[c][1] - w1[c][0])) * other[c][0][i]
-                       + (w2[c][0] + a * (w2[c][1] - w2[c][0])) * other[c][1][i];
+                    + (w1[c][0] + a * (w1[c][1] - w1[c][0])) * other[c][0][i]
+                    + (w2[c][0] + a * (w2[c][1] - w2[c][0])) * other[c][1][i];
             const float wd = wStart + a * (wEnd - wStart);
             const float mid = 0.5f * (s[0] + s[1]), side = 0.5f * wd * (s[0] - s[1]);
             dline[0][dpos] = (float) air[0].tick (mid + side);

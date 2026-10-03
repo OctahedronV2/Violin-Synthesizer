@@ -18,11 +18,23 @@ inline const juce::ParameterID room { "room", 1 };
 inline const juce::ParameterID reverb { "reverb", 1 };
 inline const juce::ParameterID volume { "volume", 1 };
 inline const juce::ParameterID dynamics { "dynamics", 1 };
+// radiation and room (M1)
+inline const juce::ParameterID violin { "violin", 1 };
+inline const juce::ParameterID mic { "mic", 1 };
+inline const juce::ParameterID width { "width", 1 };
+inline const juce::ParameterID movement { "movement", 1 };
+inline const juce::ParameterID distance { "distance", 1 };
+inline const juce::ParameterID bridge { "bridge", 1 };
+inline const juce::ParameterID mute { "mute", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
 // loads them (Processor::loadRadiationData).
 const juce::StringArray& roomNames();
+
+// The Violin and Mic position choices, in the order the engine loads them
+const juce::StringArray& violinNames();
+const juce::StringArray& micNames();
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -42,5 +54,6 @@ public:
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
+    std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute;
 };
 } // namespace octavio2::params

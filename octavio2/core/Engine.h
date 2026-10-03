@@ -34,7 +34,7 @@ struct EngineSettings
     int violin = 0; // RadiationData::bodies: Stoppani, Klimke, Levaggi, Iowa
     int mic = 0; // RadiationData::mics: front, above, player's ear, side
     double width = 1.0; // stereo width, 0..2
-    double movement = 0.0; // player's sway, 0..1
+    double movement = 0.5; // player's sway, 0..1 (0.5: the M1 clips' middle setting)
     double distance = 2.0; // m, 0.5..10
     double bridgeHz = 2900.0; // bridge rocking resonance, 2400 (dark) .. 3600 (bright)
     int mute = 0; // 0 off, 1 con sordino, 2 practice mute

@@ -16,6 +16,18 @@ const juce::StringArray& roomNames()
     return names;
 }
 
+const juce::StringArray& violinNames()
+{
+    static const juce::StringArray names { "Stoppani", "Klimke", "Levaggi", "Iowa" };
+    return names;
+}
+
+const juce::StringArray& micNames()
+{
+    static const juce::StringArray names { "Front", "Above", "Player's ear", "Side" };
+    return names;
+}
+
 namespace
 {
 std::unique_ptr<juce::AudioParameterFloat> floatParam (const juce::ParameterID& id,
@@ -59,6 +71,21 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::volume, "Volume", { -36.0f, 12.0f }, 0.0f, "dB", 1));
     // added to every note's dynamics, from velocity (0 = as played)
     layout.add (floatParam (id::dynamics, "Dynamics", { -50.0f, 50.0f }, 0.0f, "%", 0));
+    // radiation and room (M1, Jake approved the clips 2026-10-03)
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::violin, "Violin", violinNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::mic, "Mic Position", micNames(), 0));
+    layout.add (floatParam (id::width, "Stereo Width", { 0.0f, 200.0f }, 100.0f, "%", 0));
+    // the player's sway: 0 is a violin on a stand
+    layout.add (floatParam (id::movement, "Movement", { 0.0f, 100.0f }, 50.0f, "%", 0));
+    juce::NormalisableRange<float> distance { 0.5f, 10.0f };
+    distance.setSkewForCentre (2.0f);
+    layout.add (floatParam (id::distance, "Distance", distance, 2.0f, "m", 1));
+    // the bridge's rocking resonance: lower is darker
+    layout.add (floatParam (id::bridge, "Bridge", { 2400.0f, 3600.0f }, 2900.0f, "Hz", 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::mute,
+                                                              "Mute",
+                                                              juce::StringArray { "Off", "Con sordino", "Practice" },
+                                                              0));
     return layout;
 }
 
@@ -71,7 +98,14 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       room (s.getRawParameterValue (id::room.getParamID())),
       reverb (s.getRawParameterValue (id::reverb.getParamID())),
       volume (s.getRawParameterValue (id::volume.getParamID())),
-      dynamics (s.getRawParameterValue (id::dynamics.getParamID()))
+      dynamics (s.getRawParameterValue (id::dynamics.getParamID())),
+      violin (s.getRawParameterValue (id::violin.getParamID())),
+      mic (s.getRawParameterValue (id::mic.getParamID())),
+      width (s.getRawParameterValue (id::width.getParamID())),
+      movement (s.getRawParameterValue (id::movement.getParamID())),
+      distance (s.getRawParameterValue (id::distance.getParamID())),
+      bridge (s.getRawParameterValue (id::bridge.getParamID())),
+      mute (s.getRawParameterValue (id::mute.getParamID()))
 {
 }
 
@@ -86,6 +120,13 @@ o2::EngineSettings Reader::read() const
     e.reverbDb = reverb->load();
     e.volumeDb = volume->load();
     e.dynamics = dynamics->load() / 100.0;
+    e.violin = juce::roundToInt (violin->load());
+    e.mic = juce::roundToInt (mic->load());
+    e.width = width->load() / 100.0;
+    e.movement = movement->load() / 100.0;
+    e.distance = distance->load();
+    e.bridgeHz = bridge->load();
+    e.mute = juce::roundToInt (mute->load());
     return e;
 }
 
