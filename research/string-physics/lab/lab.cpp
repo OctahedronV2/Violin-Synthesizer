@@ -34,10 +34,14 @@ static int stringIndex (const char* s)
 {
     switch (s[0])
     {
-        case 'G': return 0;
-        case 'D': return 1;
-        case 'A': return 2;
-        default: return 3;
+        case 'G':
+            return 0;
+        case 'D':
+            return 1;
+        case 'A':
+            return 2;
+        default:
+            return 3;
     }
 }
 
@@ -56,7 +60,9 @@ static void setup (Violin& v)
 {
     Params& p = v.p;
     if (opts.count ("friction"))
-        p.friction = opts["friction"] == "thermal" ? Friction::thermal : opts["friction"] == "thermalHyp" ? Friction::thermalHyp : Friction::hyperbolic;
+        p.friction = opts["friction"] == "thermal" ? Friction::thermal
+            : opts["friction"] == "thermalHyp"     ? Friction::thermalHyp
+                                                   : Friction::hyperbolic;
 #define O(name) p.name = opt (#name, p.name)
     O (muS);
     O (muD);
@@ -208,7 +214,14 @@ static Regime classify (const std::vector<double>& st, double t0, double t1, dou
     return r;
 }
 
-static Renderer runNote (int si, double midi, double force, double speed, double beta, double dur, double attackAccel = 0, double ring = 1.5)
+static Renderer runNote (int si,
+                         double midi,
+                         double force,
+                         double speed,
+                         double beta,
+                         double dur,
+                         double attackAccel = 0,
+                         double ring = 1.5)
 {
     Renderer R;
     setup (R.v);
@@ -279,8 +292,14 @@ int main (int argc, char** argv)
     if (mode == "note")
     {
         const int si = stringIndex (pos[0].c_str());
-        auto R = runNote (si, std::atof (pos[1].c_str()), std::atof (pos[2].c_str()), std::atof (pos[3].c_str()),
-                          std::atof (pos[4].c_str()), std::atof (pos[5].c_str()), opt ("accel", 0), opt ("ring", 1.5));
+        auto R = runNote (si,
+                          std::atof (pos[1].c_str()),
+                          std::atof (pos[2].c_str()),
+                          std::atof (pos[3].c_str()),
+                          std::atof (pos[4].c_str()),
+                          std::atof (pos[5].c_str()),
+                          opt ("accel", 0),
+                          opt ("ring", 1.5));
         writeWav (pos[6], R.out, 48000);
         if (std::getenv ("LAB_TRACE"))
         {
@@ -297,8 +316,17 @@ int main (int argc, char** argv)
             std::fclose (f);
         }
         if (opt ("ringFrom", 0) > 0)
-            std::printf ("ring energy G %.3g D %.3g A %.3g E %.3g\n", R.ringEnergy[0], R.ringEnergy[1], R.ringEnergy[2], R.ringEnergy[3]);
-        std::printf ("regime %d slips/period %.3f cv %.4f f %.2f (string f1 %.2f)\n", r.kind, r.slipsPerPeriod, r.cv, r.freq, R.v.s[si].f1);
+            std::printf ("ring energy G %.3g D %.3g A %.3g E %.3g\n",
+                         R.ringEnergy[0],
+                         R.ringEnergy[1],
+                         R.ringEnergy[2],
+                         R.ringEnergy[3]);
+        std::printf ("regime %d slips/period %.3f cv %.4f f %.2f (string f1 %.2f)\n",
+                     r.kind,
+                     r.slipsPerPeriod,
+                     r.cv,
+                     r.freq,
+                     R.v.s[si].f1);
         return 0;
     }
     if (mode == "pizz")
@@ -394,7 +422,12 @@ int main (int argc, char** argv)
                 const double F = fmin * std::pow (fmax / fmin, j / (nf - 1.0));
                 auto R = runNote (si, midi, F, speed, b, dur, 0, 0.0);
                 const auto r = classify (R.slipTimes[si], dur * 0.5, dur, R.v.s[si].period / R.v.fs);
-                const char* c = r.kind == 1 ? "H" : r.kind == 0 ? "." : r.kind == -1 ? "x" : r.kind == 2 ? "2" : r.kind == 3 ? "3" : "m";
+                const char* c = r.kind == 1 ? "H"
+                    : r.kind == 0           ? "."
+                    : r.kind == -1          ? "x"
+                    : r.kind == 2           ? "2"
+                    : r.kind == 3           ? "3"
+                                            : "m";
                 std::printf ("     %s", c);
                 helm += r.kind == 1;
                 ++total;
@@ -480,8 +513,11 @@ int main (int argc, char** argv)
                 ++nUp;
             }
         }
-        std::printf ("c_lower %.2f g/s  c_upper %.3f kg/s  (beta points %d / %d)\n", nLo ? std::exp (sumLo / nLo) / speed * 1000 : -1.0,
-                     nUp ? std::exp (sumUp / nUp) / speed : -1.0, nLo, nUp);
+        std::printf ("c_lower %.2f g/s  c_upper %.3f kg/s  (beta points %d / %d)\n",
+                     nLo ? std::exp (sumLo / nLo) / speed * 1000 : -1.0,
+                     nUp ? std::exp (sumUp / nUp) / speed : -1.0,
+                     nLo,
+                     nUp);
         return 0;
     }
     if (mode == "guettler")
@@ -504,7 +540,8 @@ int main (int argc, char** argv)
             for (int j = 0; j < nf; ++j)
             {
                 const double F = fmin * std::pow (fmax / fmin, j / (nf - 1.0));
-                auto R = runNote (si, midi, F, opt ("vmax", 0.3), beta, dur, a, 0.0); // constant acceleration up to vmax
+                auto R
+                    = runNote (si, midi, F, opt ("vmax", 0.3), beta, dur, a, 0.0); // constant acceleration up to vmax
                 const double P = R.v.s[si].period / R.v.fs;
                 const auto& st = R.slipTimes[si];
                 const double tr = transient (st, P, dur);
@@ -529,7 +566,8 @@ int main (int argc, char** argv)
     if (mode == "flatten")
     {
         const int si = stringIndex (pos[0].c_str());
-        const double midi = std::atof (pos[1].c_str()), speed = std::atof (pos[2].c_str()), beta = std::atof (pos[3].c_str());
+        const double midi = std::atof (pos[1].c_str()), speed = std::atof (pos[2].c_str()),
+                     beta = std::atof (pos[3].c_str());
         const double dur = 1.0;
         for (int j = 0; j < 14; ++j)
         {
@@ -553,8 +591,11 @@ int main (int argc, char** argv)
                 num += k * f1 * a;
                 den += a;
             }
-            std::printf ("force %6.3f regime %2d cents %+7.2f centroid %6.0f Hz\n", F, r.kind,
-                         r.freq > 0 ? 1200 * std::log2 (r.freq / R.v.s[si].f1) : 0.0, den > 0 ? num / den : 0.0);
+            std::printf ("force %6.3f regime %2d cents %+7.2f centroid %6.0f Hz\n",
+                         F,
+                         r.kind,
+                         r.freq > 0 ? 1200 * std::log2 (r.freq / R.v.s[si].f1) : 0.0,
+                         den > 0 ? num / den : 0.0);
         }
         return 0;
     }
@@ -570,7 +611,10 @@ int main (int argc, char** argv)
             acc += v.tick (vb, fb);
         auto t1 = std::chrono::steady_clock::now();
         const double sec = std::chrono::duration<double> (t1 - t0).count();
-        std::printf ("%.3f ms per second of audio (4 strings, 1 bowed, %zu bridge modes) [%g]\n", sec / 10 * 1000, v.bridge.modes.size(), acc * 0);
+        std::printf ("%.3f ms per second of audio (4 strings, 1 bowed, %zu bridge modes) [%g]\n",
+                     sec / 10 * 1000,
+                     v.bridge.modes.size(),
+                     acc * 0);
         return 0;
     }
     std::fprintf (stderr, "unknown mode\n");

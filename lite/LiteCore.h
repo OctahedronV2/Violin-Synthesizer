@@ -25,11 +25,26 @@ namespace m
 constexpr double pi = 3.14159265358979323846;
 constexpr double ln2 = 0.69314718055994530942;
 
-inline double abs (double x) { return x < 0 ? -x : x; }
-inline double min (double a, double b) { return a < b ? a : b; }
-inline double max (double a, double b) { return a > b ? a : b; }
-inline double clamp (double x, double lo, double hi) { return x < lo ? lo : x > hi ? hi : x; }
-inline double sqrt (double x) { return __builtin_sqrt (x); }
+inline double abs (double x)
+{
+    return x < 0 ? -x : x;
+}
+inline double min (double a, double b)
+{
+    return a < b ? a : b;
+}
+inline double max (double a, double b)
+{
+    return a > b ? a : b;
+}
+inline double clamp (double x, double lo, double hi)
+{
+    return x < lo ? lo : x > hi ? hi : x;
+}
+inline double sqrt (double x)
+{
+    return __builtin_sqrt (x);
+}
 inline double floor (double x)
 {
     const double t = (double) (long long) x;
@@ -54,7 +69,10 @@ inline double exp2 (double x)
     const unsigned long long bits = (unsigned long long) e << 52;
     return s * __builtin_bit_cast (double, bits);
 }
-inline double exp (double x) { return exp2 (x * 1.44269504088896340736); }
+inline double exp (double x)
+{
+    return exp2 (x * 1.44269504088896340736);
+}
 
 inline double log (double x)
 {
@@ -78,9 +96,18 @@ inline double log (double x)
     }
     return 2.0 * sum + e * ln2;
 }
-inline double pow (double a, double b) { return exp (b * log (a)); }
-inline double pow2 (double x) { return exp2 (x); }
-inline double db (double d) { return exp2 (d * 0.16609640474436811739); } // 10^(d/20)
+inline double pow (double a, double b)
+{
+    return exp (b * log (a));
+}
+inline double pow2 (double x)
+{
+    return exp2 (x);
+}
+inline double db (double d)
+{
+    return exp2 (d * 0.16609640474436811739);
+} // 10^(d/20)
 
 inline double sin (double x)
 {
@@ -98,7 +125,10 @@ inline double sin (double x)
     }
     return s;
 }
-inline double cos (double x) { return sin (x + pi / 2); }
+inline double cos (double x)
+{
+    return sin (x + pi / 2);
+}
 
 inline double atan (double x)
 {
@@ -140,7 +170,10 @@ inline double tanh (double x)
     const double e = exp (2.0 * x);
     return (e - 1.0) / (e + 1.0);
 }
-inline double midiHz (double n) { return 440.0 * exp2 ((n - 69.0) / 12.0); }
+inline double midiHz (double n)
+{
+    return 440.0 * exp2 ((n - 69.0) / 12.0);
+}
 } // namespace m
 
 // ------------------------------------------------------------------ parameters
@@ -266,7 +299,8 @@ struct Delay
 };
 
 // Bow-string friction, hyperbolic curve. Returns the string's velocity at the bow.
-inline double friction (double vBow, double vH, double force, double Z, double muS, double muD, double v0, bool& sticking)
+inline double
+friction (double vBow, double vH, double force, double Z, double muS, double muD, double v0, bool& sticking)
 {
     if (force <= 0.0)
     {
@@ -274,7 +308,8 @@ inline double friction (double vBow, double vH, double force, double Z, double m
         return vH;
     }
     const double dh = vBow - vH, adh = m::abs (dh), a = 2.0 * Z;
-    auto root = [&] {
+    auto root = [&]
+    {
         const double b = a * v0 + force * muD - a * adh, c = (force * muS - a * adh) * v0;
         const double disc = b * b - 4 * a * c;
         if (disc < 0)
@@ -674,7 +709,8 @@ struct Engine
         {
             const double k = i - (decTaps - 1) / 2.0, fc = 0.21; // 20 kHz at 96 kHz
             const double sinc = k == 0 ? 2 * fc : m::sin (2 * m::pi * fc * k) / (m::pi * k);
-            decH[i] = sinc * (0.42 - 0.5 * m::cos (2 * m::pi * i / (decTaps - 1)) + 0.08 * m::cos (4 * m::pi * i / (decTaps - 1)));
+            decH[i] = sinc
+                * (0.42 - 0.5 * m::cos (2 * m::pi * i / (decTaps - 1)) + 0.08 * m::cos (4 * m::pi * i / (decTaps - 1)));
         }
         body.initTables();
         body.load (body.irLength);
@@ -726,7 +762,9 @@ struct Engine
         {
             // The line stays on the most recent free voice; chord notes take the oldest.
             for (int k = 0; k < maxVoices; ++k)
-                if (! voices[k].held && (v < 0 || (chord ? voices[k].lastUsed < voices[v].lastUsed : voices[k].lastUsed > voices[v].lastUsed)))
+                if (! voices[k].held
+                    && (v < 0
+                        || (chord ? voices[k].lastUsed < voices[v].lastUsed : voices[k].lastUsed > voices[v].lastUsed)))
                     v = k;
             if (v < 0)
                 v = 0;

@@ -202,7 +202,8 @@ struct String
         note = n;
         f1 = 440.0 * std::pow (2.0, (n - 69.0) / 12.0);
         // intrinsic losses, set from decay times in seconds (so the same at any rate)
-        const double lo = P->perString ? d.t60lo : 2.5, hi = P->perString ? d.t60hi : 0.25, fh = P->perString ? d.fhi : 4000.0;
+        const double lo = P->perString ? d.t60lo : 2.5, hi = P->perString ? d.t60hi : 0.25,
+                     fh = P->perString ? d.fhi : 4000.0;
         g = std::pow (10.0, -3.0 / (lo * f1));
         {
             const double r = std::pow (10.0, -3.0 / f1 * (1.0 / hi - 1.0 / lo));
@@ -259,7 +260,8 @@ struct String
         const double gap = gapSamples();
         dBr = std::max (1.0, beta * period / 2.0);
         // the nut side loses the extra delay of the bow-width gaps
-        dN = std::max (1.0, N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
+        dN = std::max (1.0,
+                       N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
     }
 
     int bowPointsNow() const { return std::clamp (P->bowPoints, 1, 4); }
@@ -288,33 +290,34 @@ struct String
 
     double hyperbolic (int k, double vBow, double vh, double force, double a)
     {
-            const double muS = P->muS, muD = P->muD, v0 = P->v0;
-            const double dh = vBow - vh, adh = std::abs (dh);
-            auto root = [&] {
-                const double b = a * v0 + force * muD - a * adh, c = (force * muS - a * adh) * v0;
-                const double disc = b * b - 4 * a * c;
-                if (disc < 0)
-                    return -1.0;
-                const double r = (-b + std::sqrt (disc)) / (2 * a);
-                return r > 0 ? r : -1.0;
-            };
-            double slip;
-            if (a * adh <= muS * force)
+        const double muS = P->muS, muD = P->muD, v0 = P->v0;
+        const double dh = vBow - vh, adh = std::abs (dh);
+        auto root = [&]
+        {
+            const double b = a * v0 + force * muD - a * adh, c = (force * muS - a * adh) * v0;
+            const double disc = b * b - 4 * a * c;
+            if (disc < 0)
+                return -1.0;
+            const double r = (-b + std::sqrt (disc)) / (2 * a);
+            return r > 0 ? r : -1.0;
+        };
+        double slip;
+        if (a * adh <= muS * force)
+        {
+            if (stick[k])
+                return vBow;
+            slip = root();
+            if (slip < 0)
             {
-                if (stick[k])
-                    return vBow;
-                slip = root();
-                if (slip < 0)
-                {
-                    stick[k] = true;
-                    return vBow;
-                }
+                stick[k] = true;
+                return vBow;
             }
-            else
-                slip = root();
-            stick[k] = false;
-            return vBow - (dh > 0 ? slip : -slip);
-            }
+        }
+        else
+            slip = root();
+        stick[k] = false;
+        return vBow - (dh > 0 ? slip : -slip);
+    }
 
     // Friction at one contact point. a = junction impedance seen by the friction force
     // (force f gives velocity change f / a). Returns the contact point's velocity.
@@ -408,7 +411,8 @@ struct String
         const double tPeriod = period / P->torsionSpeed;
         const double tGap = K > 1 ? std::max (1.0, gap / P->torsionSpeed) : 0.0;
         const double tR = std::exp (-pi / (2.0 * P->torsionQ)); // per reflection
-        const double tdB = std::max (1.0, beta * tPeriod), tdN = std::max (1.0, (1 - beta) * tPeriod - 2.0 * (K - 1) * tGap);
+        const double tdB = std::max (1.0, beta * tPeriod),
+                     tdN = std::max (1.0, (1 - beta) * tPeriod - 2.0 * (K - 1) * tGap);
         double fromB[4], fromN[4], tfromB[4] = {}, tfromN[4] = {};
         for (int k = 0; k < K; ++k)
         {
@@ -575,10 +579,7 @@ struct Violin
         }
         bridge.clear();
     }
-    void setString (int i, const StringData& d)
-    {
-        s[i].init (d, p);
-    }
+    void setString (int i, const StringData& d) { s[i].init (d, p); }
 
     // One sample. bowString < 0: no bow. Returns the total force on the bridge.
     double tick (const double* vBow, const double* force)

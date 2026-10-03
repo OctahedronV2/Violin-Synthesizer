@@ -103,7 +103,8 @@ struct BowString
         {
             const double k = i - (decTaps - 1) / 2.0, fc = 0.21;
             const double sinc = k == 0 ? 2 * fc : m::sin (2 * m::pi * fc * k) / (m::pi * k);
-            decH[i] = sinc * (0.42 - 0.5 * m::cos (2 * m::pi * i / (decTaps - 1)) + 0.08 * m::cos (4 * m::pi * i / (decTaps - 1)));
+            decH[i] = sinc
+                * (0.42 - 0.5 * m::cos (2 * m::pi * i / (decTaps - 1)) + 0.08 * m::cos (4 * m::pi * i / (decTaps - 1)));
         }
         bridge.clear();
         nut.clear();
@@ -258,7 +259,8 @@ struct BowString
                         hairY[k] = 0.0;
                 }
                 else
-                    dv = friction (vBow, vh, force * grainFactor (k), impedance, muS, muD, v0, stickK[k]) - vh; // f / (2Z)
+                    dv = friction (vBow, vh, force * grainFactor (k), impedance, muS, muD, v0, stickK[k])
+                        - vh; // f / (2Z)
                 const double v = vh + dv;
                 const double toB = fromN[k] + dv, toN = fromB[k] + dv;
                 if (k == 0)

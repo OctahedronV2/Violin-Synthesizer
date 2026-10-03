@@ -46,8 +46,18 @@ bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, std::vect
         return false;
     std::vector<uint8_t> d ((std::istreambuf_iterator<char> (f)), {});
     size_t p = 0;
-    auto u32 = [&] { uint32_t v = (d[p] << 24) | (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3]; p += 4; return v; };
-    auto u16 = [&] { uint32_t v = (d[p] << 8) | d[p + 1]; p += 2; return v; };
+    auto u32 = [&]
+    {
+        uint32_t v = (d[p] << 24) | (d[p + 1] << 16) | (d[p + 2] << 8) | d[p + 3];
+        p += 4;
+        return v;
+    };
+    auto u16 = [&]
+    {
+        uint32_t v = (d[p] << 8) | d[p + 1];
+        p += 2;
+        return v;
+    };
     if (d.size() < 14 || std::memcmp (&d[0], "MThd", 4) != 0)
         return false;
     p = 4;
@@ -57,7 +67,14 @@ bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, std::vect
     const int division = u16();
     p = 8 + hlen;
 
-    struct Raw { uint64_t tick; int order; uint8_t status, a, b; uint32_t tempo; bool isTempo; };
+    struct Raw
+    {
+        uint64_t tick;
+        int order;
+        uint8_t status, a, b;
+        uint32_t tempo;
+        bool isTempo;
+    };
     std::vector<Raw> raw;
     int order = 0;
     for (int t = 0; t < ntracks && p + 8 <= d.size(); ++t)
@@ -73,23 +90,39 @@ bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, std::vect
         {
             uint32_t delta = 0;
             uint8_t c;
-            do { c = d[p++]; delta = (delta << 7) | (c & 0x7f); } while (c & 0x80);
+            do
+            {
+                c = d[p++];
+                delta = (delta << 7) | (c & 0x7f);
+            } while (c & 0x80);
             tick += delta;
             uint8_t st = d[p];
-            if (st & 0x80) ++p; else st = running;
+            if (st & 0x80)
+                ++p;
+            else
+                st = running;
             if (st == 0xff)
             {
                 const uint8_t type = d[p++];
                 uint32_t l = 0;
-                do { c = d[p++]; l = (l << 7) | (c & 0x7f); } while (c & 0x80);
+                do
+                {
+                    c = d[p++];
+                    l = (l << 7) | (c & 0x7f);
+                } while (c & 0x80);
                 if (type == 0x51 && l == 3)
-                    raw.push_back ({ tick, order++, 0, 0, 0, uint32_t ((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]), true });
+                    raw.push_back (
+                        { tick, order++, 0, 0, 0, uint32_t ((d[p] << 16) | (d[p + 1] << 8) | d[p + 2]), true });
                 p += l;
             }
             else if (st == 0xf0 || st == 0xf7)
             {
                 uint32_t l = 0;
-                do { c = d[p++]; l = (l << 7) | (c & 0x7f); } while (c & 0x80);
+                do
+                {
+                    c = d[p++];
+                    l = (l << 7) | (c & 0x7f);
+                } while (c & 0x80);
                 p += l;
             }
             else
@@ -112,7 +145,11 @@ bool readMidi (const std::string& path, std::vector<NoteEvent>& notes, std::vect
     {
         sec += (r.tick - lastTick) * secPerTick;
         lastTick = r.tick;
-        if (r.isTempo) { secPerTick = r.tempo / 1e6 / division; continue; }
+        if (r.isTempo)
+        {
+            secPerTick = r.tempo / 1e6 / division;
+            continue;
+        }
         const int hi = r.status & 0xf0;
         if (hi == 0x90 && r.b > 0)
         {
@@ -152,12 +189,21 @@ bool readWav (const std::string& path, std::vector<std::vector<float>>& ch, doub
         std::memcpy (&len, &d[p + 4], 4);
         if (std::memcmp (&d[p], "fmt ", 4) == 0)
         {
-            uint16_t v; uint32_t r;
-            std::memcpy (&v, &d[p + 8], 2); fmt = v;
-            std::memcpy (&v, &d[p + 10], 2); nch = v;
-            std::memcpy (&r, &d[p + 12], 4); rate = r;
-            std::memcpy (&v, &d[p + 22], 2); bits = v;
-            if (fmt == 0xfffe) { std::memcpy (&v, &d[p + 32], 2); fmt = v; }
+            uint16_t v;
+            uint32_t r;
+            std::memcpy (&v, &d[p + 8], 2);
+            fmt = v;
+            std::memcpy (&v, &d[p + 10], 2);
+            nch = v;
+            std::memcpy (&r, &d[p + 12], 4);
+            rate = r;
+            std::memcpy (&v, &d[p + 22], 2);
+            bits = v;
+            if (fmt == 0xfffe)
+            {
+                std::memcpy (&v, &d[p + 32], 2);
+                fmt = v;
+            }
         }
         else if (std::memcmp (&d[p], "data", 4) == 0)
         {
@@ -168,10 +214,25 @@ bool readWav (const std::string& path, std::vector<std::vector<float>>& ch, doub
                 for (int c = 0; c < nch; ++c, s += bps)
                 {
                     float x = 0;
-                    if (fmt == 3 && bits == 32) std::memcpy (&x, s, 4);
-                    else if (bits == 16) { int16_t v; std::memcpy (&v, s, 2); x = v / 32768.0f; }
-                    else if (bits == 24) { int32_t v = (s[0] << 8) | (s[1] << 16) | (s[2] << 24); x = v / 2147483648.0f; }
-                    else if (bits == 32) { int32_t v; std::memcpy (&v, s, 4); x = v / 2147483648.0f; }
+                    if (fmt == 3 && bits == 32)
+                        std::memcpy (&x, s, 4);
+                    else if (bits == 16)
+                    {
+                        int16_t v;
+                        std::memcpy (&v, s, 2);
+                        x = v / 32768.0f;
+                    }
+                    else if (bits == 24)
+                    {
+                        int32_t v = (s[0] << 8) | (s[1] << 16) | (s[2] << 24);
+                        x = v / 2147483648.0f;
+                    }
+                    else if (bits == 32)
+                    {
+                        int32_t v;
+                        std::memcpy (&v, s, 4);
+                        x = v / 2147483648.0f;
+                    }
                     ch[c][i] = x;
                 }
             return true;
@@ -186,10 +247,18 @@ void writeWav (const std::string& path, const std::vector<float>& l, const std::
     std::ofstream f (path, std::ios::binary);
     const uint32_t n = l.size(), data = n * 4, riff = 36 + data, sr = rate, br = rate * 4, fmtLen = 16;
     const uint16_t pcm = 1, ch = 2, align = 4, bits = 16;
-    f.write ("RIFF", 4); f.write ((const char*) &riff, 4); f.write ("WAVEfmt ", 8);
-    f.write ((const char*) &fmtLen, 4); f.write ((const char*) &pcm, 2); f.write ((const char*) &ch, 2);
-    f.write ((const char*) &sr, 4); f.write ((const char*) &br, 4); f.write ((const char*) &align, 2);
-    f.write ((const char*) &bits, 2); f.write ("data", 4); f.write ((const char*) &data, 4);
+    f.write ("RIFF", 4);
+    f.write ((const char*) &riff, 4);
+    f.write ("WAVEfmt ", 8);
+    f.write ((const char*) &fmtLen, 4);
+    f.write ((const char*) &pcm, 2);
+    f.write ((const char*) &ch, 2);
+    f.write ((const char*) &sr, 4);
+    f.write ((const char*) &br, 4);
+    f.write ((const char*) &align, 2);
+    f.write ((const char*) &bits, 2);
+    f.write ("data", 4);
+    f.write ((const char*) &data, 4);
     for (uint32_t i = 0; i < n; ++i)
         for (float x : { l[i], r[i] })
         {
@@ -235,14 +304,18 @@ int main (int argc, char** argv)
             continue;
         const auto name = a.substr (0, eq);
         const double v = std::atof (a.c_str() + eq + 1);
-        if (name == "start") start = v;
-        else if (name == "length") length = v;
-        else if (name == "norm") norm = v;
+        if (name == "start")
+            start = v;
+        else if (name == "length")
+            length = v;
+        else if (name == "norm")
+            norm = v;
         else
         {
             int found = -1;
             for (int k = 0; k < lite::numParams; ++k)
-                if (name == lite::kParams[k].id) found = k;
+                if (name == lite::kParams[k].id)
+                    found = k;
             if (found < 0)
             {
                 std::fprintf (stderr, "unknown parameter: %s\n", name.c_str());
@@ -259,7 +332,12 @@ int main (int argc, char** argv)
         std::fprintf (stderr, "cannot read %s\n", argv[1]);
         return 1;
     }
-    struct Ev { double t; int type, a; double b; }; // 0 off, 1 on, 2 cc
+    struct Ev
+    {
+        double t;
+        int type, a;
+        double b;
+    }; // 0 off, 1 on, 2 cc
     std::vector<Ev> evs;
     double endT = 0;
     for (const auto& n : notes)
@@ -270,7 +348,9 @@ int main (int argc, char** argv)
     }
     for (const auto& c : ccs)
         evs.push_back ({ c.t, 2, c.cc, c.value });
-    std::stable_sort (evs.begin(), evs.end(), [] (const Ev& x, const Ev& y) { return x.t < y.t || (x.t == y.t && x.type < y.type); });
+    std::stable_sort (evs.begin(),
+                      evs.end(),
+                      [] (const Ev& x, const Ev& y) { return x.t < y.t || (x.t == y.t && x.type < y.type); });
     endT = std::min (endT + 2.5, start + length);
 
     const size_t total = (size_t) (endT * fs), skip = (size_t) (start * fs);
@@ -281,17 +361,22 @@ int main (int argc, char** argv)
         while (ei < evs.size() && (size_t) (evs[ei].t * fs) <= pos)
         {
             const auto& e = evs[ei++];
-            if (e.type == 1) engine->noteOn (e.a, e.b);
-            else if (e.type == 0) engine->noteOff (e.a);
-            else engine->controller (e.a, e.b);
+            if (e.type == 1)
+                engine->noteOn (e.a, e.b);
+            else if (e.type == 0)
+                engine->noteOff (e.a);
+            else
+                engine->controller (e.a, e.b);
         }
         size_t next = total;
-        if (ei < evs.size()) next = std::min (next, std::max (pos + 1, (size_t) (evs[ei].t * fs)));
+        if (ei < evs.size())
+            next = std::min (next, std::max (pos + 1, (size_t) (evs[ei].t * fs)));
         const int n = (int) std::min<size_t> (next - pos, 512);
         engine->process (&L[pos], &R[pos], n);
         pos += n;
     }
-    std::vector<float> lo (L.begin() + std::min (skip, total), L.end()), ro (R.begin() + std::min (skip, total), R.end());
+    std::vector<float> lo (L.begin() + std::min (skip, total), L.end()),
+        ro (R.begin() + std::min (skip, total), R.end());
     double e = 0, peak = 0;
     for (size_t i = 0; i < lo.size(); ++i)
     {
@@ -302,12 +387,21 @@ int main (int argc, char** argv)
     if (norm != 0.0)
     {
         const double g = std::pow (10.0, norm / 20.0) / std::max (rms, 1e-9);
-        for (size_t i = 0; i < lo.size(); ++i) { lo[i] = (float) std::tanh (lo[i] * g); ro[i] = (float) std::tanh (ro[i] * g); }
+        for (size_t i = 0; i < lo.size(); ++i)
+        {
+            lo[i] = (float) std::tanh (lo[i] * g);
+            ro[i] = (float) std::tanh (ro[i] * g);
+        }
     }
     if (const char* raw = std::getenv ("LITE_RAW")) // float dump of the left channel, for comparing builds
-        std::ofstream (raw, std::ios::binary).write ((const char*) lo.data(), (std::streamsize) (lo.size() * sizeof (float)));
+        std::ofstream (raw, std::ios::binary)
+            .write ((const char*) lo.data(), (std::streamsize) (lo.size() * sizeof (float)));
     writeWav (argv[2], lo, ro, fs);
-    std::printf ("%s: %.1f s, %zu notes, rms %.1f dBFS, peak %.1f dBFS\n", argv[2], lo.size() / fs, notes.size(),
-                 20 * std::log10 (std::max (rms, 1e-12)), 20 * std::log10 (std::max (peak, 1e-12)));
+    std::printf ("%s: %.1f s, %zu notes, rms %.1f dBFS, peak %.1f dBFS\n",
+                 argv[2],
+                 lo.size() / fs,
+                 notes.size(),
+                 20 * std::log10 (std::max (rms, 1e-12)),
+                 20 * std::log10 (std::max (peak, 1e-12)));
     return 0;
 }
