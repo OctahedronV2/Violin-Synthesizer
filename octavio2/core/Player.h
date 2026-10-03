@@ -63,12 +63,13 @@ struct PlayerParams
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
     double posLo = 0.55, posRange = 0.2712;
-    double accel = 12.82; // bow acceleration limit, m/s^2 (higher at ff)
-    double accelFF = 30.0;
+    // bow acceleration limit, m/s^2 (higher at ff); 20/40 turn the bow round a little quicker
+    // than 12.8/30 did (Jake's pick, bow-change listening test 2026-10-03)
+    double accel = 20.0;
+    double accelFF = 40.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
     double changeDip = 0.25; // force reduction at a bow change
-    double changeFloor = 0.3; // force follows bow speed down to this share of the stroke's speed at a change
     double releaseTime = 0.07368; // lift-off force time constant, s
     // a short separate note (held less than stopBelow s) ends with the bow stopping on the string
     // (decelerating at stopAccel m/s^2, force x stopForce) for stopTime s before it lifts: the
@@ -90,14 +91,11 @@ struct PlayerParams
     // nearing the end of the hair the bow slows (decelerating at budgetSoft m/s^2) so the change
     // it is forced into is a gentle one, as a player saves bow (0 = off)
     double budgetSoft = 4.0;
-    // a bow change turns the bow round smoothly: the speed follows the new stroke's through two
-    // smoothing stages of this time constant, s (an S-shaped reversal; 0 = straight line)
-    double changeSmooth = 0.0;
     // a separate stroke eases off over its last strokeTaper s (bow speed, and the force with it,
     // down by taperDepth): the stroke's sound rounds off into the change as a player's does.
     // Studio knows the note's length; Live guesses it from the last strokes when they are short
     // (under taperLiveMax s) and recovers if the note goes on (0 = off)
-    double strokeTaper = 0.0, taperDepth = 0.4, taperLiveMax = 0.8;
+    double strokeTaper = 0.22, taperDepth = 0.65, taperLiveMax = 0.8; // Jake's pick (version C)
     // left hand
     double shiftBase = 0.045, shiftPerSemi = 0.006; // slide time, s
     double shiftLighten = 0.2; // bow force reduction during a slide
@@ -173,7 +171,6 @@ struct Player
     double strokeCap = 0.0; // bow speed that makes the stroke fit the hair left (0 = none)
     double strokeEst = 0.0; // how long strokes last lately (Live bow distribution), s
     double lastBudget = -10.0; // when the hair last ran out
-    double vs1 = 0.0, vs2 = 0.0; // bow change smoothing stages
     double strokeLen = 0.0; // the stroke's expected length for the taper (0 = unknown)
     double d = 0.6; // dynamics of the current stroke
     double dTarget = 0.6, noteNow = 69.0;
@@ -636,18 +633,8 @@ struct Player
                 releasing = true;
             }
         }
-        double vCmd = vTarget;
-        if (changing && pp.changeSmooth > 0.0)
-        {
-            const double k = std::min (1.0, dt / pp.changeSmooth);
-            vs1 += (vTarget - vs1) * k;
-            vs2 += (vs1 - vs2) * k;
-            vCmd = vs2;
-        }
-        else
-            vs1 = vs2 = v;
         const double a = (stopping ? stA : accel) * dt;
-        v += std::clamp (vCmd - v, -a, a);
+        v += std::clamp (vTarget - v, -a, a);
         if (changing && std::abs (v - vTarget) < 1e-4)
             changing = false;
         hair = std::clamp (hair + v * dt, 0.0, pp.bowLength);
@@ -722,7 +709,7 @@ struct Player
             double ft = 0.0;
             if (S.bowed && ! releasing)
             {
-                ft = forceFor (s, std::max (std::abs (v), (changing ? pp.changeFloor : 0.3) * V * balance[s]));
+                ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
                 ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim) * std::exp (-age / pp.biteTime);

@@ -89,13 +89,11 @@ static void playerOpts (PlayerParams& q)
     O (biteFF);
     O (biteTime);
     O (changeDip);
-    O (changeFloor);
     O (liveDistribute);
     O (retakeAfter);
     O (retakeRoom);
     O (retakeMin);
     O (budgetSoft);
-    O (changeSmooth);
     O (strokeTaper);
     O (taperDepth);
     O (taperLiveMax);
