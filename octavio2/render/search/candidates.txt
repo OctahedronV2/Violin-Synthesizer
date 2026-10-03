@@ -1,0 +1,8 @@
+# Round m0i candidates (CMA-ES over 18 player settings, objective: evalreal.py)
+C1: forceSus=0.4883 forceTau=0.07482 forceHold=0.0159 shapeIOI=0.3831 strokeSus=0.7078 strokeTau=0.1498 stopBelow=0.6 stopForce=0.5138 stopTime=0.035 posLo=0.55 posRange=0.2712 earMax=2.106 bite=0.07393  accel=12.82 accelFF=30  releaseTime=0.07368 slipNoise=0.04
+C2: forceSus=0.4883 forceTau=0.07482 forceHold=0.0159 shapeIOI=0.3831 strokeSus=0.7078 strokeTau=0.1498 stopBelow=0.6 stopForce=0.5138 stopTime=0.035 posLo=0.55 posRange=0.2712 earMax=2.106 bite=0.07393  accel=12.82 accelFF=30  releaseTime=0.07368 slipNoise=0.07
+best-seed: forceSus=0.4437 forceTau=0.04144 forceHold=0.02415 shapeIOI=0.4445 strokeSus=0.7842 strokeTau=0.09583 stopBelow=0.5953 stopForce=0.6477 stopTime=0.01844 posLo=0.4841 posRange=0.261 earMax=2.193 bite=0.04071 slipNoise=0.05712 accel=13.89 accelFF=30 changeDip=0.3002 releaseTime=0.05283
+
+# Round m0j fast-note candidates (MIDIs octavio2/data/midi/t5_*): D1 = defaults
+D2: quickIOI=0.3 quickRun=3 quickP=0.35 quickContact=1.3
+D3: quickIOI=0.3 quickRun=3 qForceSus=0.1172 qForceTau=0.2024 qForceHold=0.001039 qStrokeSus=0.6583 qStrokeTau=0.2016 qStopForce=0.4649 qStopTime=0.04107 qStopAccel=40.32 quickP=0.04922 quickContact=1.383

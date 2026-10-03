@@ -1,0 +1,124 @@
+"""Octavio 2 finishing step (until M1 moves it into the core): bridge force -> sound.
+
+    python3 finish.py force.wav out_base [--hall arvedi-near-seat|detmold|church|none] [--bright dB] [--mp3]
+
+Writes
+  out_base.dry.wav   mono, full-band balanced body, -20 dB RMS: what the scorer measures
+  out_base.wav       stereo: direct sound through the two directional bodies (left/right mic),
+                     hall tail fed by the all-direction body (the body-radiation plan, F8)
+  out_base.mp3       the stereo file as 192 kbps mp3 (with --mp3)
+Bodies are the body-radiation thread's full-band and directional IRs (octavio2/data).
+"""
+import os, sys, subprocess
+import numpy as np, soundfile as sf, scipy.signal as ss
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(HERE, '..', 'data')
+IRS = '/mnt/project-files/research/final-tune-up-render/irs/'
+FS = 48000
+
+
+def mono(p):
+    x, sr = sf.read(p)
+    assert sr == FS, (p, sr)
+    return x[:, 0] if x.ndim > 1 else x
+
+
+def pair(l, r=None):
+    if r is None:
+        d, _ = sf.read(IRS + l)
+        L, R = d[:, 0], d[:, 1]
+    else:
+        L, R = mono(IRS + l), mono(IRS + r)
+    n = max(len(L), len(R))
+    return np.stack([np.pad(L, (0, n - len(L))), np.pad(R, (0, n - len(R)))], 1)
+
+
+A = 'arvedi/arvedi_auditorium_dataset/rirs/rir-S0-'
+HALLS = {
+    'arvedi-near-seat': lambda: pair(A + 'A206.wav', A + 'A209.wav'),
+    'arvedi-far-seat': lambda: pair(A + 'A505.wav', A + 'A510.wav'),
+    'detmold': lambda: pair('detmold/SetA_SingleSources/Data/Brahmssaal/DummyHead/C1S1R3.wav'),
+    'church': lambda: pair('church/OMNI/SC_ML_OMNI_2.wav', 'church/OMNI/SC_MR_OMNI_2.wav'),
+}
+
+
+def split(ir):
+    """Direct sound (3.5 ms around the first arrival per channel) and the tail."""
+    D, T = [], np.zeros_like(ir)
+    for c in range(2):
+        x = ir[:, c]
+        p = int(np.argmax(np.abs(x)))
+        a, b = max(p - 48, 0), p + 120
+        w = np.zeros(len(x))
+        w[a:b] = 1
+        w[b:b + 48] = np.linspace(1, 0, 48)
+        D.append((p, np.sqrt(np.sum((x * w) ** 2))))
+        T[:, c] = x * (1 - w)
+    p0 = min(d[0] for d in D)
+    T = T[max(p0 - 48, 0):]
+    D = [(p - p0 + min(p0, 48), g) for p, g in D]
+    return D, T
+
+
+def high_shelf(x, f0, db):
+    """RBJ high shelf (S = 1): db above f0."""
+    A = 10 ** (db / 40)
+    w = 2 * np.pi * f0 / FS
+    al = np.sin(w) / 2 * np.sqrt(2)
+    c = np.cos(w)
+    b = [A * ((A + 1) + (A - 1) * c + 2 * np.sqrt(A) * al), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - 2 * np.sqrt(A) * al)]
+    a = [(A + 1) - (A - 1) * c + 2 * np.sqrt(A) * al, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - 2 * np.sqrt(A) * al]
+    return ss.lfilter(b, a, x)
+
+
+def rms_norm(x, db=-20.0):
+    return x * (10 ** (db / 20) / max(np.sqrt(np.mean(x ** 2)), 1e-12))
+
+
+def main():
+    src, base = sys.argv[1], sys.argv[2]
+    hall = 'arvedi-near-seat'
+    if '--hall' in sys.argv:
+        hall = sys.argv[sys.argv.index('--hall') + 1]
+    F = mono(src)
+    # the bow's steady push leaves a slow drift (below 5 Hz) in the bridge force that the body IRs
+    # pass; it carried most of the energy and made level matching ~8 dB too quiet
+    F = ss.sosfilt(ss.butter(4, 60, 'hp', fs=FS, output='sos'), F)
+    # high shelf above 1.5 kHz (dB): brings the tone's brightness to the real players' (Jake picked
+    # +5 dB with more grit, 2026-10-01); --bright 0 turns it off
+    bright = float(sys.argv[sys.argv.index('--bright') + 1]) if '--bright' in sys.argv else 5.0
+    if bright:
+        F = high_shelf(F, 1500.0, bright)
+    body = mono(os.path.join(DATA, 'body-fullband-balanced-48k.wav'))
+    bl = mono(os.path.join(DATA, 'body-directional-left-48k.wav'))
+    br = mono(os.path.join(DATA, 'body-directional-right-48k.wav'))
+    n = len(F)
+    diffuse = ss.fftconvolve(F, body)[:n]
+    # --gain g: a fixed gain instead of the -20 dB RMS level, so short renders of the start of a
+    # piece come out at the same level as the whole piece (fitnotes.py)
+    if '--gain' in sys.argv:
+        dry = diffuse * float(sys.argv[sys.argv.index('--gain') + 1])
+    else:
+        dry = rms_norm(diffuse)
+        print('gain %.6g' % (10 ** (-20 / 20) / max(np.sqrt(np.mean(diffuse ** 2)), 1e-12)))
+    sf.write(base + '.dry.wav', dry.astype(np.float32), FS)
+    direct = np.stack([ss.fftconvolve(F, bl)[:n], ss.fftconvolve(F, br)[:n]], 1)
+    if hall == 'none':
+        out = direct
+    else:
+        D, T = split(HALLS[hall]())
+        out = np.stack([ss.fftconvolve(diffuse, T[:, c])[:n] for c in range(2)], 1)
+        for c, (p, g) in enumerate(D):
+            out[p:, c] += g * direct[:n - p, c]
+    out = rms_norm(out)
+    out /= max(np.abs(out).max() / 0.97, 1.0)
+    fade = int(0.3 * FS)
+    out[-fade:] *= np.linspace(1, 0, fade)[:, None]
+    sf.write(base + '.wav', out.astype(np.float32), FS)
+    if '--mp3' in sys.argv:
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', base + '.wav', '-b:a', '192k', base + '.mp3'], check=True)
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,333 @@
+<title>Octavio Lite Playground</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky play bar on top (start, demo phrase, keyboard); below it, one column of slider groups that mirror the engine's parameter table. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#16202a; --muted:#5b6876; --line:#cdd5de;
+  --accent:#1f6f8b; --rosin:#b8660b; --key:#fbfcfd; --keyb:#1c2630; --keyon:#f3c27a;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:"Manrope",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --rosin:#f0a44a; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --rosin:#f0a44a; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);padding:0 16px 56px}
+.wrap{max-width:780px;margin:0 auto;display:grid;gap:18px}
+h1,h2{font-family:var(--display);margin:0;line-height:1.15;text-wrap:balance}
+h1{font-size:clamp(24px,5.5vw,34px)}
+p{margin:0}
+.muted{color:var(--muted)}
+header{padding-top:22px;display:grid;gap:6px}
+.eyebrow{font:600 12px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:10px;display:grid;gap:10px;border-bottom:1px solid var(--line)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{font:600 14px var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--panel);border-color:var(--accent)}
+button[disabled]{opacity:.5;cursor:default}
+label.chk{display:inline-flex;gap:6px;align-items:center;font-size:14px}
+.status{font:13px var(--mono);color:var(--muted)}
+.kbwrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
+.kb{position:relative;height:120px;touch-action:none;user-select:none;-webkit-user-select:none}
+.k{position:absolute;top:0;border:1px solid var(--line);border-top:none}
+.k.w{background:var(--key);height:120px;border-radius:0 0 6px 6px;z-index:1}
+.k.b{background:var(--keyb);height:72px;z-index:2;border-radius:0 0 4px 4px;border-color:var(--keyb)}
+.k.on{background:var(--keyon)!important}
+.k span{position:absolute;bottom:6px;left:0;right:0;text-align:center;font:10px var(--mono);color:#5b6876}
+.vel{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.vel input{width:120px}
+details{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+summary{cursor:pointer;padding:12px 16px;font:700 17px var(--display);list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::-webkit-details-marker{display:none}
+summary small{font:12px var(--mono);color:var(--muted);font-weight:400}
+.group{padding:4px 16px 14px;display:grid;gap:12px}
+.p{display:grid;gap:2px}
+.p .top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.p .name{font-weight:600;font-size:14px}
+.p .val{font:13px var(--mono);font-variant-numeric:tabular-nums;color:var(--accent);white-space:nowrap;cursor:pointer;background:none;border:none;padding:0}
+.p .val.changed{color:var(--rosin)}
+.p .tip{font-size:12px;color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent);height:28px}
+textarea{width:100%;min-height:90px;font:12px var(--mono);background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:8px}
+.note{font-size:13px;color:var(--muted)}
+.err{color:#c0392b;font-weight:600}
+@media (max-width:600px){.kb,.k.w{height:88px}.k.b{height:54px}.keys-note{display:none}.bar{gap:8px;padding-block:8px}.vel label{white-space:nowrap}}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Octavio Lite · live engine</div>
+  <h1>Octavio Lite Playground</h1>
+  <p class="muted">The same C++ engine as the renderer, compiled for the browser. Move a slider while a phrase plays and you hear the change at once. The settings you land on carry over to the plugin unchanged.</p>
+</header>
+
+<div class="bar">
+  <div class="row">
+    <button id="start" class="primary">Start sound</button>
+    <select id="demo" aria-label="Demo phrase">
+      <option value="lyric">Slow lyric melody</option>
+      <option value="brahms">Brahms Hungarian Dance 5</option>
+      <option value="showcase">10-articulation opening</option>
+    </select>
+    <button id="play" disabled>Play</button>
+    <label class="chk"><input type="checkbox" id="loop" checked> Loop</label>
+    <button id="panic" disabled title="Stop every note">Stop</button>
+    <span class="status" id="status">Not started</span>
+  </div>
+  <div class="kbwrap"><div class="kb" id="kb" aria-label="Keyboard, G3 to E6"></div></div>
+  <div class="row">
+    <div class="vel"><label for="vel">Key velocity</label><input type="range" id="vel" min="1" max="127" value="64"><span id="velv">64</span></div>
+    <span class="note keys-note">Computer keys: Z row = C4, Q row = C5.</span>
+  </div>
+</div>
+
+<div id="groups" style="display:grid;gap:12px"></div>
+
+<section style="display:grid;gap:8px">
+  <h2 style="font-size:19px">Share your settings</h2>
+  <p class="note">Copy puts every setting you changed on the clipboard, so you can paste it into the thread and I'll make it the new default. Paste settings here to load them.</p>
+  <div class="row">
+    <button id="copy" disabled>Copy settings</button>
+    <button id="load" disabled>Load pasted settings</button>
+    <button id="reset" disabled>Reset all</button>
+    <span class="status" id="copied"></span>
+  </div>
+  <textarea id="settings" aria-label="Settings text" placeholder='{"pressure": 0.8, "grain": 0.1}'></textarea>
+</section>
+</div>
+
+<script src="midi.js"></script>
+<script src="worklet.js"></script>
+<script>
+const TIPS = {
+  bowSoft: 'How fast the bow moves on the quietest notes.',
+  bowLoud: 'How fast it moves at full velocity. Faster is louder.',
+  pressure: 'Bow weight, as a share of the most the string can take cleanly. Too low: hollow or octave-high. Too high: crunch.',
+  contact: 'Distance from the bridge. Small = bright and edgy (ponticello side), large = soft and airy (over the fingerboard).',
+  attack: 'Time for the bow to reach full speed at the start of a stroke.',
+  release: 'Time for the bow to stop at the end of a note.',
+  lift: 'How much faster the weight comes off than the speed at the end. Higher lets the note ring.',
+  grain: 'Rosin noise riding on the bow. The string filters it, so it sounds like hair on gut, not hiss.',
+  grainColour: 'Low = rough and woody, high = fine and airy.',
+  muS: 'How hard the rosin grips before the string lets go.',
+  muD: 'Friction while sliding. A bigger gap to static friction gives a snappier, brighter tone.',
+  v0: 'How gradually friction falls as the string slides. Higher = smoother, rounder.',
+  ring: 'How long the string rings after the bow leaves it.',
+  dark: 'Loss of upper harmonics on each trip along the string.',
+  impedance: 'String heaviness. Heavier strings need more weight and sound fuller.',
+  impedanceSlope: 'Makes low notes behave like the heavier G and D strings.',
+  vibDepth: 'Peak-to-peak vibrato width.',
+  vibRate: 'Vibrato speed.',
+  vibDelay: 'How long a note stays straight before vibrato starts.',
+  vibFade: 'How long vibrato takes to reach full width.',
+  vibRateJitter: 'Each vibrato cycle a little faster or slower.',
+  vibDepthJitter: 'Each vibrato cycle a little wider or narrower.',
+  glide: 'Pitch slide between slurred notes.',
+  landCents: 'The finger lands this far flat, then settles.',
+  landTime: 'How quickly the landing settles.',
+  intonation: 'Random tuning of each note, as a standard deviation.',
+  body: '0 = bare string, 1 = through the Stoppani violin body.',
+  room: 'Room reverb mix.',
+  roomTime: 'Reverb length.',
+  roomDamp: 'Higher absorbs more treble in the reverb.',
+  gain: 'Output level.',
+};
+const OPEN = new Set(['Bow', 'Rosin']);
+
+let ctx = null, node = null, host = null, params = [], values = {}, inputs = {};
+const $ = (id) => document.getElementById(id);
+const status = (t, err) => { const s = $('status'); s.textContent = t; s.className = 'status' + (err ? ' err' : ''); };
+const send = (msg) => { if (node) node.port.postMessage(msg); else if (host) host.handle(msg); };
+
+// ---- sliders, built from the engine's own parameter table
+const isLog = (p) => p.min > 0 && p.max / p.min >= 20;
+const toSlider = (p, v) => isLog(p) ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
+const fromSlider = (p, s) => isLog(p) ? p.min * Math.pow(p.max / p.min, s) : p.min + s * (p.max - p.min);
+const fmt = (p, v) => { const a = Math.abs(v); const d = a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3; return v.toFixed(d) + (p.unit ? ' ' + p.unit : ''); };
+
+function buildSliders() {
+  const box = $('groups'); box.innerHTML = '';
+  const groups = [];
+  for (const p of params) { if (!groups.includes(p.group)) groups.push(p.group); }
+  for (const g of groups) {
+    const det = document.createElement('details'); if (OPEN.has(g)) det.open = true;
+    const list = params.filter((p) => p.group === g);
+    det.innerHTML = `<summary>${g} <small>${list.length} controls</small></summary>`;
+    const div = document.createElement('div'); div.className = 'group';
+    for (const p of list) {
+      const w = document.createElement('div'); w.className = 'p';
+      w.innerHTML = `<div class="top"><label class="name" for="p-${p.id}">${p.label}</label><button class="val" title="Reset to default" id="v-${p.id}"></button></div>
+        <input type="range" id="p-${p.id}" min="0" max="1000" step="1">
+        <div class="tip">${TIPS[p.id] || ''}</div>`;
+      div.appendChild(w);
+      const input = w.querySelector('input'), val = w.querySelector('.val');
+      inputs[p.id] = { input, val, p };
+      input.addEventListener('input', () => setValue(p.id, fromSlider(p, input.value / 1000)));
+      val.addEventListener('click', () => setValue(p.id, p.def, true));
+    }
+    det.appendChild(div); box.appendChild(det);
+  }
+}
+function setValue(id, v, moveSlider) {
+  const { input, val, p } = inputs[id];
+  v = Math.min(p.max, Math.max(p.min, v));
+  values[id] = v;
+  if (moveSlider !== false) input.value = Math.round(toSlider(p, v) * 1000);
+  val.textContent = fmt(p, v);
+  val.classList.toggle('changed', Math.abs(v - p.def) > 1e-9 * Math.max(1, Math.abs(p.def)));
+  send({ type: 'param', index: p.index, value: v });
+  try { localStorage.setItem('lite-settings', JSON.stringify(changed())); } catch (e) {}
+}
+function changed() {
+  const out = {};
+  for (const p of params) if (Math.abs(values[p.id] - p.def) > 1e-9 * Math.max(1, Math.abs(p.def))) out[p.id] = +values[p.id].toPrecision(4);
+  return out;
+}
+function applySettings(obj) {
+  for (const p of params) setValue(p.id, obj[p.id] !== undefined ? +obj[p.id] : p.def);
+}
+
+// ---- keyboard: G3 (55) to E6 (88)
+const LO = 55, HI = 88, WHITE = [0, 2, 4, 5, 7, 9, 11];
+const NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const keyEls = {};
+function buildKeyboard() {
+  const kb = $('kb'); const ww = 34, bw = 22; let x = 0;
+  for (let n = LO; n <= HI; n++) {
+    const pc = n % 12, white = WHITE.includes(pc);
+    const el = document.createElement('div');
+    el.className = 'k ' + (white ? 'w' : 'b');
+    if (white) { el.style.left = x + 'px'; el.style.width = ww + 'px'; if (pc === 0 || n === LO) el.innerHTML = `<span>${NAMES[pc]}${Math.floor(n / 12) - 1}</span>`; x += ww; }
+    else { el.style.left = (x - bw / 2) + 'px'; el.style.width = bw + 'px'; }
+    el.dataset.note = n; kb.appendChild(el); keyEls[n] = el;
+  }
+  kb.style.width = x + 'px';
+  const pointerNote = new Map();
+  const noteAt = (e) => { const t = document.elementFromPoint(e.clientX, e.clientY); return t && t.closest('.k') ? +t.closest('.k').dataset.note : null; };
+  kb.addEventListener('pointerdown', (e) => { kb.setPointerCapture(e.pointerId); const n = noteAt(e); if (n != null) { pointerNote.set(e.pointerId, n); keyOn(n); } });
+  kb.addEventListener('pointermove', (e) => {
+    if (!pointerNote.has(e.pointerId)) return;
+    const n = noteAt(e), old = pointerNote.get(e.pointerId);
+    if (n != null && n !== old) { keyOn(n); keyOff(old); pointerNote.set(e.pointerId, n); } // overlapping: a slur
+  });
+  const up = (e) => { if (pointerNote.has(e.pointerId)) { keyOff(pointerNote.get(e.pointerId)); pointerNote.delete(e.pointerId); } };
+  kb.addEventListener('pointerup', up); kb.addEventListener('pointercancel', up);
+  // scroll so C4 is near the left
+  setTimeout(() => { $('kb').parentElement.scrollLeft = 0; }, 0);
+}
+const held = new Set();
+function keyOn(n) { if (!ready()) return; held.add(n); keyEls[n] && keyEls[n].classList.add('on'); send({ type: 'on', note: n, vel: $('vel').value / 127 }); }
+function keyOff(n) { held.delete(n); keyEls[n] && keyEls[n].classList.remove('on'); send({ type: 'off', note: n }); }
+const KEYMAP = {};
+'zsxdcvgbhnjm,l.;/'.split('').forEach((c, i) => KEYMAP[c] = 60 + i);
+'q2w3er5t6y7ui9o0p'.split('').forEach((c, i) => KEYMAP[c] = 72 + i);
+window.addEventListener('keydown', (e) => {
+  if (e.repeat || e.metaKey || e.ctrlKey || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined && n <= 103) { e.preventDefault(); keyOn(n); }
+});
+window.addEventListener('keyup', (e) => { const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined) keyOff(n); });
+
+// ---- start-up
+const ready = () => !!(node || host);
+async function loadAssets() {
+  const [wasm, irBuf] = await Promise.all([
+    fetch('lite.wasm').then((r) => { if (!r.ok) throw new Error('lite.wasm ' + r.status); return r.arrayBuffer(); }),
+    fetch('stoppani.wav').then((r) => { if (!r.ok) throw new Error('stoppani.wav ' + r.status); return r.arrayBuffer(); }),
+  ]);
+  // stoppani.wav: 32-bit float mono
+  const dv = new DataView(irBuf); let p = 12, ir = null, rate = 48000;
+  while (p + 8 <= dv.byteLength) {
+    const id = String.fromCharCode(dv.getUint8(p), dv.getUint8(p + 1), dv.getUint8(p + 2), dv.getUint8(p + 3)), len = dv.getUint32(p + 4, true);
+    if (id === 'fmt ') rate = dv.getUint32(p + 12, true);
+    if (id === 'data') { ir = new Float32Array(irBuf.slice(p + 8, p + 8 + len)); break; }
+    p += 8 + len + (len & 1);
+  }
+  return { wasm, ir, rate };
+}
+async function start() {
+  $('start').disabled = true; status('Loading…');
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    await ctx.resume();
+    const { wasm, ir, rate } = await loadAssets();
+    let got;
+    if (ctx.audioWorklet) {
+      await ctx.audioWorklet.addModule('worklet.js');
+      node = new AudioWorkletNode(ctx, 'lite', { numberOfInputs: 0, outputChannelCount: [2] });
+      got = await new Promise((res, rej) => {
+        node.port.onmessage = (ev) => {
+          const m = ev.data;
+          if (m.type === 'ready') res(m.params);
+          else if (m.type === 'error') rej(new Error(m.message));
+          else if (m.type === 'ended') { $('play').textContent = 'Play'; }
+        };
+        node.port.postMessage({ type: 'init', wasm, ir, irRate: rate });
+      });
+      node.connect(ctx.destination);
+    } else {
+      host = new LiteHost();
+      got = await host.init(wasm, ir, rate, ctx.sampleRate);
+      const sp = ctx.createScriptProcessor(1024, 0, 2);
+      sp.onaudioprocess = (e) => { host.render(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1), e.outputBuffer.length); if (host.ended) { host.ended = false; $('play').textContent = 'Play'; } };
+      sp.connect(ctx.destination);
+    }
+    params = got; buildSliders();
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('lite-settings') || '{}'); } catch (e) {}
+    applySettings(saved);
+    for (const id of ['play', 'panic', 'copy', 'load', 'reset']) $(id).disabled = false;
+    $('start').textContent = 'Sound on';
+    status(`Running at ${ctx.sampleRate / 1000} kHz`);
+    tryMidiInput();
+  } catch (err) {
+    status('Could not start: ' + err.message, true);
+    $('start').disabled = false;
+  }
+}
+$('start').addEventListener('click', start);
+
+const demoCache = {};
+$('play').addEventListener('click', async () => {
+  if ($('play').textContent === 'Pause') { send({ type: 'stop' }); $('play').textContent = 'Play'; return; }
+  const f = $('demo').value;
+  try {
+    if (!demoCache.all) demoCache.all = await (await fetch('demos.json')).json();
+    const ev = demoCache.all[f];
+    send({ type: 'play', events: ev, loop: $('loop').checked });
+    $('play').textContent = 'Pause';
+  } catch (err) { status('Could not load the phrase: ' + err.message, true); }
+});
+$('loop').addEventListener('change', () => send({ type: 'loop', loop: $('loop').checked }));
+$('panic').addEventListener('click', () => { send({ type: 'panic' }); $('play').textContent = 'Play'; for (const n of [...held]) keyOff(n); });
+$('vel').addEventListener('input', () => { $('velv').textContent = $('vel').value; });
+$('copy').addEventListener('click', async () => {
+  const txt = JSON.stringify(changed(), null, 1);
+  $('settings').value = txt;
+  try { await navigator.clipboard.writeText(txt); $('copied').textContent = 'Copied'; }
+  catch (e) { $('settings').select(); $('copied').textContent = 'Selected: copy it from the box'; }
+});
+$('load').addEventListener('click', () => {
+  try { applySettings(JSON.parse($('settings').value || '{}')); $('copied').textContent = 'Loaded'; }
+  catch (e) { $('copied').textContent = 'That text is not valid settings'; }
+});
+$('reset').addEventListener('click', () => applySettings({}));
+
+async function tryMidiInput() {
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const access = await navigator.requestMIDIAccess();
+    const hook = () => access.inputs.forEach((inp) => {
+      inp.onmidimessage = (m) => {
+        const [st, a, b] = m.data, hi = st & 0xf0;
+        if (hi === 0x90 && b > 0) { keyEls[a] && keyEls[a].classList.add('on'); send({ type: 'on', note: a, vel: b / 127 }); }
+        else if (hi === 0x80 || hi === 0x90) { keyEls[a] && keyEls[a].classList.remove('on'); send({ type: 'off', note: a }); }
+      };
+    });
+    hook(); access.onstatechange = hook;
+  } catch (e) { /* MIDI devices are not available here */ }
+}
+buildKeyboard();
+</script>

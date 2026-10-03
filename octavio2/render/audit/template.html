@@ -1,0 +1,350 @@
+<title>Finale Note Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a workbench. Summary strip, then a scrollable score of every note (real vs ours strokes), then the selected note's bench: listen, issues, curves, numbers. */
+:root {
+  --bg: #f3f4f2; --panel: #ffffff; --fg: #1d2326; --muted: #5d676c; --line: #d9ddda;
+  --real: #2f5d8a; --ours: #c2631b; --accent: #2f5d8a;
+  --good: #2e7d4f; --warn: #b7860b; --bad: #b3362b;
+  --good-bg: #e3f1e8; --warn-bg: #f8efd4; --bad-bg: #f7e1de;
+  --display: "Instrument Serif", Georgia, serif;
+  --body: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15191b; --panel: #1d2326; --fg: #e6e9e7; --muted: #9aa4a8; --line: #323a3e;
+  --real: #7fb0e0; --ours: #f0a05a; --accent: #7fb0e0;
+  --good: #6cc790; --warn: #e2bd4f; --bad: #ec7b6f;
+  --good-bg: #1f3428; --warn-bg: #3a321a; --bad-bg: #3d2320; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15191b; --panel: #1d2326; --fg: #e6e9e7; --muted: #9aa4a8; --line: #323a3e;
+  --real: #7fb0e0; --ours: #f0a05a; --accent: #7fb0e0;
+  --good: #6cc790; --warn: #e2bd4f; --bad: #ec7b6f;
+  --good-bg: #1f3428; --warn-bg: #3a321a; --bad-bg: #3d2320; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 18px; }
+h1 { font-family: var(--display); font-weight: 400; font-size: 2.1rem; line-height: 1.1; margin: 0; text-wrap: balance; }
+h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+.lede { color: var(--muted); max-width: 70ch; margin: 6px 0 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 .8rem var(--body); border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--panel); }
+.chip b { font-family: var(--mono); font-weight: 500; }
+.stats { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+.stat { display: grid; }
+.stat .v { font-family: var(--mono); font-size: 1.3rem; }
+.stat .k { font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.roll { position: relative; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.roll canvas { display: block; cursor: pointer; }
+.head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); pointer-events: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: .78rem; color: var(--muted); margin-top: 8px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 760px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.nhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
+.nname { font-family: var(--display); font-size: 2rem; line-height: 1; }
+.meta { color: var(--muted); font-family: var(--mono); font-size: .82rem; }
+.score { font-family: var(--mono); font-size: .85rem; padding: 2px 8px; border-radius: 6px; }
+.s-good { background: var(--good-bg); color: var(--good); } .s-warn { background: var(--warn-bg); color: var(--warn); } .s-bad { background: var(--bad-bg); color: var(--bad); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+button.b { font: 600 .85rem var(--body); border-radius: 8px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); cursor: pointer; }
+button.b.real { border-color: var(--real); color: var(--real); } button.b.ours { border-color: var(--ours); color: var(--ours); }
+button.b.ab { background: var(--fg); color: var(--panel); border-color: var(--fg); }
+button:focus-visible, .chip:focus-visible, canvas:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.issues { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.issues li { max-width: 65ch; }
+.ok { color: var(--good); }
+.plot { width: 100%; height: auto; display: block; }
+.plot text { fill: var(--muted); font: 10px var(--mono); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: .85rem; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+td.n { font-family: var(--mono); }
+.tscroll { overflow-x: auto; }
+.list tr { cursor: pointer; } .list tr.sel { background: var(--bg); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.note-k { color: var(--real); } .note-o { color: var(--ours); }
+.small { font-size: .8rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Finale Note Audit</h1>
+    <p class="lede">Every note of the Haydn Finale (2nd violin, first 53 s), the real player against Octavio 2 playing the same transcribed notes. Pick a note on the score or in the list to hear both and see what the comparison found. This page is republished as each fix lands.</p>
+  </header>
+
+  <section class="panel">
+    <h2>Fix log</h2>
+    <div class="tscroll"><table id="hist"></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="stats" id="stats"></div>
+    <h2>Show notes with</h2>
+    <div class="chips" id="filters"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Score: real strokes above, ours below. Colour is the note's score</h2>
+    <div class="btns">
+      <button class="b real" id="wr" type="button">Play whole Finale: real</button>
+      <button class="b ours" id="wo" type="button">Play whole Finale: ours</button>
+      <button class="b" id="wsw" type="button">Switch real ⇄ ours</button>
+      <button class="b" id="wstop" type="button">Stop</button>
+      <span class="small" id="wstat" aria-live="polite" style="align-self:center"></span>
+    </div>
+    <div class="roll" id="roll"><canvas id="cv" tabindex="0" aria-label="Note timeline"></canvas><div class="head" id="head" hidden></div></div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--good)"></span>80–100 close</span>
+      <span><span class="sw" style="background:var(--warn)"></span>50–79 off</span>
+      <span><span class="sw" style="background:var(--bad)"></span>under 50 wrong</span>
+      <span><span class="sw" style="background:var(--real)"></span>real bow stroke</span>
+      <span><span class="sw" style="background:var(--ours)"></span>our bow stroke</span>
+    </div>
+  </section>
+
+  <section class="bench">
+    <div class="panel">
+      <div class="nhead"><span class="nname" id="nname"></span><span class="score" id="nscore"></span><span class="meta" id="nmeta"></span></div>
+      <div class="btns">
+        <button class="b real" id="pr" type="button">Play real</button>
+        <button class="b ours" id="po" type="button">Play ours</button>
+        <button class="b ab" id="pab" type="button">Real, then ours</button>
+        <button class="b" id="stop" type="button">Stop</button>
+        <button class="b" id="prev" type="button">← Prev</button>
+        <button class="b" id="next" type="button">Next →</button>
+      </div>
+      <p class="small" id="pstat" aria-live="polite" style="min-height:1.2em;margin:0 0 6px"></p>
+      <label class="small"><input type="checkbox" id="ctx"> Play with one second of context either side</label>
+      <h2 style="margin-top:14px">What's wrong</h2>
+      <ul class="issues" id="issues"></ul>
+    </div>
+    <div class="panel">
+      <h2>Pitch, cents from the written note (±20 in tune)</h2>
+      <svg class="plot" id="pp" viewBox="0 0 400 150" role="img" aria-label="Pitch curves"></svg>
+      <h2 style="margin-top:10px">Level, dB under the piece's loud level</h2>
+      <svg class="plot" id="lp" viewBox="0 0 400 150" role="img" aria-label="Level curves"></svg>
+      <div class="legend"><span><span class="sw" style="background:var(--real)"></span>real</span><span><span class="sw" style="background:var(--ours)"></span>ours</span><span>shaded: the written note</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Measured, real vs ours</h2>
+    <div class="tscroll"><table id="mt"></table></div>
+    <p class="small" id="howto"></p>
+  </section>
+
+  <section class="panel">
+    <h2>All notes</h2>
+    <div class="tscroll"><table class="list" id="list"></table></div>
+  </section>
+</div>
+
+
+<script>
+const D = /*DATA*/null;
+const N = D.notes;
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const KINDS = [
+  ['Never settles', 'Wrong or missing pitch'], ['Speaks', 'Late or early'], ['Out of tune', 'Out of tune'], ['Pitch wanders', 'Pitch wanders'],
+  ['sounds on another pitch', 'Pitch glitch'], ['Volume hole', 'Volume hole'], ['Blends into', 'Blends (should be a new stroke)'],
+  ['Not distinct', 'Not distinct'], ['Separate bow stroke', 'Extra bow change'], ['Rough', 'Scratchy'], ['Holds its volume', 'Doesn\'t fade'],
+  ['Dies away', 'Fades too early'], ['Louder', 'Too loud'], ['Softer', 'Too soft'], ['Took', 'Slow to sound clean'], ['Below the violin', 'Transcription error']
+];
+N.forEach(n => n.kinds = KINDS.filter(([k]) => n.issues.some(s => s.includes(k))).map(([, l]) => l));
+let filter = null, sel = 0;
+const shown = () => N.filter(n => !filter || n.kinds.includes(filter));
+const cls = s => s >= 80 ? 'good' : s >= 50 ? 'warn' : 'bad';
+
+// fix log
+(function () {
+  const H = D.history || [];
+  $('hist').innerHTML = '<tr><th>Step</th><th>Change</th><th>Mean score</th><th>Under 50</th><th>Bow strokes (real ' + (N[N.length - 1].real.strokeNo) + ')</th></tr>' +
+    H.slice().reverse().map((h, j) => `<tr><td class="n">${H.length - j}</td><td>${h.desc}</td><td class="n">${h.mean}</td><td class="n">${h.under50}</td><td class="n">${h.strokes}</td></tr>`).join('');
+})();
+// summary
+(function () {
+  const sc = N.map(n => n.score), mean = sc.reduce((a, b) => a + b, 0) / sc.length;
+  const st = [['Notes', N.length], ['Mean score', Math.round(mean)], ['Under 50', sc.filter(s => s < 50).length],
+    ['Real bow strokes', N[N.length - 1].real.strokeNo], ['Our bow strokes', N[N.length - 1].ours.strokeNo], ['Real tuning A', D.a4real + ' Hz']];
+  $('stats').innerHTML = st.map(([k, v]) => `<div class="stat"><span class="v">${v}</span><span class="k">${k}</span></div>`).join('');
+  const f = $('filters');
+  const counts = {}; N.forEach(n => n.kinds.forEach(k => counts[k] = (counts[k] || 0) + 1));
+  const mk = (label, key, c) => { const b = document.createElement('button'); b.className = 'chip'; b.type = 'button'; b.setAttribute('aria-pressed', String(filter === key)); b.innerHTML = `${label} <b>${c}</b>`; b.onclick = () => { filter = filter === key ? null : key; render(); }; return b; };
+  window.renderFilters = () => { f.innerHTML = ''; f.append(mk('All', null, N.length)); KINDS.map(k => k[1]).filter(k => counts[k]).sort((a, b) => counts[b] - counts[a]).forEach(k => f.append(mk(k, k, counts[k]))); };
+})();
+
+// piano roll
+const cv = $('cv'), PX = 90, TOP = 8;
+let lo = 200, hi = 0; N.forEach(n => { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); }); lo -= 1; hi += 1;
+const ROW = 6, H = TOP + (hi - lo + 1) * ROW + 40;
+function drawRoll() {
+  const dur = Math.max(...N.map(n => n.off)) + 0.5, dpr = window.devicePixelRatio || 1;
+  cv.width = dur * PX * dpr; cv.height = H * dpr; cv.style.width = dur * PX + 'px'; cv.style.height = H + 'px';
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.fillStyle = css('--bg'); g.fillRect(0, 0, dur * PX, H);
+  g.strokeStyle = css('--line'); g.fillStyle = css('--muted'); g.font = '10px ' + css('--mono'); g.lineWidth = 1;
+  for (let s = 0; s < dur; s++) { g.globalAlpha = s % 5 ? .35 : 1; g.beginPath(); g.moveTo(s * PX + .5, 0); g.lineTo(s * PX + .5, H - 30); g.stroke(); if (s % 5 === 0) g.fillText(s + ' s', s * PX + 3, H - 18); }
+  g.globalAlpha = 1;
+  for (let p = lo; p <= hi; p++) if (p % 12 === 7) { const y = TOP + (hi - p) * ROW; g.fillText(['G' + (Math.floor(p / 12) - 1)], 2, y + 5); }
+  const vis = new Set(shown());
+  N.forEach((n, i) => {
+    const x = n.on * PX, w = Math.max(3, (n.off - n.on) * PX - 1), y = TOP + (hi - n.pitch) * ROW;
+    g.globalAlpha = vis.has(n) ? 1 : .18;
+    g.fillStyle = css('--' + cls(n.score)); g.fillRect(x, y - 2, w, ROW + 2);
+    if (i === sel) { g.strokeStyle = css('--fg'); g.lineWidth = 2; g.strokeRect(x - 1, y - 3, w + 2, ROW + 4); g.lineWidth = 1; }
+  });
+  g.globalAlpha = 1;
+  // strokes: a bar per bow stroke, alternating shade
+  [['real', H - 34, '--real'], ['ours', H - 8, '--ours']].forEach(([who, y, c]) => {
+    let start = null, no = null, end = 0;
+    const flush = () => { if (start === null) return; g.fillStyle = css(c); g.globalAlpha = no % 2 ? 1 : .55; g.fillRect(start * PX, y, Math.max(2, (end - start) * PX - 2), 5); };
+    N.forEach(n => { const k = n[who].strokeNo; if (k !== no) { flush(); start = n.on; no = k; } end = Math.max(end, n.off); });
+    flush(); g.globalAlpha = 1;
+  });
+}
+cv.addEventListener('click', e => {
+  const r = cv.getBoundingClientRect(), t = (e.clientX - r.left) / PX, y = e.clientY - r.top;
+  let best = -1, bd = 1e9;
+  N.forEach((n, i) => { const ny = TOP + (hi - n.pitch) * ROW; const dx = t < n.on ? n.on - t : t > n.off ? t - n.off : 0; const d = dx * 200 + Math.abs(y - ny); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) select(best, true);
+});
+cv.addEventListener('keydown', e => { if (e.key === 'ArrowRight') step(1); if (e.key === 'ArrowLeft') step(-1); });
+
+// plots
+function plot(svg, key, rangeLo, rangeHi, band, n) {
+  const W = 400, Hh = 150, L = 34, R = 6, T = 8, B = 20;
+  const t0 = n.win[0], t1 = n.win[1], dt = D.hop;
+  const X = t => L + (t - t0) / (t1 - t0) * (W - L - R), Y = v => T + (rangeHi - Math.max(rangeLo, Math.min(rangeHi, v))) / (rangeHi - rangeLo) * (Hh - T - B);
+  let s = `<rect x="${X(n.on)}" y="${T}" width="${Math.max(1, X(Math.min(n.off, t1)) - X(n.on))}" height="${Hh - T - B}" fill="var(--line)" opacity=".5"/>`;
+  if (band) s += `<rect x="${L}" y="${Y(band)}" width="${W - L - R}" height="${Y(-band) - Y(band)}" fill="var(--good)" opacity=".12"/>`;
+  const ticks = key === 'c' ? [-100, -50, 0, 50, 100] : [0, -10, -20, -30, -40, -50];
+  ticks.forEach(v => { s += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L - 4}" y="${Y(v) + 3}" text-anchor="end">${v}</text>`; });
+  const step = (t1 - t0) > 1.2 ? 0.5 : 0.1;
+  for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) s += `<text x="${X(t)}" y="${Hh - 6}" text-anchor="middle">${t.toFixed(1)}</text>`;
+  [['rc', '--real'], ['oc', '--ours']].forEach(([w, c]) => {
+    const v = n[w][key]; let d = '', pen = false;
+    v.forEach((y, i) => { if (y === null || (key === 'c' && Math.abs(y) >= 300)) { pen = false; return; } d += (pen ? 'L' : 'M') + X(t0 + i * dt).toFixed(1) + ' ' + Y(y).toFixed(1); pen = true; });
+    s += `<path d="${d}" fill="none" stroke="var(${c})" stroke-width="1.6"/>`;
+  });
+  svg.innerHTML = s;
+}
+
+function fmt(v, unit) { return v === null || v === undefined ? '–' : (typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(1)) : v) + (unit || ''); }
+const ROWS = [
+  ['Speaks at', n => [n.real.speak, n.ours.speak], ' s'], ['Tuning', n => [n.real.cents, n.ours.cents], ' ¢'],
+  ['In tune (±20 ¢)', n => [pct(n.real.intune), pct(n.ours.intune)], ''], ['On another pitch', n => [pct(n.real.wrong), pct(n.ours.wrong)], ''],
+  ['Peak level', n => [n.real.peak, n.ours.peak], ' dB'], ['Attack to peak', n => [n.real.attack, n.ours.attack], ' ms'],
+  ['Level at end re peak', n => [n.real.end, n.ours.end], ' dB'], ['Contour 25/50/75/100%', n => [n.real.contour?.join(' / '), n.ours.contour?.join(' / ')], ''],
+  ['Deepest hole inside', n => [n.real.gap, n.ours.gap], ' dB'], ['Dip into this note', n => [n.real.sep, n.ours.sep], ' dB'],
+  ['Noisy share of loud part', n => [pct(n.real.rough), pct(n.ours.rough)], ''], ['Bow', n => [n.real.stroke + ' #' + n.real.strokeNo, n.ours.stroke + ' #' + n.ours.strokeNo + (n.ours.string ? ' · ' + n.ours.string + ' string' : '')], ''],
+  ['Clean tone after', n => ['–', n.ours.capture], ' ms']
+];
+function pct(v) { return v === null || v === undefined ? null : Math.round(v * 100) + '%'; }
+
+function select(i, scroll) {
+  if (i !== sel && typeof stopAll === 'function' && !player.paused) stopAll();
+  sel = i; const n = N[i];
+  $('nname').textContent = n.name + (n.chord ? ' (double stop)' : '');
+  $('nscore').textContent = n.score + (n.prev !== undefined && n.prev !== null ? '  (was ' + n.prev + ')' : ''); $('nscore').className = 'score s-' + cls(n.score);
+  $('nmeta').textContent = `note ${i + 1} of ${N.length} · ${n.on.toFixed(2)}–${n.off.toFixed(2)} s · ${Math.round((n.off - n.on) * 1000)} ms · velocity ${n.vel}`;
+  $('issues').innerHTML = n.issues.length ? n.issues.map(s => `<li>${s}</li>`).join('') : '<li class="ok">Matches the real note on every check.</li>';
+  plot($('pp'), 'c', -120, 120, 20, n); plot($('lp'), 'l', -50, 2, 0, n);
+  $('mt').innerHTML = '<tr><th></th><th class="note-k">Real</th><th class="note-o">Ours</th></tr>' + ROWS.map(([k, f, u]) => { const [a, b] = f(n); return `<tr><td>${k}</td><td class="n">${fmt(a, a === null ? '' : u)}</td><td class="n">${fmt(b, b === null ? '' : u)}</td></tr>`; }).join('');
+  drawRoll();
+  document.querySelectorAll('.list tr[data-i]').forEach(r => r.classList.toggle('sel', +r.dataset.i === i));
+  if (scroll) { const x = n.on * PX - $('roll').clientWidth / 2; $('roll').scrollTo({ left: Math.max(0, x), behavior: 'smooth' }); }
+}
+function step(d) { const v = shown(); let k = v.indexOf(N[sel]); k = k < 0 ? 0 : Math.max(0, Math.min(v.length - 1, k + d)); select(N.indexOf(v[k]), true); }
+$('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+
+// audio: both recordings are decoded once when the page opens; each press builds one short clip
+// (real, ours, or real + pause + ours) and plays it in a single <audio> element, so only one thing
+// ever plays and it starts inside the tap (phones need that, and <audio> ignores the silent switch)
+const player = new Audio(); player.preload = 'auto';
+let bufs = null, loadErr = false, lastUrl = null;
+(function load() {
+  try {
+    const AC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const dec = new AC(1, 44100, 44100);
+    const one = u => fetch(u).then(r => r.arrayBuffer()).then(x => new Promise((res, rej) => dec.decodeAudioData(x, res, rej)));
+    Promise.all([one('clips/finale-real.mp3'), one('clips/finale-ours.mp3')])
+      .then(b => { bufs = b; $('pstat').textContent = ''; })
+      .catch(() => { loadErr = true; $('pstat').textContent = 'Could not load the audio. Reload the page to try again.'; });
+    $('pstat').textContent = 'Loading audio…';
+  } catch (e) { loadErr = true; }
+})();
+function wav(parts, sr) {
+  const n = parts.reduce((k, p) => k + p.length, 0), buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  let o = 44; parts.forEach(p => { for (let i = 0; i < p.length; i++, o += 2) v.setInt16(o, Math.max(-1, Math.min(1, p[i])) * 32767, true); });
+  return new Blob([buf], { type: 'audio/wav' });
+}
+function seg(b, a, e) {
+  const sr = b.sampleRate, d = b.getChannelData(0), i0 = Math.max(0, Math.round(a * sr)), i1 = Math.min(d.length, Math.round(e * sr));
+  const x = d.slice(i0, i1), f = Math.min(Math.round(0.01 * sr), x.length >> 1);
+  for (let i = 0; i < f; i++) { x[i] *= i / f; x[x.length - 1 - i] *= i / f; }
+  return x;
+}
+function stopAll() { player.pause(); whole = null; $('pstat').textContent = ''; $('wstat').textContent = ''; }
+function play(which) {
+  if (!bufs) { $('pstat').textContent = loadErr ? 'Could not load the audio. Reload the page to try again.' : 'Still loading the audio, try again in a moment.'; return; }
+  const n = N[sel], c = $('ctx').checked ? 1 : 0, a = Math.max(0, n.win[0] - c), e = n.win[1] + c, sr = bufs[0].sampleRate;
+  const parts = which === 'ab' ? [seg(bufs[0], a, e), new Float32Array(Math.round(0.35 * sr)), seg(bufs[1], a, e)] : [seg(bufs[which], a, e)];
+  player.pause(); whole = null; $('wstat').textContent = '';
+  if (lastUrl) URL.revokeObjectURL(lastUrl);
+  lastUrl = URL.createObjectURL(wav(parts, sr));
+  player.src = lastUrl;
+  const label = which === 'ab' ? 'real, then ours' : which ? 'ours' : 'real';
+  player.play().then(() => { $('pstat').textContent = 'Playing ' + label; }).catch(() => { $('pstat').textContent = 'The browser blocked playback. Tap the button again.'; });
+}
+player.addEventListener('ended', () => { $('pstat').textContent = ''; $('wstat').textContent = ''; whole = null; });
+
+// the whole Finale: plays the recording file itself, with a playhead on the score above;
+// Switch jumps to the other recording at the same moment
+let whole = null;
+function playWhole(which, at) {
+  player.pause();
+  if (lastUrl) { URL.revokeObjectURL(lastUrl); lastUrl = null; }
+  whole = which;
+  player.src = which === 'real' ? 'clips/finale-real.mp3' : 'clips/finale-ours.mp3';
+  const go = () => { player.play().then(() => { $('wstat').textContent = 'Playing the whole Finale: ' + which; $('pstat').textContent = ''; head(); })
+    .catch(() => { $('wstat').textContent = 'The browser blocked playback. Tap the button again.'; }); };
+  if (at) { player.addEventListener('loadedmetadata', function f() { player.removeEventListener('loadedmetadata', f); player.currentTime = at; }); }
+  go();
+}
+function head() {
+  const h = $('head');
+  if (!whole || player.paused) { h.hidden = true; return; }
+  h.hidden = false;
+  const x = player.currentTime * PX, r = $('roll');
+  h.style.left = x + 'px';
+  if (x < r.scrollLeft + 40 || x > r.scrollLeft + r.clientWidth - 60) r.scrollLeft = Math.max(0, x - 40);
+  requestAnimationFrame(head);
+}
+$('wr').onclick = () => playWhole('real', 0);
+$('wo').onclick = () => playWhole('ours', 0);
+$('wsw').onclick = () => { const t = whole ? player.currentTime : 0; playWhole(whole === 'real' ? 'ours' : 'real', t); };
+$('wstop').onclick = stopAll;
+$('pr').onclick = () => play(0);
+$('po').onclick = () => play(1);
+$('pab').onclick = () => play('ab');
+$('stop').onclick = stopAll;
+
+$('howto').textContent = 'Real tuning is measured against the player\'s own A (' + D.a4real + ' Hz), ours against A = 440. "Speaks" is when the written pitch is first held for 15 ms. "Dip into this note" is how far the level falls at the change from the previous note: real bow changes here dip 5 dB or more, slurs less. "Clean tone after" is when our string settled into a clean, steady vibration (from the engine itself).';
+
+function renderList() {
+  const v = shown();
+  $('list').innerHTML = '<tr><th>#</th><th>Time</th><th>Note</th><th>Score</th><th>Issues</th></tr>' + v.map(n => `<tr data-i="${n.i}" tabindex="0"><td class="n">${n.i + 1}</td><td class="n">${n.on.toFixed(2)}</td><td>${n.name}</td><td><span class="score s-${cls(n.score)}">${n.score}</span>${n.prev !== undefined && n.prev !== null && n.prev !== n.score ? ` <span class="small">${n.score > n.prev ? '▲' : '▼'} ${n.prev}</span>` : ''}</td><td>${n.kinds.join(', ') || '<span class="ok">ok</span>'}</td></tr>`).join('');
+  $('list').querySelectorAll('tr[data-i]').forEach(r => { r.onclick = () => select(+r.dataset.i, true); r.onkeydown = e => { if (e.key === 'Enter') select(+r.dataset.i, true); }; });
+}
+function render() { renderFilters(); renderList(); const v = shown(); if (v.length && !v.includes(N[sel])) sel = N.indexOf(v[0]); select(sel, true); }
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawRoll);
+render();
+</script>

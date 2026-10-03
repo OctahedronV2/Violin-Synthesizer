@@ -1,0 +1,356 @@
+<title>Bow on String</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one column. The scope of the string's motion is the hero, the indicator sits on it, three big sliders and a keyboard below. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#16202a; --muted:#5b6876; --line:#cdd5de;
+  --accent:#1f6f8b; --good:#1e8a55; --warn:#b8660b; --bad:#c0392b; --trace:#1f6f8b; --key:#fbfcfd; --keyb:#1c2630; --keyon:#f3c27a;
+  --display:"Bricolage Grotesque",system-ui,sans-serif; --body:"Manrope",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --good:#4cc68a; --warn:#f0a44a; --bad:#ef6f5e; --trace:#5cb8d6; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --panel:#171e26; --fg:#e4e9ef; --muted:#9aa6b4; --line:#2c3743;
+  --accent:#5cb8d6; --good:#4cc68a; --warn:#f0a44a; --bad:#ef6f5e; --trace:#5cb8d6; --key:#d9dee4; --keyb:#0b1015; --keyon:#f0a44a; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);padding:20px 16px 48px}
+.wrap{max-width:680px;margin:0 auto;display:grid;gap:16px}
+h1{font-family:var(--display);font-size:clamp(26px,6vw,36px);margin:0;line-height:1.1}
+p{margin:0;max-width:62ch}
+.muted{color:var(--muted)}
+button{font:600 15px var(--body);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--panel);border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.scopebox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;gap:8px}
+canvas{width:100%;height:180px;display:block}
+.state{font:700 17px var(--display);display:flex;gap:8px;align-items:center}
+.dot{width:12px;height:12px;border-radius:50%;background:var(--line);flex:none}
+.state.good .dot{background:var(--good)} .state.warn .dot{background:var(--warn)} .state.bad .dot{background:var(--bad)}
+.hint{font-size:13px;color:var(--muted)}
+.cap{font:12px var(--mono);color:var(--muted)}
+.slider{display:grid;gap:2px}
+.slider .top{display:flex;justify-content:space-between;align-items:baseline}
+.slider label{font-weight:700}
+.slider output{font:600 15px var(--mono);color:var(--accent);font-variant-numeric:tabular-nums}
+.slider .tip{font-size:13px;color:var(--muted)}
+input[type=range]{width:100%;height:34px;accent-color:var(--accent)}
+.kbwrap{overflow-x:auto;border-radius:8px;border:1px solid var(--line);background:var(--panel)}
+.kb{position:relative;height:110px;touch-action:none;user-select:none;-webkit-user-select:none}
+.k{position:absolute;top:0;border:1px solid var(--line);border-top:none}
+.k.w{background:var(--key);height:110px;border-radius:0 0 6px 6px;z-index:1}
+.k.b{background:var(--keyb);height:66px;z-index:2;border-radius:0 0 4px 4px;border-color:var(--keyb)}
+.k.on{background:var(--keyon)!important}
+.k span{position:absolute;bottom:6px;left:0;right:0;text-align:center;font:10px var(--mono);color:#5b6876}
+label.chk{display:inline-flex;gap:6px;align-items:center}
+.err{color:var(--bad);font-weight:600}
+</style>
+
+<div class="wrap">
+<header style="display:grid;gap:6px">
+  <h1>Bow on String</h1>
+  <p class="muted">One violin string and a bow, heard through a violin body (or bare). While a key is held, the bow moves at a constant speed with constant pressure. Find the settings where the string settles into Helmholtz motion.</p>
+</header>
+
+<div class="row">
+  <button id="start" class="primary">Start sound</button>
+  <label class="chk"><input type="checkbox" id="hold" checked> Hold note (tap a key to start, tap again to stop)</label>
+  <span id="status" class="hint"></span>
+</div>
+
+<div class="kbwrap"><div class="kb" id="kb" aria-label="Keyboard, G3 to E6"></div></div>
+<p class="hint">Computer keys: Z row = C4, Q row = C5.</p>
+
+<section class="scopebox" aria-label="String motion">
+  <div class="state" id="state"><span class="dot"></span><span id="stateText">Press Start, then a key</span></div>
+  <canvas id="scope" width="1200" height="360" role="img" aria-label="String velocity at the bow over three periods"></canvas>
+  <div class="cap">String velocity under the bow, three periods. Helmholtz motion: a long flat stretch at the bow's speed (the string sticks to the hair), then one short fast swing back (it slips), once per period.</div>
+</section>
+
+<section style="display:grid;gap:14px">
+  <div class="slider">
+    <div class="top"><label for="force">Bow pressure</label><output id="o-force"></output></div>
+    <input type="range" id="force" min="0" max="1000">
+    <div class="tip" id="fmaxTip"></div>
+  </div>
+  <div class="slider">
+    <div class="top"><label for="speed">Bow speed</label><output id="o-speed"></output></div>
+    <input type="range" id="speed" min="0" max="1000">
+    <div class="tip">Faster bow, louder note. A faster bow also tolerates more pressure.</div>
+  </div>
+  <div class="slider">
+    <div class="top"><label for="contact">Contact point</label><output id="o-contact"></output></div>
+    <input type="range" id="contact" min="0" max="1000">
+    <div class="tip">Distance from the bridge, as a share of the string. Nearer the bridge is brighter and needs more pressure.</div>
+  </div>
+  <label class="chk"><input type="checkbox" id="widebow" checked> Real bow (a centimetre of springy hair with a little rosin grain; off: the bow touches at a single point and is perfectly smooth)</label>
+  <div class="slider">
+    <div class="top"><label for="body">Body amount</label><output id="o-body"></output></div>
+    <input type="range" id="body" min="0" max="1000">
+    <div class="tip">0%: the bare string's pull on the bridge, a buzzy sawtooth. 100%: the real violin body. Above that, the body's peaks and dips are exaggerated, up to 8 times as deep.</div>
+  </div>
+</section>
+
+<section style="display:grid;gap:12px">
+  <h2 style="font-size:17px;margin:0">What changed: a real bow</h2>
+  <div class="row"><button id="dl" hidden>Download all clips (zip)</button><span id="dlStatus" class="hint"></span></div>
+  <p class="muted" style="margin:0">Open A4 at 0.5 N, 0.2 m/s, contact 12%, through the Iowa violin body, all at the same loudness. Compare with the real violin below.</p>
+  <div style="display:grid;gap:2px"><strong>Point bow (before)</strong><span class="muted">The bow touches the string at a single point, as before. Every cycle is identical.</span><audio controls preload="none" src="clip-point.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Real bow (now)</strong><span class="muted">The hair touches along about a centimetre, gives a little, and its rosin grips a touch unevenly. Each cycle now differs slightly, as on the real violin.</span><audio controls preload="none" src="clip-wide.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Point bow, no body</strong><audio controls preload="none" src="clip-point-bare.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>Real bow, no body</strong><audio controls preload="none" src="clip-wide-bare.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>G3, point bow</strong><audio controls preload="none" src="clip-g3p.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>G3, real bow</strong><audio controls preload="none" src="clip-g3.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>E5, point bow</strong><audio controls preload="none" src="clip-e5p.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>E5, real bow</strong><audio controls preload="none" src="clip-e5.mp3" style="width:100%"></audio></div>
+  <div style="display:grid;gap:2px"><strong>A4, real bow, more pressure (1.0 N)</strong><span class="muted">More pressure brings in more grit, as it does on a real violin.</span><audio controls preload="none" src="clip-heavy.mp3" style="width:100%"></audio></div>
+</section>
+
+<section style="display:grid;gap:8px">
+  <h2 style="font-size:17px;margin:0">Real violin for comparison</h2>
+  <p class="muted" style="margin:0">The open A string (A4) of a real violin, bowed and recorded with no room (University of Iowa Musical Instrument Samples). The body above is measured from this same violin, so play A4 with the body at 100% to compare.</p>
+  <audio controls preload="none" src="real-a4.mp3" style="width:100%"></audio>
+</section>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="worklet.js"></script>
+<script>
+const P = [
+  { id: 'force', min: 0.02, max: 3.0, def: 0.5, unit: 'N', log: true },
+  { id: 'speed', min: 0.02, max: 1.0, def: 0.2, unit: 'm/s', log: true },
+  { id: 'contact', min: 0.03, max: 0.3, def: 0.12, unit: '', log: false },
+];
+// Clip download through the viewer (plain download links do nothing in the artifact viewer).
+(async () => {
+  const downloads = window.claude && (await window.claude.use('downloads'));
+  if (!downloads) return;
+  $('dl').hidden = false;
+  $('dl').addEventListener('click', async () => {
+    try {
+      $('dlStatus').textContent = 'Packing…';
+      const zip = new JSZip();
+      const names = [...document.querySelectorAll('audio')].map((a) => a.getAttribute('src'));
+      for (const n of names) zip.file(n, await fetch(n).then((r) => r.arrayBuffer()));
+      const data = await zip.generateAsync({ type: 'arraybuffer' });
+      await downloads.save({ filename: 'bow-on-string-clips.zip', data });
+      $('dlStatus').textContent = 'Saved.';
+    } catch (e) { $('dlStatus').textContent = e && e.code === 'declined' ? '' : 'Could not save the clips here.'; }
+  });
+})();
+const BODY = 3, WIDE = 4;
+const sendWide = () => send({ type: 'param', index: WIDE, value: $('widebow').checked ? 1 : 0 });
+const $ = (id) => document.getElementById(id);
+let ctx = null, node = null, host = null, snap = null;
+const send = (m) => { if (node) node.port.postMessage(m); else if (host) host.handle(m); };
+// Body amount: scales the body's response in decibels (0 = none, 1 = the real body, 8 = eight times the peaks and dips).
+const BODY_MAX = 8;
+let bodyAmount = 1, bodyBase = null, bodyTimer = 0;
+const amountFrom = (s) => BODY_MAX * s * s, amountTo = (a) => Math.sqrt(a / BODY_MAX);
+function applyBody() {
+  send({ type: 'param', index: BODY, value: bodyAmount > 0.005 ? 1 : 0 });
+  if (!bodyBase || bodyAmount <= 0.005) return;
+  const ir = Math.abs(bodyAmount - 1) < 0.005 ? bodyBase.slice() : shapeBody(bodyBase, bodyAmount, ctx.sampleRate);
+  if (node) node.port.postMessage({ type: 'ir', ir }, [ir.buffer]); else if (host) host.handle({ type: 'ir', ir });
+}
+$('widebow').addEventListener('change', sendWide);
+$('body').value = Math.round(amountTo(1) * 1000);
+$('o-body').textContent = '100%';
+$('body').addEventListener('input', () => {
+  const s = $('body').value / 1000;
+  bodyAmount = amountFrom(s);
+  if (Math.abs(bodyAmount - 1) < 0.04) bodyAmount = 1; // snap to the real body
+  $('o-body').textContent = Math.round(bodyAmount * 100) + '%';
+  clearTimeout(bodyTimer); bodyTimer = setTimeout(applyBody, 120);
+});
+
+// In-place radix-2 FFT.
+function fft(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = (inverse ? 2 : -2) * Math.PI / len, wr = Math.cos(a), wi = Math.sin(a);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const p = i + k, q = p + len / 2;
+        const xr = re[q] * cr - im[q] * ci, xi = re[q] * ci + im[q] * cr;
+        re[q] = re[p] - xr; im[q] = im[p] - xi; re[p] += xr; im[p] += xi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+  if (inverse) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+// The body with its decibel response scaled by `amount`, rebuilt as a minimum-phase response.
+function shapeBody(base, amount, rate) {
+  const n = 32768, re = new Float64Array(n), im = new Float64Array(n);
+  re.set(base.subarray(0, Math.min(base.length, n)));
+  fft(re, im, false);
+  let peak = 0;
+  for (let k = 0; k < n; k++) peak = Math.max(peak, Math.hypot(re[k], im[k]));
+  const floor = peak * 1e-3; // dips deeper than -60 dB are clipped before scaling
+  for (let k = 0; k < n; k++) { re[k] = Math.log(Math.max(Math.hypot(re[k], im[k]), floor)); im[k] = 0; }
+  // Level: the average over the violin's notes (G3 to E6) of each note's loudness, taking
+  // the note as a sawtooth heard through the body, stays as it was with the real body.
+  const level = () => {
+    let sum = 0;
+    for (let note = 55; note <= 88; note++) {
+      const f0 = 440 * Math.pow(2, (note - 69) / 12);
+      let p = 0;
+      for (let h = 1; h * f0 < 12000; h++) p += Math.exp(2 * re[Math.round(h * f0 / rate * n)]) / (h * h);
+      sum += Math.log(p);
+    }
+    return sum / 34;
+  };
+  const before = level();
+  for (let k = 0; k < n; k++) re[k] *= amount;
+  const shift = 0.5 * (before - level());
+  for (let k = 0; k < n; k++) re[k] += shift;
+  fft(re, im, true); // real cepstrum
+  for (let k = 1; k < n / 2; k++) { re[k] *= 2; re[n - k] = 0; }
+  for (let k = 0; k < n; k++) im[k] = 0;
+  fft(re, im, false);
+  for (let k = 0; k < n; k++) { const m = Math.exp(re[k]), ph = im[k]; re[k] = m * Math.cos(ph); im[k] = m * Math.sin(ph); }
+  fft(re, im, true);
+  const len = 24576, fade = 2048, out = new Float32Array(len);
+  for (let i = 0; i < len; i++) out[i] = re[i] * (i < len - fade ? 1 : 0.5 + 0.5 * Math.cos(Math.PI * (i - (len - fade)) / fade));
+  return out;
+}
+const val = {};
+const to = (p, v) => p.log ? Math.log(v / p.min) / Math.log(p.max / p.min) : (v - p.min) / (p.max - p.min);
+const from = (p, s) => p.log ? p.min * Math.pow(p.max / p.min, s) : p.min + s * (p.max - p.min);
+const show = (p, v) => p.id === 'contact' ? (v * 100).toFixed(1) + '% (1/' + (1 / v).toFixed(1) + ')' : v.toFixed(v < 0.1 ? 3 : 2) + ' ' + p.unit;
+P.forEach((p, i) => {
+  const s = $(p.id);
+  const set = (v) => { val[p.id] = v; $('o-' + p.id).textContent = show(p, v); send({ type: 'param', index: i, value: v }); updateTip(); };
+  s.value = Math.round(to(p, p.def) * 1000); set(p.def);
+  s.addEventListener('input', () => set(from(p, s.value / 1000)));
+});
+function updateTip() {
+  if (val.speed === undefined || val.contact === undefined) return;
+  const fmax = 2 * 0.2 * val.speed / (val.contact * 0.5);
+  $('fmaxTip').textContent = `Clean tone needs enough pressure to catch the string but less than about ${fmax.toFixed(2)} N here (Schelleng's limit for this speed and contact point). Above that it crunches.`;
+}
+
+// ---- keyboard G3..E6, monophonic
+const LO = 55, HI = 88, WHITE = [0, 2, 4, 5, 7, 9, 11], NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const keyEls = {}; let latched = null;
+(function buildKeyboard() {
+  const kb = $('kb'), ww = 34, bw = 22; let x = 0;
+  for (let n = LO; n <= HI; n++) {
+    const pc = n % 12, white = WHITE.includes(pc), el = document.createElement('div');
+    el.className = 'k ' + (white ? 'w' : 'b');
+    if (white) { el.style.left = x + 'px'; el.style.width = ww + 'px'; if (pc === 0 || n === LO) el.innerHTML = `<span>${NAMES[pc]}${Math.floor(n / 12) - 1}</span>`; x += ww; }
+    else { el.style.left = (x - bw / 2) + 'px'; el.style.width = bw + 'px'; }
+    el.dataset.note = n; kb.appendChild(el); keyEls[n] = el;
+  }
+  kb.style.width = x + 'px';
+  const noteAt = (e) => { const t = document.elementFromPoint(e.clientX, e.clientY); return t && t.closest('.k') ? +t.closest('.k').dataset.note : null; };
+  const down = new Map();
+  kb.addEventListener('pointerdown', (e) => { kb.setPointerCapture(e.pointerId); const n = noteAt(e); if (n == null) return; press(n); down.set(e.pointerId, n); });
+  kb.addEventListener('pointermove', (e) => { if (!down.has(e.pointerId) || $('hold').checked) return; const n = noteAt(e), o = down.get(e.pointerId); if (n != null && n !== o) { on(n); off(o); down.set(e.pointerId, n); } });
+  const up = (e) => { if (!down.has(e.pointerId)) return; if (!$('hold').checked) off(down.get(e.pointerId)); down.delete(e.pointerId); };
+  kb.addEventListener('pointerup', up); kb.addEventListener('pointercancel', up);
+})();
+function on(n) { if (!node && !host) return; keyEls[n].classList.add('on'); send({ type: 'on', note: n }); }
+function off(n) { keyEls[n] && keyEls[n].classList.remove('on'); send({ type: 'off', note: n }); }
+function press(n) {
+  if (!$('hold').checked) { on(n); return; }
+  if (latched === n) { off(n); latched = null; return; }
+  if (latched !== null) { on(n); off(latched); } else on(n); // a new key moves the finger; the bow keeps going
+  latched = n;
+}
+$('hold').addEventListener('change', () => { if (!$('hold').checked && latched !== null) { off(latched); latched = null; } });
+const KEYMAP = {};
+'zsxdcvgbhnjm,l.;/'.split('').forEach((c, i) => KEYMAP[c] = 60 + i);
+'q2w3er5t6y7ui9o0p'.split('').forEach((c, i) => KEYMAP[c] = 72 + i);
+addEventListener('keydown', (e) => { if (e.repeat || e.metaKey || e.ctrlKey) return; const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined && keyEls[n]) { e.preventDefault(); press(n); } });
+addEventListener('keyup', (e) => { const n = KEYMAP[e.key.toLowerCase()]; if (n !== undefined && keyEls[n] && !$('hold').checked) off(n); });
+
+// ---- indicator and scope
+function classify(s) {
+  if (!s || !s.bowing) return ['', 'Not bowing', 'Press a key.'];
+  if (s.slips === 0) return ['warn', 'Starting, or stuck to the bow', 'If this stays, the string is locked to the hair: ease the pressure.'];
+  if (Math.abs(s.slips - 1) < 0.06 && s.irregularity < 0.12) return ['good', 'Helmholtz motion', 'One stick and one slip every period: the clean, bright bowed tone.'];
+  if (Math.abs(s.slips - 1) < 0.35 && s.irregularity < 0.7) return ['warn', 'Helmholtz motion, a little rough', 'Mostly one slip per period, but the hairs let go unevenly: some grit, like a firm real bow. Ease the pressure for a purer tone.'];
+  if (s.slips > 1.5 && s.irregularity < 0.3) return ['warn', 'Too light: ' + s.slips.toFixed(1) + ' slips per period', 'The string lets go more than once a period: a thin, hollow or octave-high tone. Add pressure or slow the bow.'];
+  const heavy = val.force > 0.5 * (2 * 0.2 * val.speed / (val.contact * 0.5));
+  return ['bad', heavy ? 'Too heavy: raucous' : 'Irregular', heavy ? 'The bow crushes the string and the slips come at random: a crunchy, scratchy tone. Ease the pressure or speed up.' : 'The slips are not settling. Try a little more pressure.'];
+}
+function draw() {
+  requestAnimationFrame(draw);
+  const c = $('scope'), dpr = window.devicePixelRatio || 1;
+  const cw = Math.round(c.clientWidth * dpr), ch = Math.round(c.clientHeight * dpr);
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+  const g = c.getContext('2d'), W = c.width, H = c.height, css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = css.getPropertyValue('--line'); g.lineWidth = dpr;
+  g.beginPath(); g.moveTo(0, H / 2); g.lineTo(W, H / 2); g.stroke();
+  const [cls, title, hint] = classify(snap);
+  $('state').className = 'state ' + cls; $('stateText').textContent = title + (hint ? ' · ' : '');
+  $('stateText').innerHTML = `${title}<span class="hint" style="font-family:var(--body);font-weight:400;margin-left:6px">${hint}</span>`;
+  if (!snap) return;
+  const s = snap.scope, per = snap.period, span = Math.min(s.length - 2, Math.round(3 * per));
+  // trigger on the latest slip (the largest drop) at least `span` samples back from the end
+  let trig = s.length - span - 1, best = 0;
+  for (let i = Math.max(1, s.length - span - Math.round(per) - 1); i <= s.length - span - 1; i++) { const d = s[i - 1] - s[i]; if (d > best) { best = d; trig = i; } }
+  let peak = Math.max(val.speed * 1.2, 1e-4);
+  for (let i = trig; i < trig + span; i++) peak = Math.max(peak, Math.abs(s[i]));
+  const y = (v) => H / 2 - (v / peak) * (H / 2 - 12);
+  // bow speed reference
+  g.setLineDash([5 * dpr, 4 * dpr]); g.strokeStyle = css.getPropertyValue('--warn');
+  g.beginPath(); g.moveTo(0, y(val.speed)); g.lineTo(W, y(val.speed)); g.stroke(); g.setLineDash([]);
+  g.fillStyle = css.getPropertyValue('--muted'); g.font = (12 * dpr) + 'px JetBrains Mono, monospace'; g.fillText('bow speed', 10, y(val.speed) - 10);
+  g.strokeStyle = css.getPropertyValue('--trace'); g.lineWidth = 2 * dpr; g.beginPath();
+  for (let i = 0; i < span; i++) { const X = (i / (span - 1)) * W, Y = y(s[trig + i]); i ? g.lineTo(X, Y) : g.moveTo(X, Y); }
+  g.stroke();
+}
+requestAnimationFrame(draw);
+
+$('start').addEventListener('click', async () => {
+  $('start').disabled = true; $('status').textContent = 'Loading…';
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    await ctx.resume();
+    const get = (f) => fetch(f).then((r) => { if (!r.ok) throw new Error(f + ' ' + r.status); return r.arrayBuffer(); });
+    const [wasm, irBuf] = await Promise.all([get('bow.wasm'), get('iowa.wav')]);
+    // iowa.wav: 32-bit float mono
+    const dv = new DataView(irBuf); let p = 12, ir = null, irRate = 48000;
+    while (p + 8 <= dv.byteLength) {
+      const id = String.fromCharCode(dv.getUint8(p), dv.getUint8(p + 1), dv.getUint8(p + 2), dv.getUint8(p + 3)), len = dv.getUint32(p + 4, true);
+      if (id === 'fmt ') irRate = dv.getUint32(p + 12, true);
+      if (id === 'data') { ir = new Float32Array(irBuf.slice(p + 8, p + 8 + len)); break; }
+      p += 8 + len + (len & 1);
+    }
+    if (ctx.audioWorklet) {
+      await ctx.audioWorklet.addModule('worklet.js');
+      node = new AudioWorkletNode(ctx, 'bow', { numberOfInputs: 0, outputChannelCount: [2] });
+      await new Promise((res, rej) => {
+        node.port.onmessage = (ev) => { const m = ev.data; if (m.type === 'ready') res(); else if (m.type === 'error') rej(new Error(m.message)); else if (m.type === 'scope') snap = m; };
+        node.port.postMessage({ type: 'init', wasm, ir, irRate });
+      });
+      node.connect(ctx.destination);
+    } else {
+      host = new BowHost(); await host.init(wasm, ir, irRate, ctx.sampleRate);
+      const sp = ctx.createScriptProcessor(1024, 0, 2);
+      sp.onaudioprocess = (e) => { host.render(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1), e.outputBuffer.length); snap = host.snapshot(); };
+      sp.connect(ctx.destination);
+    }
+    P.forEach((p, i) => send({ type: 'param', index: i, value: val[p.id] }));
+    const ratio = irRate / ctx.sampleRate;
+    bodyBase = new Float32Array(Math.floor(ir.length / ratio));
+    for (let i = 0; i < bodyBase.length; i++) { const x = i * ratio, k = Math.floor(x), f = x - k; bodyBase[i] = ((ir[k] || 0) * (1 - f) + (ir[k + 1] || 0) * f) * ratio; }
+    applyBody();
+    sendWide();
+    $('start').textContent = 'Sound on'; $('status').textContent = `Running at ${ctx.sampleRate / 1000} kHz`;
+  } catch (err) { $('status').innerHTML = `<span class="err">Could not start: ${err.message}</span>`; $('start').disabled = false; }
+});
+</script>

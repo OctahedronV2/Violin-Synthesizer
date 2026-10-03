@@ -48,6 +48,9 @@ env:
   VST3_SDK_TAG: v3.8.1_build_84
   ARTEFACTS: build/Octavio_artefacts/Release
   PRODUCT_NAME: Octavio
+  # Octavio 2 (octavio2/) builds beside Octavio 1 and is validated and packaged the same way.
+  ARTEFACTS2: build/octavio2/Octavio2_artefacts/Release
+  PRODUCT_NAME2: Octavio 2
   # The label that adds Linux and macOS to a pull request's builds.
   ALL_PLATFORMS_LABEL: all-platforms
   SCCACHE_GHA_ENABLED: "true"
@@ -76,6 +79,7 @@ jobs:
               - CMakeLists.txt
               - cmake/**
               - source/**
+              - octavio2/**
               - tests/**
               - resources/**
               - third_party/**
@@ -367,7 +371,10 @@ jobs:
         run: |
           for bundle in "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3" \
                         "$ARTEFACTS/AU/$PRODUCT_NAME.component" \
-                        "$ARTEFACTS/Standalone/$PRODUCT_NAME.app"; do
+                        "$ARTEFACTS/Standalone/$PRODUCT_NAME.app" \
+                        "$ARTEFACTS2/VST3/$PRODUCT_NAME2.vst3" \
+                        "$ARTEFACTS2/AU/$PRODUCT_NAME2.component" \
+                        "$ARTEFACTS2/Standalone/$PRODUCT_NAME2.app"; do
             codesign --force --deep --sign - "$bundle"
             codesign --verify --verbose "$bundle"
           done
@@ -388,6 +395,8 @@ jobs:
 
           $runner "$exe" --strictness-level 10 --validate-in-process \
             --validate "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3"
+          $runner "$exe" --strictness-level 10 --validate-in-process \
+            --validate "$ARTEFACTS2/VST3/$PRODUCT_NAME2.vst3"
 
       # The validator only changes with the SDK tag, so it is built once per
       # platform and kept in the Actions cache.
@@ -424,6 +433,7 @@ jobs:
 
           # Prints errors only; exits non-zero if any test fails.
           $runner "$validator" -e -q "$ARTEFACTS/VST3/$PRODUCT_NAME.vst3"
+          $runner "$validator" -e -q "$ARTEFACTS2/VST3/$PRODUCT_NAME2.vst3"
 
       - name: auval (AU)
         if: runner.os == 'macOS'
@@ -433,6 +443,9 @@ jobs:
           killall -9 -u "$(whoami)" AudioComponentRegistrar || true
           auval -a | grep -i octa || true
           auval -strict -v aumu Vsyn Octa
+          cp -R "$ARTEFACTS2/AU/$PRODUCT_NAME2.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 -u "$(whoami)" AudioComponentRegistrar || true
+          auval -strict -v aumu Oct2 Octa
 
       - name: Package
         run: |
@@ -455,6 +468,23 @@ jobs:
               (cd Standalone && 7z a -bso0 "$GITHUB_WORKSPACE/dist/Octavio-Standalone-$suffix.zip" "$PRODUCT_NAME.exe")
               # The benchmark, to run on the reference PC (docs/PHASE7.md, step 7.0).
               (cd "$GITHUB_WORKSPACE/$BUILD_DIR/tests" && 7z a -bso0 "$GITHUB_WORKSPACE/dist/ViolinSynthBench-$suffix.zip" ViolinSynthBench.exe)
+              ;;
+          esac
+          # Octavio 2, named Octavio2-* so 1.x releases (Octavio-*.zip) leave it out until it ships
+          cd "$GITHUB_WORKSPACE/$ARTEFACTS2"
+          case "$RUNNER_OS" in
+            macOS)
+              ditto -c -k --keepParent "VST3/$PRODUCT_NAME2.vst3"      "$GITHUB_WORKSPACE/dist/Octavio2-VST3-$suffix.zip"
+              ditto -c -k --keepParent "AU/$PRODUCT_NAME2.component"   "$GITHUB_WORKSPACE/dist/Octavio2-AU-$suffix.zip"
+              ditto -c -k --keepParent "Standalone/$PRODUCT_NAME2.app" "$GITHUB_WORKSPACE/dist/Octavio2-Standalone-$suffix.zip"
+              ;;
+            Linux)
+              (cd VST3 && zip -qry "$GITHUB_WORKSPACE/dist/Octavio2-VST3-$suffix.zip" "$PRODUCT_NAME2.vst3")
+              (cd Standalone && zip -qy "$GITHUB_WORKSPACE/dist/Octavio2-Standalone-$suffix.zip" "$PRODUCT_NAME2")
+              ;;
+            Windows)
+              (cd VST3 && 7z a -bso0 "$GITHUB_WORKSPACE/dist/Octavio2-VST3-$suffix.zip" "$PRODUCT_NAME2.vst3")
+              (cd Standalone && 7z a -bso0 "$GITHUB_WORKSPACE/dist/Octavio2-Standalone-$suffix.zip" "$PRODUCT_NAME2.exe")
               ;;
           esac
           ls -la "$GITHUB_WORKSPACE/dist"

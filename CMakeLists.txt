@@ -37,6 +37,7 @@ include(Sanitizers)
 if(VIOLINSYNTH_RENDER_ONLY)
     add_subdirectory(source)
     add_subdirectory(tools/render)
+    add_subdirectory(octavio2)
     return()
 endif()
 
@@ -98,3 +99,8 @@ if(VIOLINSYNTH_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Octavio 2: its own plugin, installed beside Octavio 1 (octavio2/)
+# ---------------------------------------------------------------------------
+add_subdirectory(octavio2)
