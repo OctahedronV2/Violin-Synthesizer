@@ -131,6 +131,18 @@ struct Params
     // x follow heat power q = |f dv| (W) with time constants tauFast/tauSlow.
     double tauFast = 3e-4, tauSlow = 0.2, kFast = 8.0, kSlow = 1.0; // (old lumped variant, unused)
     double aT = 1.0e-6, bT = 0.22, cT = 1.0e-4, tauG = 25.0, ya = 0.4, xi = 2.0; // van Walstijn 2026, Table 1
+    // elasto-plastic pre-sliding layer (Dupont et al. 2002, as in vW26): the rosin shears
+    // elastically by z before it slides; friction = force * (sigma0 z + sigma1 dz/dt). 0 = off.
+    // zba: fraction of the sliding deflection below which the layer is purely elastic. The layer is
+    // stiffer under more force, so a light bow rounds the Helmholtz corner and a heavy one keeps it
+    // sharp: brightness follows force (M2, 2026-10-03: sigma0 3e5 and zba 0.5 halve the gap to
+    // Iowa's pp-mf-ff brightening and bring the Schelleng limits at 10-20 cm/s closer).
+    double sigma0 = 3.0e5, sigma1 = 0.0, zba = 0.5;
+    // the hair is a ribbon held at the frog and the tip, so it is stiffest near either end: its
+    // stiffness under the string goes as 1 / (x (1 - x)) along the bow (x = 0 frog, 1 tip),
+    // hairStiffness being the value at the middle. hairEnds 0 = uniform, 1 = the full law.
+    double hairEnds = 1.0;
+    int epIters = 3;
     // bow
     int bowPoints = 4;
     // the player tunes the strings while bowing, so the bow's flattening is tuned out: every
@@ -187,6 +199,9 @@ struct String
     // bow contact state
     bool stick[4] = {};
     double hairY[4] = {}, grainLp[4] = {}, xFast[4] = {}, xSlow[4] = {}, tau[4] = {};
+    double zEP[4] = {}, dvEP[4] = {}; // elasto-plastic layer deflection (m) and last relative velocity
+    double hairFrac = 0.5; // where on the bow the string is, 0 frog .. 1 tip (set by the player)
+    double widthScale = 1.0; // the hair's width on the string against bowWidth (the player tilts the bow)
     Rng rng;
     // diagnostics
     double vBowPt = 0.0;
@@ -306,7 +321,7 @@ struct String
         if (K <= 1)
             return 0.0;
         const double c = 2.0 * 0.325 * d.f0; // wave speed of this string, m/s
-        return std::max (1.0, P->bowWidth * fs / c / (K - 1));
+        return std::max (1.0, P->bowWidth * widthScale * fs / c / (K - 1));
     }
 
     double grainFactor (int k, double vBow = 0.0)
@@ -355,6 +370,77 @@ struct String
         return vBow - (dh > 0 ? slip : -slip);
     }
 
+    // Thermal friction with the elasto-plastic pre-sliding layer (vW26 / Dupont 2002). The layer's
+    // deflection z obeys dz/dt = dv (1 - alpha(z, dv) z / zss), zss = mu(tau) / sigma0, with
+    // alpha 0 (elastic) below zba * zss and 1 (sliding) above zss. The friction force is
+    // force * (sigma0 z + sigma1 dz/dt). Solved implicitly: backward Euler in z (alpha from the
+    // last step), Newton on the relative velocity dv = vBow - v, where v = vh + f / a.
+    double elastoPlastic (int k, double vBow, double vh, double force, double a)
+    {
+        const double lineLen = std::max (1e-4, P->bowWidth * widthScale / std::max (1, bowPointsNow()));
+        const double Fb = force / lineLen;
+        const double tq = std::pow (std::max (0.0, tau[k]) / P->tauG, P->xi);
+        const double muT = P->muS * (1 + P->ya * tq) / (1 + tq);
+        // the sliding rosin's roughness (see the plastic law below): while the layer slides, the
+        // friction limit fluctuates, or (slipNoiseOut) the same fluctuation goes to the bridge
+        double r = 0.0;
+        if (P->slipNoise > 0.0 && ! stick[k])
+        {
+            const double an = slipNoiseA, wn = rng.gauss();
+            slipLp[k] = an * slipLp[k] + (1 - an) * wn;
+            r = noiseGain * P->slipNoise * std::pow (std::abs (dvEP[k]) / 0.1, P->slipNoiseExp) * (wn - slipLp[k]);
+        }
+        const double mu = P->slipNoiseOut > 0.0 ? muT : muT * std::max (0.05, 1.0 + r);
+        const double s0 = P->sigma0, s1 = P->sigma1, T = 1.0 / fs, zp = zEP[k];
+        const double zss = mu / s0;
+        const double D = vBow - vh; // relative velocity if no friction acted
+        auto alphaOf = [&] (double dv)
+        {
+            if (zp * dv <= 0.0) // unloading or reversing: elastic
+                return 0.0;
+            const double r = std::abs (zp) / zss, lo = P->zba;
+            if (r <= lo)
+                return 0.0;
+            if (r >= 1.0)
+                return 1.0;
+            return 0.5 + 0.5 * std::sin (pi * (r - 0.5 * (1 + lo)) / (1 - lo));
+        };
+        // f(dv) and h(dv) = dv - D + f / a (zero at the solution)
+        auto eval = [&] (double dv, double& f, double& dfd)
+        {
+            const double al = alphaOf (dv), c = al * T * s0 / mu; // implicit: z = (zp + T dv) / (1 + c |dv|)
+            const double den = 1.0 + c * std::abs (dv);
+            const double z = (zp + T * dv) / den;
+            const double dz = (z - zp) / T;
+            const double dzd = (T * den - (zp + T * dv) * c * (dv >= 0 ? 1.0 : -1.0)) / (den * den);
+            f = force * (s0 * z + s1 * dz);
+            dfd = force * (s0 + s1 / T) * dzd;
+            return z;
+        };
+        double dv = dvEP[k], f = 0, dfd = 0;
+        for (int it = 0; it < P->epIters; ++it)
+        {
+            eval (dv, f, dfd);
+            const double h = dv - D + f / a, dh = 1.0 + dfd / a;
+            double step = h / std::max (dh, 1e-3);
+            dv -= step;
+        }
+        const double z = eval (dv, f, dfd);
+        // the force a stuck contact can carry is bounded by the layer: keep f consistent with dv
+        zEP[k] = z;
+        dvEP[k] = dv;
+        stick[k] = std::abs (z) < P->zba * zss;
+        if (P->slipNoiseOut > 0.0 && ! stick[k])
+            hiss += P->slipNoiseOut * (dv > 0 ? 1.0 : -1.0) * muT * force * r;
+        const double v = vBow - dv;
+        const double q = std::abs (f * dv) / lineLen; // W/m
+        const double cool = (P->bT * std::sqrt (std::abs (dv) / Fb) + P->cT) * Fb;
+        const double rate = cool / (P->aT * Fb), e = std::exp (-rate / fs);
+        const double target = cool > 0 ? q / cool : 0.0;
+        tau[k] = target + (tau[k] - target) * e;
+        return v;
+    }
+
     // Friction at one contact point. a = junction impedance seen by the friction force
     // (force f gives velocity change f / a). Returns the contact point's velocity.
     double contact (int k, double vBow, double vh, double force, double a)
@@ -363,11 +449,13 @@ struct String
         {
             stick[k] = false;
             tau[k] *= 0.999;
+            zEP[k] = 0.0;
+            dvEP[k] = 0.0;
             return vh;
         }
         if (P->friction == Friction::thermalHyp)
         {
-            const double lineLen = std::max (1e-4, P->bowWidth / std::max (1, bowPointsNow()));
+            const double lineLen = std::max (1e-4, P->bowWidth * widthScale / std::max (1, bowPointsNow()));
             const double Fb = force / lineLen;
             const double tq = std::pow (std::max (0.0, tau[k]) / P->tauG, P->xi);
             const double y = (1 + P->ya * tq) / (1 + tq);
@@ -381,12 +469,14 @@ struct String
         }
         if (P->friction == Friction::hyperbolic)
             return hyperbolic (k, vBow, vh, force, a);
+        if (P->sigma0 > 0.0)
+            return elastoPlastic (k, vBow, vh, force, a);
         // thermal friction after van Walstijn et al. (Acta Acustica 2026) with mu_d = mu_s (their best
         // fit) and the rosin's pre-sliding elasticity left out: friction limit mu_s * y(tau), where
         // tau is the contact temperature above ambient and y falls from 1 to ya through the
         // glass transition tauG. Heat balance per unit length of contact (their eq. 22):
         //   aT Fb dtau/dt + (bT sqrt(|v| / Fb) + cT Fb) tau = Qf = f_line |v_rel|
-        const double lineLen = std::max (1e-4, P->bowWidth / std::max (1, bowPointsNow()));
+        const double lineLen = std::max (1e-4, P->bowWidth * widthScale / std::max (1, bowPointsNow()));
         const double Fb = force / lineLen; // N/m
         const double tq = std::pow (std::max (0.0, tau[k]) / P->tauG, P->xi);
         const double y = (1 + P->ya * tq) / (1 + tq);
@@ -495,7 +585,9 @@ struct String
             if (P->hairStiffness > 0.0)
             {
                 // hair spring kk with damper c in parallel, in series with the string surface
-                const double c = P->hairDamping / K, kk = P->hairStiffness / K;
+                const double x = std::clamp (hairFrac, 0.04, 0.96);
+                const double ends = 1.0 + P->hairEnds * (0.25 / (x * (1.0 - x)) - 1.0);
+                const double c = P->hairDamping / K, kk = P->hairStiffness * ends / K;
                 const double a = 1.0 / (Ys + 1.0 / c);
                 const double vb = vBow - kk * hairY[k] / c;
                 const double vv = contact (k, vb, vh, fk, a);

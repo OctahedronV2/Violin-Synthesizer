@@ -78,6 +78,10 @@ static void setup (Violin& v)
     O (ya);
     O (xi);
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
+    p.sigma0 = opt ("sigma0", p.sigma0);
+    p.sigma1 = opt ("sigma1", p.sigma1);
+    p.zba = opt ("zba", p.zba);
+    p.epIters = (int) opt ("epIters", p.epIters);
     O (bowWidth);
     O (hairStiffness);
     O (hairDamping);

@@ -63,6 +63,13 @@ struct PlayerParams
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
     double posLo = 0.55, posRange = 0.2712;
+    // the most a player presses (N): real ff tops out around 2-3 N; above that the rosin layer
+    // pulls an open string flat (M2: -40 to -60 cents at the 4 N velocity 127 asked for)
+    double forceCap = 2.0;
+    // the player tilts the stick towards the fingerboard at pp, so only part of the ribbon
+    // touches the string: the hair's width on the string is tiltPP of the full width at pp,
+    // all of it at ff
+    double tiltPP = 1.0; // 1 = off: in M2 a narrower contact made pp brighter, against real violins
     // bow acceleration limit, m/s^2 (higher at ff); 20/40 turn the bow round a little quicker
     // than 12.8/30 did (Jake's pick, bow-change listening test 2026-10-03)
     double accel = 20.0;
@@ -284,7 +291,7 @@ struct Player
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
         const double p = std::clamp (pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
-        return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
+        return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
     }
 
     double regTrim (double pitch) const
@@ -769,6 +776,8 @@ struct Player
             force[s] = S.force;
             vBow[s] = S.force > 0.0 ? v : 0.0;
             vn->s[s].setBeta (betaFor (s));
+            vn->s[s].hairFrac = hair / pp.bowLength;
+            vn->s[s].widthScale = pp.tiltPP + (1.0 - pp.tiltPP) * d;
         }
         t += dt;
     }

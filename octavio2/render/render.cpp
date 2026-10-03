@@ -69,6 +69,45 @@ static void writeStereo (const std::string& path, const std::vector<float>& l, c
 static const char* halls[] = { "arvedi-near",  "arvedi-far",   "detmold",          "church",
                                "maida-vale-4", "maida-vale-5", "wdr-control-room", "wdr-studio" };
 
+// experiments: any of the strings' and bow's continuous Params
+static void stringOpts (Params& p)
+{
+#define O(name) p.name = opt (#name, p.name)
+    O (muS);
+    O (muD);
+    O (v0);
+    O (aT);
+    O (bT);
+    O (cT);
+    O (tauG);
+    O (ya);
+    O (xi);
+    O (bowWidth);
+    O (hairStiffness);
+    O (hairEnds);
+    O (sigma0);
+    O (sigma1);
+    O (zba);
+    p.epIters = (int) opt ("epIters", p.epIters);
+    O (hairDamping);
+    O (grain);
+    O (grainHz);
+    O (grainFade);
+    O (tuneCents);
+    O (earCarry);
+    O (slipNoise);
+    O (slipNoiseHz);
+    O (slipNoiseExp);
+    O (slipNoiseFade);
+    O (slipNoiseOut);
+    O (torsionSpeed);
+    O (torsionImpedance);
+    O (torsionQ);
+    O (fingerLoss);
+    O (admScale);
+#undef O
+}
+
 // PlayerParams fields given on the command line
 static void playerOpts (PlayerParams& q)
 {
@@ -85,6 +124,8 @@ static void playerOpts (PlayerParams& q)
     O (cUpper);
     O (posLo);
     O (posRange);
+    O (forceCap);
+    O (tiltPP);
     O (accel);
     O (accelFF);
     O (landTime);
@@ -249,6 +290,7 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
+    stringOpts (engine->getViolin().p); // and any continuous strings Params field
     engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;
@@ -367,35 +409,7 @@ int main (int argc, char** argv)
         p.friction = opts["friction"] == "hyperbolic" ? Friction::hyperbolic
             : opts["friction"] == "thermalHyp"        ? Friction::thermalHyp
                                                       : Friction::thermal;
-#define O(name) p.name = opt (#name, p.name)
-    O (muS);
-    O (muD);
-    O (v0);
-    O (aT);
-    O (bT);
-    O (cT);
-    O (tauG);
-    O (ya);
-    O (xi);
-    O (bowWidth);
-    O (hairStiffness);
-    O (hairDamping);
-    O (grain);
-    O (grainHz);
-    O (grainFade);
-    O (tuneCents);
-    O (earCarry);
-    O (slipNoise);
-    O (slipNoiseHz);
-    O (slipNoiseExp);
-    O (slipNoiseFade);
-    O (slipNoiseOut);
-    O (torsionSpeed);
-    O (torsionImpedance);
-    O (torsionQ);
-    O (fingerLoss);
-    O (admScale);
-#undef O
+    stringOpts (p);
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
     p.dispersion = opt ("dispersion", p.dispersion) != 0;
     p.torsion = opt ("torsion", p.torsion) != 0;
