@@ -35,9 +35,14 @@ juce_add_binary_data(Octavio2Data
     NAMESPACE Octavio2BinaryData
     HEADER_NAME Octavio2BinaryData.h
     SOURCES
-        data/body-fullband-balanced-48k.wav
-        data/body-directional-left-48k.wav
-        data/body-directional-right-48k.wav
+        data/bodies/stoppani-48k.wav
+        data/bodies/klimke-48k.wav
+        data/bodies/levaggi-48k.wav
+        data/bodies/iowa-48k.wav
+        data/mics/front-48k.wav
+        data/mics/above-48k.wav
+        data/mics/ear-48k.wav
+        data/mics/side-48k.wav
         data/halls/arvedi-near.wav
         data/halls/arvedi-far.wav
         data/halls/detmold.wav

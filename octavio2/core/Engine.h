@@ -30,6 +30,14 @@ struct EngineSettings
     double vibrato = 1.0; // width scale
     double velocityCurve = 1.0; // dynamics = velocity ^ this (PlayerParams::velCurve)
     double dynamics = 0.0; // added to every note's dynamics, -0.5..0.5 (PlayerParams::dynBias)
+    // radiation and room (M1)
+    int violin = 0; // RadiationData::bodies: Stoppani, Klimke, Levaggi, Iowa
+    int mic = 0; // RadiationData::mics: front, above, player's ear, side
+    double width = 1.0; // stereo width, 0..2
+    double movement = 0.0; // player's sway, 0..1
+    double distance = 2.0; // m, 0.5..10
+    double bridgeHz = 2900.0; // bridge rocking resonance, 2400 (dark) .. 3600 (bright)
+    int mute = 0; // 0 off, 1 con sordino, 2 practice mute
 };
 
 class Engine
@@ -168,6 +176,7 @@ public:
     // for tests and the renderer
     Player& getPlayer() { return *player; }
     Violin& getViolin() { return *violin; }
+    Radiation& getRadiation() { return *radiation; }
 
 private:
     struct Ev
@@ -193,6 +202,12 @@ private:
         radiation->setHall (settings.hall);
         radiation->setReverbGain (std::pow (10.0, settings.reverbDb / 20.0));
         radiation->setOutputGain (std::pow (10.0, settings.volumeDb / 20.0));
+        radiation->setViolin (settings.violin);
+        radiation->setMic (settings.mic);
+        radiation->setWidth (settings.width);
+        radiation->setMovement (settings.movement);
+        radiation->setDistance (settings.distance);
+        radiation->setBridge (settings.bridgeHz, settings.mute);
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;

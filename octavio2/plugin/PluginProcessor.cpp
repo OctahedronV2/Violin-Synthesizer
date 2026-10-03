@@ -33,9 +33,17 @@ o2::RadiationData loadRadiationData()
         auto w = resource (f);
         return w.channels.empty() ? std::vector<float> (1, 0.0f) : w.channels[0];
     };
-    data.body = mono ("body-fullband-balanced-48k.wav");
-    data.bodyLeft = mono ("body-directional-left-48k.wav");
-    data.bodyRight = mono ("body-directional-right-48k.wav");
+    // the Violin choices, then the Mic position choices, in order (data/bodies/make_bodies.py)
+    for (const char* b : { "stoppani-48k.wav", "klimke-48k.wav", "levaggi-48k.wav", "iowa-48k.wav" })
+        data.bodies.push_back (mono (b));
+    for (const char* m : { "front-48k.wav", "above-48k.wav", "ear-48k.wav", "side-48k.wav" })
+    {
+        auto w = resource (m);
+        std::array<std::vector<float>, 6> irs;
+        for (size_t k = 0; k < 6; ++k)
+            irs[k] = k < w.channels.size() ? std::move (w.channels[k]) : std::vector<float> (1, 0.0f);
+        data.mics.push_back (std::move (irs));
+    }
     // the Room choices after "None", in order (params::roomNames)
     for (const char* hall : { "arvedi-near.wav",
                               "arvedi-far.wav",

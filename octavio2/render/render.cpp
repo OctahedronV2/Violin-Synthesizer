@@ -20,6 +20,8 @@
 #include "../core/Wav.h"
 #include "Midi.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -195,9 +197,21 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         const WavData w = readWavFile (dir + "/" + name);
         return w.channels.empty() ? std::vector<float>() : w.channels[0];
     };
-    data.body = mono ("body-fullband-balanced-48k.wav");
-    data.bodyLeft = mono ("body-directional-left-48k.wav");
-    data.bodyRight = mono ("body-directional-right-48k.wav");
+    for (const char* b : { "stoppani", "klimke", "levaggi", "iowa" })
+        data.bodies.push_back (mono (std::string ("bodies/") + b + "-48k.wav"));
+    for (const char* m : { "front", "above", "ear", "side" })
+    {
+        const WavData w = readWavFile (dir + "/mics/" + m + "-48k.wav");
+        if (w.channels.size() != 6)
+        {
+            std::fprintf (stderr, "cannot read %s/mics/%s-48k.wav\n", dir.c_str(), m);
+            return 1;
+        }
+        std::array<std::vector<float>, 6> irs;
+        for (size_t k = 0; k < 6; ++k)
+            irs[k] = w.channels[k];
+        data.mics.push_back (irs);
+    }
     for (const char* h : halls)
     {
         const WavData w = readWavFile (dir + "/halls/" + h + ".wav");
@@ -208,7 +222,7 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         }
         data.halls.push_back ({ w.channels[0], w.channels[1] });
     }
-    if (data.body.empty() || data.bodyLeft.empty() || data.bodyRight.empty())
+    if (std::any_of (data.bodies.begin(), data.bodies.end(), [] (const auto& b) { return b.empty(); }))
     {
         std::fprintf (stderr, "cannot read the bodies in %s\n", dir.c_str());
         return 1;
@@ -224,6 +238,15 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.volumeDb = opt ("volume", es.volumeDb);
     es.vibrato = opt ("vibrato", es.vibrato);
     es.velocityCurve = opt ("velCurve", es.velocityCurve);
+    es.violin = (int) opt ("violin", es.violin);
+    es.mic = (int) opt ("mic", es.mic);
+    es.width = opt ("width", es.width);
+    es.movement = opt ("movement", es.movement);
+    es.distance = opt ("distance", es.distance);
+    es.bridgeHz = opt ("bridge", es.bridgeHz);
+    es.mute = (int) opt ("mute", es.mute);
+    if (opts.count ("size"))
+        engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
     engine->getPlayer().log = opt ("log", 0) != 0;
