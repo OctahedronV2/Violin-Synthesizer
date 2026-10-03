@@ -1,6 +1,7 @@
 // Octavio 2 plugin tests: the engine plays, Studio mode looks ahead, the processor runs at the
 // host's rate, notes outside the violin stay silent, state round-trips.
 
+#include "../plugin/PluginEditor.h"
 #include "../plugin/PluginProcessor.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -131,4 +132,52 @@ TEST_CASE ("Octavio 2 saves and restores its parameters", "[octavio2]")
     b.setStateInformation (state.getData(), (int) state.getSize());
     CHECK (std::abs (b.getParameters().getRawParameterValue ("vibrato")->load() - 1.5f) < 1e-4f);
     CHECK (juce::roundToInt (b.getParameters().getRawParameterValue ("room")->load()) == 3);
+}
+
+TEST_CASE ("Octavio 2's interface paints every tab while it plays", "[octavio2]")
+{
+    // OCTAVIO2_SNAPSHOTS=<folder> saves each tab as a PNG (Live, then Studio)
+    const juce::ScopedJuceInitialiser_GUI gui;
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("OCTAVIO2_SNAPSHOTS", {});
+    for (const bool studio : { false, true })
+    {
+        octavio2::Processor p;
+        setParam (p, "mode", studio ? 1.0f : 0.0f);
+        // a little run, the last note held
+        const double rate = 48000.0;
+        const int block = 480;
+        p.prepareToPlay (rate, block);
+        juce::AudioBuffer<float> buf (2, block);
+        const int notes[] = { 62, 64, 66, 67, 69, 71, 73, 74, 76 };
+        const int step = (int) (0.35 * rate / block);
+        const int blocks = (int) (4.5 * rate / block);
+        for (int b = 0; b < blocks; ++b)
+        {
+            juce::MidiBuffer midi;
+            if (b % step == 0 && b / step < 9)
+            {
+                const int k = b / step;
+                if (k > 0)
+                    midi.addEvent (juce::MidiMessage::noteOff (1, notes[k - 1] - 12), 0);
+                midi.addEvent (juce::MidiMessage::noteOn (1, notes[k] - 12, (juce::uint8) (80 + 4 * k)), 1);
+            }
+            p.processBlock (buf, midi);
+        }
+        for (int tab = 0; tab < 7; ++tab)
+        {
+            if (studio && tab != 0)
+                break;
+            p.editorTab = tab;
+            octavio2::Editor editor (p);
+            const auto image = editor.createComponentSnapshot (editor.getLocalBounds());
+            CHECK (image.getWidth() == octavio2::ui::designWidth);
+            if (folder.isNotEmpty())
+            {
+                juce::File file (folder + "/" + (studio ? "studio" : "live") + "-" + juce::String (tab) + ".png");
+                file.deleteFile();
+                juce::FileOutputStream out (file);
+                juce::PNGImageFormat().writeImageToStream (image, out);
+            }
+        }
+    }
 }

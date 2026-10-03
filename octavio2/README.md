@@ -11,7 +11,10 @@ New engine, player and plugin for Octavio 2.0.0. Plan: `docs/OCTAVIO2_PLAN.md`.
 - `core/Engine.h`: MIDI events -> player -> strings -> radiation, at 48 kHz. Live mode plays at
   once; Studio mode looks 1.2 s ahead so the player knows each note's length. The plugin and the
   renderer's `sound=` mode both run this, so a render is what the plugin plays.
-- `plugin/`: the Octavio 2 plugin (VST3, AU, Standalone; installs beside Octavio 1).
+- `plugin/`: the Octavio 2 plugin (VST3, AU, Standalone; installs beside Octavio 1). `plugin/ui/`
+  is the interface from the mockups (Play in Live and Studio, Curves, Tone, MIDI); controls of
+  later milestones show dimmed, with a tooltip saying which milestone brings them.
+  `OCTAVIO2_SNAPSHOTS=<folder> build/octavio2/Octavio2Tests` saves every tab as a PNG.
 - `render/render.cpp`: MIDI -> bridge force (research path) or, with `sound=`, the engine's stereo.
 - `data/`: full-band and directional bodies, halls (`data/halls/SOURCES.md`, CC BY), string and
   bridge data from the research threads.

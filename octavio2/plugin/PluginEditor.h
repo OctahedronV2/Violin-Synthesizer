@@ -2,74 +2,53 @@
 
 #include "PluginProcessor.h"
 #include "plugin/HostKeyboardFocus.h"
-#include "plugin/LookAndFeel.h"
+#include "ui/Controls.h"
+#include "ui/Keyboard.h"
 
 namespace octavio2
 {
-// First Octavio 2 editor: every parameter, in Octavio 1's dark wood and amber look, plus the
-// on-screen keyboard. The full interface from the mockups (octavio-2/mockups) replaces it.
-class Editor final : public juce::AudioProcessorEditor
+// The Octavio 2 interface, from the mockups (octavio-2/mockups): a header with the instrument,
+// player, presets, Live/Studio and the tabs; the tab's view; the keyboard. Drawn at 1200 x 780
+// and scaled to the window, which keeps that shape.
+class Editor final : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
     explicit Editor (Processor&);
     ~Editor() override;
 
-    void paint (juce::Graphics&) override;
     void resized() override;
     void parentHierarchyChanged() override { hostFocus.editorParentChanged(); }
 
 private:
-    // right-click (Ctrl-click on macOS) opens the host's menu for the parameter: automation
-    // clips, MIDI learn and so on
-    struct MenuSlider final : juce::Slider
-    {
-        MenuSlider()
-            : juce::Slider (RotaryHorizontalVerticalDrag, TextBoxBelow)
-        {
-        }
-        std::function<void()> onMenu;
-        void mouseDown (const juce::MouseEvent& e) override
-        {
-            if (e.mods.isPopupMenu() && onMenu)
-                onMenu();
-            else
-                juce::Slider::mouseDown (e);
-        }
-        void mouseDrag (const juce::MouseEvent& e) override
-        {
-            if (! e.mods.isPopupMenu())
-                juce::Slider::mouseDrag (e);
-        }
-        void mouseUp (const juce::MouseEvent& e) override
-        {
-            if (! e.mods.isPopupMenu())
-                juce::Slider::mouseUp (e);
-        }
-    };
-    struct Knob
-    {
-        MenuSlider slider;
-        juce::Label label;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attachment;
-    };
-    struct Choice
-    {
-        juce::ComboBox box;
-        juce::Label label;
-        std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attachment;
-    };
+    void timerCallback() override;
 
-    void addKnob (Knob&, const juce::ParameterID&, const juce::String& name);
-    void addChoice (Choice&, const juce::ParameterID&, const juce::String& name);
-    void showParameterMenu (juce::Component&, const juce::ParameterID&);
+    // everything, in design units
+    class Canvas final : public juce::Component
+    {
+    public:
+        explicit Canvas (Editor&);
+        void paint (juce::Graphics&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        void mouseMove (const juce::MouseEvent&) override;
+        void showTab (int);
+        juce::Rectangle<float> tabBounds (int) const;
+
+        Editor& editor;
+        std::vector<std::unique_ptr<juce::Component>> views;
+        int tab = 0;
+    };
 
     Processor& processor;
-    violinsynth::ViolinLookAndFeel lookAndFeel;
-    Knob velocityCurve, vibrato, brightness, reverb, volume;
-    Choice mode, octave, room;
-    juce::MidiKeyboardComponent keyboard;
-    juce::Label credits;
+    ui::LookAndFeel lookAndFeel;
+    ui::Choices mode;
+    ui::Keyboard keyboard;
+    struct HeaderPreview final : juce::Component, juce::SettableTooltipClient
+    {
+    } instrument, player, presets;
+    Canvas canvas { *this };
+    juce::TooltipWindow tooltips { this, 500 };
     violinsynth::HostKeyboardFocus hostFocus { *this };
+    juce::String cpuText, latencyText;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Editor)
 };

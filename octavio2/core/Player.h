@@ -98,6 +98,7 @@ struct PlayerParams
     double vibRate = 5.6, vibRateDyn = 0.6; // Hz, plus per unit d
     double vibWander = 0.15; // relative random wander of rate and width
     double vibAmount = 1.0; // the plugin's Vibrato control: scales every note's width
+    double dynBias = 0.0; // the plugin's Dynamics control: added to every note's dynamics (0..1 scale)
     double liftAfter = 0.35; // an idle string's finger lifts after this long, s
     double liftDamp = 0.25, liftDampTime = 0.03;
     double openMute = 0.1, openMuteTime = 0.15; // muting an open string the bow just left (loss per round trip, s)
@@ -182,6 +183,7 @@ struct Player
         double fScale = 1.0;
         double landAt = -10.0; // when the bow last landed on this string while moving
         double ear = 1.0; // force correction from listening
+        double spp = 1.0; // slips per period at the last listen (1 = clean Helmholtz motion)
         long slipMark = 0;
         bool captured = true;
         int earHigh = 0;
@@ -210,7 +212,7 @@ struct Player
     double dynFromVel (double vel127) const
     {
         const double x = std::clamp ((vel127 - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0);
-        return std::pow (x, pp.velCurve);
+        return std::clamp (std::pow (x, pp.velCurve) + pp.dynBias, 0.0, 1.0);
     }
 
     // ---------------------------------------------------------------- string choice
@@ -683,6 +685,7 @@ struct Player
                         if (log)
                             std::fprintf (stderr, "capture %.3f s at %.3f string %d pitch %.1f\n", c, t, s, S.target);
                     }
+                    S.spp = spp;
                     S.earHigh = spp > 1.4 ? S.earHigh + 1 : 0;
                     if (S.earHigh >= 2)
                         S.ear = std::min (pp.earMax, S.ear * (1.0 + pp.earUp));

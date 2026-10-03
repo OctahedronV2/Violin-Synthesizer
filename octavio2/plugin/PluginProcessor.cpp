@@ -147,6 +147,7 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     scratchL.assign (static_cast<size_t> (std::max (samplesPerBlock, 512)), 0.0f);
     scratchR.assign (scratchL.size(), 0.0f);
     latencyShown = -1;
+    nextHistoryT = 0.0;
     updateLatency();
 }
 
@@ -180,6 +181,7 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
             engine->noteOff (when, sent[static_cast<size_t> (m.getNoteNumber())]);
         sent[static_cast<size_t> (m.getNoteNumber())] = static_cast<std::int8_t> (pitch);
         engine->noteOn (when, pitch, m.getVelocity());
+        lastVelocity = m.getVelocity();
     }
     else if (m.isNoteOff())
     {
@@ -231,6 +233,7 @@ void Processor::renderEngine (float* left, float* right, int numSamples)
 void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    const auto startTicks = juce::Time::getHighResolutionTicks();
     const int n = buffer.getNumSamples();
     engine->setSettings (reader.read());
 
@@ -239,7 +242,10 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
         {
             const auto when = engineTime (0);
             if (e.velocity > 0.0f)
+            {
                 engine->noteOn (when, e.note, e.velocity * 127.0f);
+                lastVelocity = juce::roundToInt (e.velocity * 127.0f);
+            }
             else
                 engine->noteOff (when, e.note);
         });
@@ -272,6 +278,55 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     for (int c = 2; c < buffer.getNumChannels(); ++c)
         buffer.clear (c, 0, n);
     hostClock += n;
+    updateTelemetry (n / hostRate, startTicks);
+}
+
+void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
+{
+    const double used = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - startTicks);
+    telemetry.cpu.store (static_cast<float> (0.9 * telemetry.cpu.load() + 0.1 * used / std::max (1e-6, blockSeconds)));
+
+    auto& pl = engine->getPlayer();
+    auto& vn = engine->getViolin();
+    auto& T = telemetry;
+    const int s = juce::jlimit (0, 3, pl.lastString);
+    const auto& S = pl.st[static_cast<size_t> (s)];
+    const bool sounding = pl.nHeld > 0 && ! pl.releasing;
+    T.note.store (sounding ? static_cast<int> (std::lround (pl.noteNow)) : -1);
+    T.string.store (s);
+    T.velocity.store (lastVelocity);
+    T.slur.store (pl.slurNotes > 0);
+    T.slurNotes.store (pl.slurNotes);
+    T.releasing.store (pl.releasing);
+    T.pitch.store (static_cast<float> (S.pitch));
+    T.dynamics.store (static_cast<float> (pl.d));
+    T.handPos.store (static_cast<float> (pl.handPos));
+    T.bowDir.store (static_cast<float> (pl.dir));
+    T.hair.store (static_cast<float> (pl.hair / pl.pp.bowLength));
+    T.speed.store (static_cast<float> (std::abs (pl.v)));
+    T.force.store (static_cast<float> (S.force));
+    T.contact.store (static_cast<float> (pl.betaFor (s)));
+    T.vibWidth.store (static_cast<float> (S.vibWidth));
+    T.vibRate.store (static_cast<float> (S.vibRate));
+    T.slips.store (static_cast<float> (S.spp));
+    for (size_t k = 0; k < 4; ++k)
+        T.stringForce[k].store (static_cast<float> (pl.st[k].force));
+    juce::ignoreUnused (vn);
+
+    const double now = engine->seconds();
+    if (now >= nextHistoryT)
+    {
+        nextHistoryT = now + 0.01;
+        const auto i = T.historyCount.load (std::memory_order_relaxed);
+        T.history[static_cast<size_t> (i % Telemetry::historySize)]
+            = { static_cast<float> (now),
+                static_cast<float> (pl.d),
+                sounding ? static_cast<float> (S.vibWidth) : 0.0f,
+                static_cast<float> (pl.betaFor (s)),
+                static_cast<float> (S.vibRate),
+                sounding };
+        T.historyCount.store (i + 1, std::memory_order_release);
+    }
 }
 
 juce::AudioProcessorEditor* Processor::createEditor()

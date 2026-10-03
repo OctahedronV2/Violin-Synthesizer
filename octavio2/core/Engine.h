@@ -14,6 +14,7 @@
 #include "Player.h"
 #include "Radiation.h"
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 
@@ -28,6 +29,7 @@ struct EngineSettings
     double volumeDb = 0.0;
     double vibrato = 1.0; // width scale
     double velocityCurve = 1.0; // dynamics = velocity ^ this (PlayerParams::velCurve)
+    double dynamics = 0.0; // added to every note's dynamics, -0.5..0.5 (PlayerParams::dynBias)
 };
 
 class Engine
@@ -126,14 +128,42 @@ public:
                         dec.push (F);
                 }
                 force[i] = dec.out();
+                scope[(size_t) (scopeWrite++ & (scopeSize - 1))] = (float) force[i];
                 ++clock;
             }
+            scopeWritten.store (scopeWrite, std::memory_order_release);
             radiation->process (force, outL, outR, m);
             outL += m;
             outR += m;
             n -= m;
         }
     }
+
+    // ---------------------------------------------------------------- for the plugin's displays
+    // What the player did, for the plan lane and the curves (written by the audio thread, read by
+    // the editor: a reader keeps its own count and reads entries newer than it, at most
+    // logSize - 64 behind the writer).
+    struct NoteLog
+    {
+        enum Kind : int
+        {
+            stroke,
+            slur,
+            off,
+            planned
+        };
+        double t; // engine seconds when it sounds (planned: when it will)
+        int pitch, string, kind;
+        double dir, dur; // dir: +1 down-bow, -1 up-bow; planned: the length if known
+    };
+    static constexpr uint64_t logSize = 1024;
+    const NoteLog& logEntry (uint64_t i) const { return noteLog[i & (logSize - 1)]; }
+    uint64_t logCount() const { return logWritten.load (std::memory_order_acquire); }
+    // the most recent bridge force (48 kHz), for the string-motion scope
+    static constexpr int scopeSize = 4096;
+    float scopeSample (int64_t i) const { return scope[(size_t) (i & (scopeSize - 1))]; }
+    int64_t scopeCount() const { return scopeWritten.load (std::memory_order_acquire); }
+    double seconds() const { return (double) clock / rate; }
 
     // for tests and the renderer
     Player& getPlayer() { return *player; }
@@ -165,6 +195,7 @@ private:
         radiation->setOutputGain (std::pow (10.0, settings.volumeDb / 20.0));
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
+        player->pp.dynBias = settings.dynamics;
     }
 
     void push (Ev e)
@@ -172,6 +203,8 @@ private:
         if (settings.studio)
         {
             e.t += lookAheadSamples;
+            if (e.type == Ev::on)
+                log ({ (double) e.t / rate, e.a, -1, NoteLog::planned, 0, 0 });
             // a note that is already sounding learns where it ends
             if (e.type == Ev::off && e.a >= 0 && e.a < 128 && sounding[e.a])
             {
@@ -225,11 +258,18 @@ private:
                     held[e.a & 127] = true;
                     player->nextDur = dur;
                     player->noteOn (e.a, e.b);
+                    log ({ seconds(),
+                           e.a,
+                           player->lastString,
+                           player->strokeStart == player->t ? NoteLog::stroke : NoteLog::slur,
+                           player->dir,
+                           dur });
                     break;
                 }
                 case Ev::off:
                     held[e.a & 127] = false;
                     player->noteOff (e.a);
+                    log ({ seconds(), e.a, -1, NoteLog::off, 0, 0 });
                     break;
                 case Ev::cc:
                     player->controller (e.a, e.b);
@@ -239,6 +279,13 @@ private:
                     break;
             }
         }
+    }
+
+    void log (const NoteLog& n)
+    {
+        const uint64_t w = logWritten.load (std::memory_order_relaxed);
+        noteLog[w & (logSize - 1)] = n;
+        logWritten.store (w + 1, std::memory_order_release);
     }
 
     void releaseAll()
@@ -266,5 +313,10 @@ private:
     uint64_t head = 0, tail = 0;
     bool held[128] = {};
     char sounding[128] = {}; // Studio: started without a known end
+    NoteLog noteLog[logSize] = {};
+    std::atomic<uint64_t> logWritten { 0 };
+    float scope[scopeSize] = {};
+    int64_t scopeWrite = 0;
+    std::atomic<int64_t> scopeWritten { 0 };
 };
 } // namespace o2

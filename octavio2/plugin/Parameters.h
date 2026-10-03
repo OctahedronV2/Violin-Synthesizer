@@ -17,6 +17,7 @@ inline const juce::ParameterID brightness { "brightness", 1 };
 inline const juce::ParameterID room { "room", 1 };
 inline const juce::ParameterID reverb { "reverb", 1 };
 inline const juce::ParameterID volume { "volume", 1 };
+inline const juce::ParameterID dynamics { "dynamics", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -40,6 +41,6 @@ public:
     bool studio() const { return mode->load() >= 0.5f; }
 
 private:
-    std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume;
+    std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
 };
 } // namespace octavio2::params

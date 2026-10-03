@@ -45,16 +45,29 @@ juce_add_binary_data(Octavio2Data
         data/halls/maida-vale-4.wav
         data/halls/maida-vale-5.wav
         data/halls/wdr-control-room.wav
-        data/halls/wdr-studio.wav)
+        data/halls/wdr-studio.wav
+        # the interface's faces (plugin/fonts/OFL.txt)
+        plugin/fonts/InstrumentSerif-Regular.ttf
+        plugin/fonts/IBMPlexSans-Regular.ttf
+        plugin/fonts/IBMPlexSans-SemiBold.ttf
+        plugin/fonts/IBMPlexMono-Regular.ttf)
 set_target_properties(Octavio2Data PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 target_sources(Octavio2 PRIVATE
     plugin/Parameters.cpp
     plugin/PluginEditor.cpp
     plugin/PluginProcessor.cpp
+    plugin/ui/Controls.cpp
+    plugin/ui/CurvesView.cpp
+    plugin/ui/Keyboard.cpp
+    plugin/ui/MidiView.cpp
+    plugin/ui/NoteTrack.cpp
+    plugin/ui/PlaceholderView.cpp
+    plugin/ui/PlayView.cpp
+    plugin/ui/Theme.cpp
+    plugin/ui/ToneView.cpp
     "${PROJECT_SOURCE_DIR}/source/dsp/PartitionedConvolution.cpp"
-    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp"
-    "${PROJECT_SOURCE_DIR}/source/plugin/LookAndFeel.cpp")
+    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp")
 target_include_directories(Octavio2 PUBLIC "${PROJECT_SOURCE_DIR}/source" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(Octavio2
     PUBLIC

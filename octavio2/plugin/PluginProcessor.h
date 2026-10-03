@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Parameters.h"
+#include "ui/Telemetry.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -49,8 +50,12 @@ public:
     juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
     int getOctaveShift() const { return reader.octaveShift(); }
 
-    // for tests
+    // What the player is doing, for the editor's displays (see Telemetry).
+    const Telemetry& getTelemetry() const { return telemetry; }
+    // for tests and the displays (the editor only reads the engine's lock-free logs)
     o2::Engine& getEngine() { return *engine; }
+    int editorTab = 0; // the tab the editor shows, kept while the editor is closed
+    double getLatencyMs() const { return getLatencySamples() * 1000.0 / hostRate; }
 
 private:
     struct KeyEvent
@@ -79,6 +84,7 @@ private:
     void handleMidi (const juce::MidiMessage&, int64_t when);
     void renderEngine (float* left, float* right, int numSamples);
     void updateLatency();
+    void updateTelemetry (double blockSeconds, juce::int64 startTicks);
 
     juce::AudioProcessorValueTreeState parameters;
     params::Reader reader;
@@ -97,6 +103,9 @@ private:
     int fifoFill = 0;
     std::vector<float> scratchL, scratchR;
     std::atomic<int> latencyShown { -1 };
+    Telemetry telemetry;
+    int lastVelocity = 0;
+    double nextHistoryT = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Processor)
 };

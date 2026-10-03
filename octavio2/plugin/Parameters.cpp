@@ -57,6 +57,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::room, "Room", roomNames(), 1));
     layout.add (floatParam (id::reverb, "Reverb", { -24.0f, 6.0f }, 0.0f, "dB", 1));
     layout.add (floatParam (id::volume, "Volume", { -36.0f, 12.0f }, 0.0f, "dB", 1));
+    // added to every note's dynamics, from velocity (0 = as played)
+    layout.add (floatParam (id::dynamics, "Dynamics", { -50.0f, 50.0f }, 0.0f, "%", 0));
     return layout;
 }
 
@@ -68,7 +70,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       brightness (s.getRawParameterValue (id::brightness.getParamID())),
       room (s.getRawParameterValue (id::room.getParamID())),
       reverb (s.getRawParameterValue (id::reverb.getParamID())),
-      volume (s.getRawParameterValue (id::volume.getParamID()))
+      volume (s.getRawParameterValue (id::volume.getParamID())),
+      dynamics (s.getRawParameterValue (id::dynamics.getParamID()))
 {
 }
 
@@ -82,6 +85,7 @@ o2::EngineSettings Reader::read() const
     e.hall = juce::roundToInt (room->load());
     e.reverbDb = reverb->load();
     e.volumeDb = volume->load();
+    e.dynamics = dynamics->load() / 100.0;
     return e;
 }
 

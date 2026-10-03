@@ -1,23 +1,22 @@
 #include "PluginEditor.h"
 
+#include "ui/CurvesView.h"
+#include "ui/MidiView.h"
+#include "ui/PlaceholderView.h"
+#include "ui/PlayView.h"
+#include "ui/ToneView.h"
+
+#include <cstring>
+
 namespace octavio2
 {
+using namespace ui;
+
 namespace
 {
-constexpr int width = 960, height = 400, keyboardHeight = 90;
-
-// Hosts number middle C differently: C5 in FL Studio, C3 in Ableton Live, Cubase, Logic,
-// Bitwig and Studio One, C4 elsewhere (as Octavio 1's keyboard).
-int hostMiddleCOctave()
-{
-    const juce::PluginHostType host;
-    if (host.isFruityLoops())
-        return 5;
-    if (host.isAbletonLive() || host.isCubase() || host.isNuendo() || host.isLogic() || host.isGarageBand()
-        || host.isBitwigStudio() || host.isStudioOne())
-        return 3;
-    return 4;
-}
+constexpr float viewTop = 104;
+const char* tabNames[] = { "Play", "Curves", "Bow", "Left hand", "Articulation", "Tone", "MIDI" };
+constexpr int tabCount = 7;
 
 void stopClicksTakingFocus (juce::Component& c)
 {
@@ -25,48 +24,95 @@ void stopClicksTakingFocus (juce::Component& c)
     for (auto* child : c.getChildren())
         stopClicksTakingFocus (*child);
 }
+
+// a dropdown or button of a later feature, drawn as in the mockups
+void previewBox (juce::Graphics& g,
+                 juce::Rectangle<float> r,
+                 const juce::String& text,
+                 bool arrow,
+                 juce::Justification j = juce::Justification::left)
+{
+    g.setColour (colours::panel2);
+    g.fillRoundedRectangle (r, 7);
+    g.setColour (colours::line);
+    g.drawRoundedRectangle (r.reduced (0.5f), 7, 1);
+    const auto font = Fonts::sans (13);
+    if (j == juce::Justification::left)
+        drawText (g, text, r.getX() + 12, r.getCentreY() + 5, font, colours::muted);
+    else
+        drawText (g,
+                  text,
+                  r.getCentreX(),
+                  r.getCentreY() + 5,
+                  font,
+                  colours::muted,
+                  juce::Justification::horizontallyCentred);
+    if (arrow)
+    {
+        juce::Path p;
+        const float cx = r.getRight() - 20, cy = r.getCentreY() - 3;
+        p.startNewSubPath (cx, cy);
+        p.lineTo (cx + 5, cy + 6);
+        p.lineTo (cx + 10, cy);
+        g.setColour (colours::dim);
+        g.strokePath (p, juce::PathStrokeType (1.5f));
+    }
+}
 } // namespace
 
 Editor::Editor (Processor& p)
     : AudioProcessorEditor (p),
       processor (p),
-      keyboard (p.getKeyboardState(), juce::MidiKeyboardComponent::horizontalKeyboard)
+      mode (&p.getParameters(), params::id::mode.getParamID(), { { "Live" }, { "Studio" } }),
+      keyboard (p)
 {
     setLookAndFeel (&lookAndFeel);
-    addChoice (mode, params::id::mode, "Mode");
-    addChoice (octave, params::id::octave, "Octave");
-    addChoice (room, params::id::room, "Room");
-    addKnob (velocityCurve, params::id::velocityCurve, "Velocity curve");
-    addKnob (vibrato, params::id::vibrato, "Vibrato");
-    addKnob (brightness, params::id::brightness, "Brightness");
-    addKnob (reverb, params::id::reverb, "Reverb");
-    addKnob (volume, params::id::volume, "Volume");
+    mode.setLayout (0, 30, 4, 70);
+    mode.setTooltip ("Live plays at once. Studio looks 1.2 s ahead so the player knows each note's length; the DAW "
+                     "compensates the delay.");
+    instrument.setTooltip ("Viola, cello and bass arrive after the violin (the strings section).");
+    player.setTooltip ("Player styles (baroque, romantic, folk) arrive with the styles milestone (M7).");
+    presets.setTooltip ("Presets arrive with the plugin milestone (M6). Your host's presets save every setting now.");
+    for (auto* c : std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets })
+        canvas.addAndMakeVisible (c);
+    mode.setBounds (916, 16, 144, 30);
+    instrument.setBounds (214, 14, 170, 34);
+    player.setBounds (394, 14, 180, 34);
+    presets.setBounds (592, 14, 306, 34);
+    keyboard.setBounds (24, 712, designWidth - 48, 58);
+    canvas.views.push_back (std::make_unique<PlayView> (p));
+    canvas.views.push_back (std::make_unique<CurvesView> (p));
+    canvas.views.push_back (
+        std::make_unique<PlaceholderView> ("Bow",
+                                           "The bow's plan and physics: speed, force and contact over each stroke, "
+                                           "where on the hair it plays, bow changes and how much bow is left.",
+                                           "Arrives with the player and bow-physics milestones (M2, M4)."));
+    canvas.views.push_back (std::make_unique<PlaceholderView> (
+        "Left hand",
+        "Fingering, positions and shifts, string choice, vibrato shape, and intonation (expressive, equal or just).",
+        "Arrives with the player milestone (M4)."));
+    canvas.views.push_back (std::make_unique<PlaceholderView> (
+        "Articulation",
+        juce::String::fromUTF8 ("Legato, détaché, martelé, staccato, spiccato, sautillé, tremolo, pizzicato and "
+                                "harmonics, each with its own settings and keyswitch."),
+        "Arrives with the player and pizzicato milestones (M4, M5)."));
+    canvas.views.push_back (std::make_unique<ToneView> (p));
+    canvas.views.push_back (std::make_unique<MidiView> (p));
+    for (auto& v : canvas.views)
+    {
+        canvas.addChildComponent (*v);
+        v->setBounds (0, (int) viewTop, designWidth, 596);
+    }
+    canvas.showTab (juce::jlimit (0, tabCount - 1, p.editorTab));
+    addAndMakeVisible (canvas);
 
-    mode.box.setTooltip ("Live plays at once. Studio looks 1.2 s ahead so the player knows each note's length; "
-                         "the DAW compensates the delay.");
-    credits.setText ("Halls: Arvedi Auditorium, Detmold Brahmssaal, ChurchIR Cremona, BBC Maida Vale, "
-                     "WDR Broadcast Studios (CC BY)",
-                     juce::dontSendNotification);
-    credits.setColour (juce::Label::textColourId, violinsynth::colours::dimText);
-    credits.setFont (juce::FontOptions (11.0f));
-    addAndMakeVisible (credits);
-
-    keyboard.setOctaveForMiddleC (hostMiddleCOctave());
-    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, violinsynth::colours::accent);
-    keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId,
-                        violinsynth::colours::accent.withAlpha (0.3f));
-    keyboard.setVelocity (0.8f, true); // softer lower on the key; 100 near the top, as a typing keyboard
-    // the host's typing keyboard plays the violin: this one takes no keys
-    keyboard.clearKeyMappings();
-    keyboard.setWantsKeyboardFocus (false);
-    // the keys that sound, G3 to E7, named as they sound (clicks are sent an Octave lower)
-    keyboard.setAvailableRange (55, 104);
-    keyboard.setLowestVisibleKey (55);
-    addAndMakeVisible (keyboard);
-
-    setSize (width, height);
+    setResizable (true, true);
+    getConstrainer()->setFixedAspectRatio ((double) designWidth / designHeight);
+    setResizeLimits (designWidth / 2, designHeight / 2, designWidth * 2, designHeight * 2);
+    setSize (designWidth, designHeight);
     // clicks must not take the computer keyboard from the host (FL Studio, Ableton); runs last
     stopClicksTakingFocus (*this);
+    startTimerHz (4);
 }
 
 Editor::~Editor()
@@ -74,95 +120,139 @@ Editor::~Editor()
     setLookAndFeel (nullptr);
 }
 
-void Editor::addKnob (Knob& k, const juce::ParameterID& id, const juce::String& name)
-{
-    k.slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 90, 20);
-    k.attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (processor.getParameters(),
-                                                                                           id.getParamID(),
-                                                                                           k.slider);
-    k.slider.setPopupMenuEnabled (false);
-    k.slider.onMenu = [this, &k, pid = id.getParamID()] { showParameterMenu (k.slider, juce::ParameterID { pid, 1 }); };
-    k.label.setText (name, juce::dontSendNotification);
-    k.label.setJustificationType (juce::Justification::centred);
-    addAndMakeVisible (k.slider);
-    addAndMakeVisible (k.label);
-}
-
-void Editor::addChoice (Choice& c, const juce::ParameterID& id, const juce::String& name)
-{
-    if (auto* param
-        = dynamic_cast<juce::AudioParameterChoice*> (processor.getParameters().getParameter (id.getParamID())))
-        c.box.addItemList (param->choices, 1);
-    c.attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (processor.getParameters(),
-                                                                                             id.getParamID(),
-                                                                                             c.box);
-    c.label.setText (name, juce::dontSendNotification);
-    addAndMakeVisible (c.box);
-    addAndMakeVisible (c.label);
-}
-
-void Editor::showParameterMenu (juce::Component& control, const juce::ParameterID& id)
-{
-    auto* param = processor.getParameters().getParameter (id.getParamID());
-    if (param == nullptr)
-        return;
-    if (auto* context = getHostContext())
-        if (auto menu = context->getContextMenuForParameter (param))
-        {
-            menu->showNativeMenu (getMouseXYRelative());
-            return;
-        }
-    // hosts without a menu (Standalone): reset only
-    juce::PopupMenu menu;
-    menu.addItem ("Reset to default",
-                  [param]
-                  {
-                      param->beginChangeGesture();
-                      param->setValueNotifyingHost (param->getDefaultValue());
-                      param->endChangeGesture();
-                  });
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&control).withMousePosition());
-}
-
-void Editor::paint (juce::Graphics& g)
-{
-    g.fillAll (violinsynth::colours::background);
-    auto top = getLocalBounds().removeFromTop (56).reduced (20, 10);
-    g.setColour (violinsynth::colours::accent);
-    g.setFont (juce::FontOptions (28.0f, juce::Font::bold));
-    g.drawText ("Octavio 2", top, juce::Justification::centredLeft);
-    g.setColour (violinsynth::colours::dimText);
-    g.setFont (juce::FontOptions (13.0f));
-    g.drawText ("preview " JucePlugin_VersionString, top, juce::Justification::centredRight);
-    g.setColour (violinsynth::colours::panel);
-    g.fillRoundedRectangle (
-        getLocalBounds().withTrimmedTop (56).withTrimmedBottom (keyboardHeight + 22).reduced (14, 4).toFloat(),
-        8.0f);
-}
-
 void Editor::resized()
 {
-    auto area = getLocalBounds();
-    area.removeFromTop (56);
-    keyboard.setBounds (area.removeFromBottom (keyboardHeight));
-    credits.setBounds (area.removeFromBottom (22).reduced (16, 0));
-    keyboard.setKeyWidth (static_cast<float> (keyboard.getWidth()) / 29.0f); // 29 white keys, G3 to E7
-    area = area.reduced (28, 14);
+    canvas.setBounds (0, 0, designWidth, designHeight);
+    canvas.setTransform (
+        juce::AffineTransform::scale ((float) getWidth() / designWidth, (float) getHeight() / designHeight));
+}
 
-    auto choices = area.removeFromLeft (300);
-    for (auto* c : { &mode, &octave, &room })
+void Editor::timerCallback()
+{
+    const auto cpu = juce::String (juce::roundToInt (processor.getTelemetry().cpu.load() * 100)) + "%";
+    const auto latency = juce::String (juce::roundToInt (processor.getLatencyMs())) + " ms";
+    if (cpu != cpuText || latency != latencyText)
     {
-        auto row = choices.removeFromTop (choices.getHeight() / 3).withSizeKeepingCentre (choices.getWidth(), 30);
-        c->label.setBounds (row.removeFromLeft (70));
-        c->box.setBounds (row);
+        cpuText = cpu;
+        latencyText = latency;
+        canvas.repaint (0, 0, designWidth, (int) viewTop);
     }
-    area.removeFromLeft (20);
-    const int w = area.getWidth() / 5;
-    for (auto* k : { &velocityCurve, &vibrato, &brightness, &reverb, &volume })
+}
+
+//==============================================================================
+Editor::Canvas::Canvas (Editor& e)
+    : editor (e)
+{
+    setOpaque (true);
+}
+
+juce::Rectangle<float> Editor::Canvas::tabBounds (int i) const
+{
+    float x = 24;
+    for (int k = 0; k < i; ++k)
+        x += (float) std::strlen (tabNames[k]) * 7.6f + 28;
+    return { x, 66, (float) std::strlen (tabNames[i]) * 7.6f + 28, 34 };
+}
+
+void Editor::Canvas::showTab (int t)
+{
+    tab = t;
+    editor.processor.editorTab = t;
+    for (size_t i = 0; i < views.size(); ++i)
+        views[i]->setVisible ((int) i == t);
+    repaint();
+}
+
+void Editor::Canvas::mouseUp (const juce::MouseEvent& e)
+{
+    for (int i = 0; i < tabCount; ++i)
+        if (tabBounds (i).contains (e.position))
+            showTab (i);
+}
+
+void Editor::Canvas::mouseMove (const juce::MouseEvent& e)
+{
+    for (int i = 0; i < tabCount; ++i)
+        if (tabBounds (i).contains (e.position))
+        {
+            setMouseCursor (juce::MouseCursor::PointingHandCursor);
+            return;
+        }
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void Editor::Canvas::paint (juce::Graphics& g)
+{
+    g.fillAll (colours::bg);
+    // logo
+    const auto serif = Fonts::serif (34);
+    drawText (g, "Octavio ", 24, 40, serif, colours::text);
+    const float x2 = 24 + juce::GlyphArrangement::getStringWidth (serif, "Octavio ");
+    drawText (g, "2", x2, 40, serif, colours::amber);
+    drawText (g,
+              JucePlugin_VersionString,
+              x2 + juce::GlyphArrangement::getStringWidth (serif, "2") + 8,
+              40,
+              Fonts::mono (11),
+              colours::dim);
+    // instrument, player, presets (previews)
+    previewBox (g, { 214, 14, 170, 34 }, "Modern violin", true);
+    previewBox (g, { 394, 14, 180, 34 }, "Player: Modern soloist", true);
+    previewBox (g, { 592, 14, 34, 34 }, juce::String::fromUTF8 ("‹"), false, juce::Justification::horizontallyCentred);
+    previewBox (g, { 630, 14, 230, 34 }, "Default", false, juce::Justification::horizontallyCentred);
+    previewBox (g, { 864, 14, 34, 34 }, juce::String::fromUTF8 ("›"), false, juce::Justification::horizontallyCentred);
+    drawText (g, editor.latencyText, 1176, 36, Fonts::mono (11), colours::muted, juce::Justification::right);
+    // tabs
+    for (int i = 0; i < tabCount; ++i)
     {
-        auto col = area.removeFromLeft (w);
-        k->label.setBounds (col.removeFromTop (22));
-        k->slider.setBounds (col.reduced (6, 0));
+        const auto r = tabBounds (i);
+        const bool on = i == tab;
+        drawText (g,
+                  tabNames[i],
+                  r.getCentreX(),
+                  86,
+                  Fonts::sans (13, on),
+                  on ? colours::text : colours::muted,
+                  juce::Justification::horizontallyCentred);
+        if (on)
+        {
+            g.setColour (colours::amber);
+            g.fillRoundedRectangle (r.getX() + 8, 95, r.getWidth() - 16, 2.5f, 1);
+        }
     }
+    g.setColour (colours::line);
+    g.drawLine (24, 100, designWidth - 24, 100);
+    drawText (g,
+              juce::String::fromUTF8 ("CPU ") + editor.cpuText + juce::String::fromUTF8 ("   ·   engine 48 kHz"),
+              designWidth - 24,
+              86,
+              Fonts::mono (11),
+              colours::dim,
+              juce::Justification::right);
+    // keyboard frame and labels
+    g.setColour (juce::Colour (0xff0d0a08));
+    g.fillRoundedRectangle (16, 704, designWidth - 32, 68, 8);
+    const float kw = (designWidth - 48) / 43.0f;
+    auto name = [] (int note) { return juce::MidiMessage::getMidiNoteName (note, true, true, middleCOctave()); };
+    drawText (g,
+              "KEYSWITCHES  " + name (24) + juce::String::fromUTF8 ("–") + name (35),
+              24 + 3.5f * kw,
+              700,
+              Fonts::sans (9).withExtraKerningFactor (0.1f),
+              colours::steel.withAlpha (0.6f),
+              juce::Justification::horizontallyCentred);
+    drawText (g,
+              "below " + name (55) + ": silent",
+              24 + 11 * kw,
+              700,
+              Fonts::sans (9),
+              colours::dim,
+              juce::Justification::horizontallyCentred);
+    drawText (g,
+              "violin range " + name (55) + juce::String::fromUTF8 (" – ") + name (104),
+              24 + 19.5f * kw,
+              700,
+              Fonts::sans (9),
+              colours::muted);
 }
 } // namespace octavio2
