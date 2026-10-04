@@ -7,8 +7,8 @@
 namespace octavio2::ui
 {
 // Play tab (mockups main.svg and studio.svg): what the player is doing on the fingerboard, the
-// note now, then the six main controls and articulations in Live mode, or the look-ahead plan
-// in Studio mode.
+// note now, then the six main controls in Live mode or the look-ahead plan in Studio mode, and the
+// articulation strip in both.
 class PlayView final : public juce::Component, private juce::Timer
 {
 public:
@@ -27,7 +27,9 @@ private:
 
     Processor& processor;
     Knob dynamics, expression, vibrato, portamento, stringPreference, room;
-    Choices articulation;
+    // 2.3: the articulation strip, bound to the Bow style, Contact, Mute and Articulation
+    // parameters; it shows what plays now, keyswitches and UACC included
+    Choices bowStyle, contact, mute, articulation;
     juce::Rectangle<float> dragArea;
 
     NoteTrack track;

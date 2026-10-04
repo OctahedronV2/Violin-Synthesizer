@@ -22,6 +22,7 @@ public:
 
 private:
     void timerCallback() override;
+    void updateInstrument();
 
     // everything, in design units
     class Canvas final : public juce::Component
@@ -43,9 +44,9 @@ private:
     ui::LookAndFeel lookAndFeel;
     ui::Choices mode;
     ui::Keyboard keyboard;
-    struct HeaderPreview final : juce::Component, juce::SettableTooltipClient
-    {
-    } instrument;
+    juce::ComboBox instrument; // 2.3: Modern / Baroque violin (ui::instruments, as the Tone tab's row)
+    std::unique_ptr<ui::TakeBox> take; // 2.3: the Seed parameter
+    int shownInstrument = -2, shownKeyswitch = -1;
     ui::PresetBar presets; // M6
     juce::ComboBox player; // M7: Player Style
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> playerAttachment;

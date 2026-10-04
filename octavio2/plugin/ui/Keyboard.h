@@ -7,7 +7,8 @@
 
 namespace octavio2::ui
 {
-// The mockups' keyboard, C1 to C7 named as they sound: the keyswitch octave (C1-B1) in steel,
+// The mockups' keyboard, C1 to C7 named as they sound: the keyswitch keys (Keyswitch Start, C1-B1
+// by default; clicking one is that keyswitch) in steel,
 // keys below the violin's G3 greyed (silent), the sounding note in gold. Clicks play the note
 // they show (the processor takes the Octave shift back off).
 class Keyboard final : public juce::MidiKeyboardComponent
@@ -18,6 +19,7 @@ public:
 
 private:
     void poll();
+    bool isKeyswitch (int note) const;
     void drawWhiteNote (int note,
                         juce::Graphics&,
                         juce::Rectangle<float>,

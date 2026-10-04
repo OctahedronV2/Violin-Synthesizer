@@ -97,6 +97,21 @@ public:
     void setLayout (int columns, float itemHeight, float gap, float itemWidth = 0);
     void setPreviewActive (int index) { previewActive = index; }
     void setOnChange (std::function<void (int)> f) { onChange = std::move (f); }
+    // 2.3: what to highlight, from the parameter's value (e.g. what a keyswitch latched over it),
+    // and a call on every click on an item (after the parameter is set)
+    void setActiveSource (std::function<int (int paramValue)> f) { activeSource = std::move (f); }
+    void setOnClick (std::function<void (int)> f) { onClick = std::move (f); }
+    void setNote (int index, const juce::String& note);
+    // an active source showing what a keyswitch or UACC latched (Telemetry) while the parameter
+    // still has the value the latch was made over
+    static std::function<int (int)> showLatch (const std::atomic<int>& latch, const std::atomic<int>& seen)
+    {
+        return [&latch, &seen] (int param)
+        {
+            const int l = latch.load();
+            return l >= 0 && seen.load() == param ? l : param;
+        };
+    }
     int active() const;
 
     void paint (juce::Graphics&) override;
@@ -110,7 +125,32 @@ private:
     std::vector<Item> items;
     int columns = 0, previewActive = 0, current = 0;
     float itemHeight = 30, gap = 4, itemWidth = 0;
-    std::function<void (int)> onChange;
+    std::function<void (int)> onChange, onClick;
+    std::function<int (int)> activeSource;
+};
+
+// 2.3: the Take (the Seed parameter): "Take 12" (drag up/down to change, double-click for the
+// default, right-click for the host's menu) and a die that rolls a new one
+class TakeBox final : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit TakeBox (juce::RangedAudioParameter&);
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void roll(); // a new random take
+
+private:
+    juce::Rectangle<float> dieArea() const;
+    void set (int take);
+    juce::RangedAudioParameter& param;
+    juce::ParameterAttachment attachment;
+    int value = 1, dragStart = 1;
+    bool dragging = false, onDie = false;
+    juce::Random random;
 };
 
 // A button of a later feature (Guess curves, Drag as MIDI, Learn): drawn as in the mockups but

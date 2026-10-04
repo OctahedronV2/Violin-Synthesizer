@@ -22,6 +22,8 @@
 // M7: articulation=0..8 (5 tremolo, 6 sautille, 7 portato, 8 col legno), contact=0..2 (ord, sul
 //   ponticello, sul tasto), strings=0..2 (synthetic, gut, steel), rosin=0..3 (light, standard, dark,
 //   baroque), bow=0..1 (modern, baroque), tremoloRate=/s, tremoloSync=0..3 with tempo=bpm
+// 2.3: imperfection=0..1, velSens=x, attackWeight=x (1 = as 2.2); bowStyle=0..5 (Live: fixed
+//   short strokes for staccato, martele, spiccato)
 
 #include "../core/Engine.h"
 #include "../core/Scala.h"
@@ -407,6 +409,11 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.tremoloRate = opt ("tremoloRate", es.tremoloRate);
     es.tremoloSync = (int) opt ("tremoloSync", es.tremoloSync);
     es.tempo = opt ("tempo", es.tempo);
+    // 2.3: imperfection=0..1 (also loosens the timing), velSens=x (1), attackWeight=x (1); the Take
+    // is seed= (prepare)
+    es.imperfection = opt ("imperfection", es.imperfection);
+    es.velocitySensitivity = opt ("velSens", es.velocitySensitivity);
+    es.attackWeight = opt ("attackWeight", es.attackWeight);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);

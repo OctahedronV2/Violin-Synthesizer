@@ -64,9 +64,9 @@ private:
 };
 
 // Tone tab (mockup tone.svg): the instrument's parts, bridge and resonance, microphones and room.
-// The violin, mute, bridge, microphones and room work now (M1); strings, rosin and bow (M7, with a
-// one-click Modern / Baroque violin); the other parts arrive with the milestones that build them
-// (docs: octavio-2/PLAN.md section 8) and show as previews until then.
+// The violin, mute, bridge, microphones and room (M1); strings, rosin and bow (M7, with a one-click
+// Modern / Baroque violin, also the header's Instrument menu); Imperfection (2.3). Only Quality's
+// Eco choice is still a preview (it arrives with the optimisation milestone, M8).
 class ToneView final : public juce::Component, private juce::Timer
 {
 public:

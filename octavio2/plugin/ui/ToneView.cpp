@@ -1,4 +1,5 @@
 #include "ToneView.h"
+#include "Instruments.h"
 
 namespace octavio2::ui
 {
@@ -68,7 +69,12 @@ ToneView::ToneView (Processor& p)
             Knob::Style::small,
             [] (float v) { return v < 0.5f ? juce::String ("free") : juce::String (juce::roundToInt (v)) + " %"; }),
       brilliance (&p.getParameters(), params::id::brightness.getParamID(), "Brilliance", Knob::Style::small, db),
-      imperfection (nullptr, {}, "Imperfection", Knob::Style::small),
+      imperfection (&p.getParameters(),
+                    params::id::imperfection.getParamID(),
+                    "Imperfection",
+                    Knob::Style::small,
+                    [] (float v)
+                    { return v < 0.5f ? juce::String ("none") : juce::String (juce::roundToInt (v)) + " %"; }),
       reverb (&p.getParameters(), params::id::reverb.getParamID(), "Reverb", Knob::Style::small, db),
       volume (&p.getParameters(), params::id::volume.getParamID(), "Volume", Knob::Style::small, db),
       width (&p.getParameters(),
@@ -109,7 +115,9 @@ ToneView::ToneView (Processor& p)
     sympathetic.setTooltip ("How freely the open strings you are not playing ring along with the notes.");
     wolf.setTooltip ("A wolf at the body's strongest resonance (near C5): those notes go rough and unsteady.");
     hold.setTooltip ("The chin and hand on the violin damp its low resonances. 0: hanging free.");
-    imperfection.setPreview (0.1f, "10 %", "the player milestone (M4)");
+    imperfection.setTooltip (
+        "A less perfect player, as Octavio 1's: notes land a little out of tune and are corrected "
+        "by ear, the bow is uneven from stroke to stroke, the timing loosens. 0: the clean player.");
     width.setTooltip ("0: both speakers hear one direction. 100 %: the two microphones as placed.");
     movement.setTooltip ("The player's slow sway, which turns the violin between directions.");
     distance.setTooltip ("How far the microphones are: the room's share, its delay and the air's treble loss.");
@@ -538,18 +546,6 @@ void ToneView::paintMics (juce::Graphics& g, float x3, float y)
 
 namespace octavio2::ui
 {
-namespace
-{
-struct Part
-{
-    const char* id;
-    float modern, baroque;
-};
-// the instrument's parts, then the Tuning row's (M7 player parameters, set only if present)
-constexpr Part parts[] = { { "strings", 0, 1 }, { "rosin", 1, 3 }, { "bow", 0, 1 } };
-constexpr Part tuning[] = { { "a4", 440, 415 }, { "intonation", 0, 3 }, { "playerStyle", 0, 3 } };
-const char* const instrumentNames[] = { "Modern violin", "Baroque violin" };
-} // namespace
 
 ToneView::Instruments::Instruments (juce::AudioProcessorValueTreeState& s)
     : state (s)
@@ -558,16 +554,7 @@ ToneView::Instruments::Instruments (juce::AudioProcessorValueTreeState& s)
 
 int ToneView::Instruments::active() const
 {
-    for (int k = 0; k < 2; ++k)
-    {
-        bool all = true;
-        for (const auto& part : parts)
-            if (auto* v = state.getRawParameterValue (part.id))
-                all = all && juce::roundToInt (v->load()) == juce::roundToInt (k == 0 ? part.modern : part.baroque);
-        if (all)
-            return k;
-    }
-    return -1;
+    return instruments::active (state); // the header's Instrument menu shares it (2.3)
 }
 
 juce::Rectangle<float> ToneView::Instruments::itemBounds (int k) const
@@ -578,15 +565,7 @@ juce::Rectangle<float> ToneView::Instruments::itemBounds (int k) const
 
 void ToneView::Instruments::choose (int k)
 {
-    auto set = [this, k] (const Part& part)
-    {
-        if (auto* p = state.getParameter (part.id))
-            p->setValueNotifyingHost (p->convertTo0to1 (k == 0 ? part.modern : part.baroque));
-    };
-    for (const auto& part : parts)
-        set (part);
-    for (const auto& part : tuning)
-        set (part);
+    instruments::choose (state, k);
 }
 
 void ToneView::Instruments::paint (juce::Graphics& g)
@@ -608,7 +587,7 @@ void ToneView::Instruments::paint (juce::Graphics& g)
             g.drawRoundedRectangle (r.reduced (0.5f), 6, 1);
         }
         drawText (g,
-                  instrumentNames[k],
+                  instruments::names[k],
                   r.getCentreX(),
                   r.getCentreY() + 4.5f,
                   Fonts::sans (12, k == on),

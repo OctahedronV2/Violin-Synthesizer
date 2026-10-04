@@ -2,12 +2,14 @@
 
 #include "../PluginProcessor.h"
 #include "Controls.h"
+#include "ToneView.h" // ValueBox
 
 namespace octavio2::ui
 {
 // MIDI tab (mockup midi.svg, M6): the controller map that plays (any CC to the player's
 // dimensions, the slur pedal or any parameter, with range, invert and Learn), the map presets,
-// the velocity response, octave, pitch bend range, keyswitches and MPE.
+// the velocity response (curve, dynamics offset, sensitivity, attack weight), octave, pitch bend
+// range, keyswitches (start key, behaviour; UACC on CC32) and MPE.
 class MidiView final : public juce::Component, private juce::Timer
 {
 public:
@@ -41,7 +43,9 @@ private:
 
     Processor& processor;
     Knob curve, dynamics, bend;
+    Knob sensitivity, attackWeight; // 2.3
     Choices octave, behaviour, mpe;
+    std::unique_ptr<ValueBox> keyswitchStart; // 2.3
     juce::ComboBox mapPreset;
     std::unique_ptr<Pill> learn;
     juce::Viewport viewport;
@@ -49,6 +53,7 @@ private:
     std::vector<std::unique_ptr<Row>> rows;
     std::vector<MidiMap::Entry> shown;
     int shownVelocity = -1;
+    std::array<float, 4> shownResponse {}; // 2.3: curve, dynamics, sensitivity, keyswitch start
     int learnRow = noLearn, learnTarget = 0, learnStart = 0;
     int lastIncoming = 0;
     bool shownPedal = false;

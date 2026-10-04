@@ -272,6 +272,22 @@ struct PlayerParams
     // light at the tip and the player lets it be) and the lift-off stroke (a separate note dies
     // away by liftStroke of its speed, time constant liftTau: every stroke breathes). 0 = modern.
     double tipLight = 0.0, liftStroke = 0.0, liftTau = 0.35;
+    // ---------------------------------------------------------------- 2.3 controls
+    // At their defaults every result is bit-identical to the 2.2 player.
+    // Velocity sensitivity: how far velocity moves the dynamics, around the dynamics of velocity
+    // velSensRef (1 = as fitted, 0 = every velocity plays like velSensRef)
+    double velSens = 1.0, velSensRef = 100.0;
+    // Attack weight: how much the dynamics move the attack bite (biteFF * d^2), around the bite at
+    // d = attackRef (1 = as fitted, 0 = the same bite at every velocity, 2 = twice the swing)
+    double attackWeight = 1.0, attackRef = 0.6;
+    // Bow style in Live mode, where a note's length is unknown: the stroke length (s) of a staccato
+    // (stopped), martele (bitten, stopped) and spiccato (off the string) note; a detache note's
+    // extra bite (each separate note speaks on its own bow)
+    double liveStaccato = 0.12, liveMartele = 0.15, liveSpiccato = 0.09, detacheBite = 0.15;
+    // Imperfection (0..1, as Octavio 1's): a less assisted player. Adds landing error (cents sd at
+    // 1), slower listening (earUp x 1 - impEar), uneven bowing (per-stroke speed sd, pressure sd in
+    // the Schelleng window, a slow speed wobble of impWobble depth); the engine loosens the timing
+    double imperfection = 0.0, impPitch = 14.0, impEar = 0.7, impSpeed = 0.12, impPress = 0.08, impWobble = 0.08;
 };
 
 // M7: the player styles, in the order of the Player Style parameter (append only)
@@ -579,6 +595,12 @@ struct Player
     double dynFromVel (double vel127) const
     {
         const double x = std::clamp ((vel127 - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0);
+        if (pp.velSens != 1.0) // 2.3 Velocity sensitivity
+        {
+            const double r
+                = std::pow (std::clamp ((pp.velSensRef - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0), pp.velCurve);
+            return std::clamp (r + pp.velSens * (std::pow (x, pp.velCurve) - r) + pp.dynBias, 0.0, 1.0);
+        }
         return std::clamp (std::pow (x, pp.velCurve) + pp.dynBias, 0.0, 1.0);
     }
 
@@ -871,10 +893,10 @@ struct Player
         const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
-        const double p
-            = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim + m7Press(),
-                          0.02,
-                          0.95);
+        const double p = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim + m7Press()
+                                         + impPressNow,
+                                     0.02,
+                                     0.95);
         return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
     }
 
@@ -1022,11 +1044,18 @@ struct Player
         cutDone = false;
         relTime = pp.releaseTime;
         strokeBite = phraseBite;
+        if (style == 2) // 2.3: detache, every separate note its own articulated stroke
+        {
+            shaped = true;
+            strokeBite += pp.detacheBite;
+        }
         if (art == 3) // staccato: a short stopped stroke, half the written length
         {
             shaped = true;
             if (dur > 0.12)
                 cutAt = t + std::max (0.06, 0.5 * dur);
+            else if (dur <= 0.0) // 2.3: length unknown (Live): a fixed short stroke
+                cutAt = t + pp.liveStaccato;
         }
         else if (art == 4 || art == 5) // martele: bite, force released, stopped; spiccato: off the string
         {
@@ -1046,11 +1075,12 @@ struct Player
                 fSus = 0.15;
                 fTau = 0.03;
                 relTime = 0.015;
-                if (dur > 0.0)
-                    cutAt = t + std::min (0.6 * dur, 0.12);
+                cutAt = t + (dur > 0.0 ? std::min (0.6 * dur, 0.12) : pp.liveSpiccato); // 2.3: Live
             }
             else if (dur > 0.15)
                 cutAt = t + std::max (0.08, 0.7 * dur);
+            else if (dur <= 0.0) // 2.3: length unknown (Live)
+                cutAt = t + pp.liveMartele;
         }
     }
 
@@ -1063,7 +1093,7 @@ struct Player
         m7ArticulationNoteOn(); // M7: tremolo, sautille, portato
         const bool anyHeld = nHeld > 0;
         const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
-        const int style = (int) pp.bowStyle;
+        const int style = bowStyleNow(); // 2.3: the Bow style, or the one UACC picked
         if (! chord)
         {
             phraseNote (pitch, vel127, anyHeld);
@@ -1144,6 +1174,8 @@ struct Player
             noteNow = pitch;
             setStroke (vel127);
             chooseArt (style, vel127);
+            if (pp.imperfection > 0.0) // 2.3: uneven bowing, stroke by stroke
+                m8ImperfectStroke();
             m7Stroke(); // M7: where the stroke starts, the bounce or reversal timing
             const bool bowMoving = std::abs (v) > 0.01;
             if (bowMoving && strokeStart >= 0.0)
@@ -1303,7 +1335,7 @@ struct Player
                 return;
             if (m7NoteOff()) // M7: portato waits in the bow for the next note, sautille lifts
                 return;
-            if ((int) pp.bowStyle == 1 && pp.legatoGap > 0.0)
+            if (bowStyleNow() == 1 && pp.legatoGap > 0.0)
             {
                 pendingOff = t + pp.legatoGap; // a note coming within legatoGap is slurred on
                 return;
@@ -1409,6 +1441,8 @@ struct Player
             shape *= 1.0 - std::min (0.95, pp.taperDepth * pp.shapeAmount) * k;
         }
         shape *= m7Shape(); // M7: portato pulses, the baroque bow's lift-off stroke (1 otherwise)
+        if (pp.imperfection > 0.0) // 2.3: uneven bowing
+            shape *= m8ImperfectShape (dt);
         vTarget = dir * V * shape * balance[lastString] * expr;
         if (strokeCap > 0.0 && std::abs (vTarget) > strokeCap)
             vTarget *= std::max (0.5, strokeCap / std::abs (vTarget));
@@ -1532,7 +1566,9 @@ struct Player
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
                 ft *= 1.0
-                    + ((pp.bite + pp.biteFF * d * d) * pp.biteScale + biteTrim + strokeBite * pp.biteScale)
+                    + ((pp.bite + (pp.attackWeight == 1.0 ? pp.biteFF * d * d : pp.biteFF * m8AttackD2()))
+                           * pp.biteScale
+                       + biteTrim + strokeBite * pp.biteScale)
                         * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
@@ -1568,7 +1604,7 @@ struct Player
                     S.spp = spp;
                     S.earHigh = spp > 1.4 ? S.earHigh + 1 : 0;
                     if (S.earHigh >= 2)
-                        S.ear = std::min (pp.earMax, S.ear * (1.0 + pp.earUp));
+                        S.ear = std::min (pp.earMax, S.ear * (1.0 + pp.earUp * (1.0 - pp.impEar * pp.imperfection)));
                     else if (spp < 0.4 && t - std::max (strokeStart, std::max (S.landAt, S.noteOn)) > pp.earWait)
                         S.ear = std::max (pp.earMin, S.ear * (1.0 - pp.earDown));
                     else
@@ -1682,7 +1718,8 @@ struct Player
     void m7Note (Str& S, int pitch, double semis)
     {
         S.mpeBend = mpeBendFor[pitch & 127];
-        S.err = pp.pitchError > 0.0 && semis > 0 ? pp.pitchError * rng.gauss() : 0.0;
+        const double pe = pp.pitchError + pp.imperfection * pp.impPitch; // 2.3: Imperfection adds landing error
+        S.err = pe > 0.0 && semis > 0 ? pe * rng.gauss() : 0.0;
     }
     double m7PitchAdd (const Str& S) const
     {
@@ -1776,14 +1813,7 @@ struct Player
         const int ks = (int) pp.keyswitchBase;
         if (ks > 0 && pitch >= ks && pitch <= ks + m7KeyLast)
         {
-            if (pitch - ks >= m7ContactKey0) // M7: the contact keyswitches latch on their own
-            {
-                m7Contact();
-                m7ContactKey = pitch - ks - m7ContactKey0;
-                return true;
-            }
-            m5Articulation();
-            m5Key = pitch - ks;
+            keyswitch (pitch - ks);
             return true;
         }
         const int art = m5Articulation();
@@ -2162,5 +2192,158 @@ struct Player
         lastOn = t;
         m5Pluck[pitch & 127] = s + 1;
     }
+
+    // ================================================================ 2.3: keyswitches, UACC, imperfection
+    // Keyswitches by index (0..8 the articulations, 9..11 the contact points), from the notes
+    // keyswitchBase.. (the renderer) or from the plugin, which finds them on its own keys (Keyswitch
+    // Start) and sends them apart from the notes. A keyswitch latches; Momentary keyswitches send
+    // keyswitchUp when the key is let go, which returns to what played before. UACC (CC32) latches
+    // the articulation, the bow style and the contact point together (uaccMap). Changing the
+    // parameter itself wins over each latch, as before.
+    mutable int m8StyleKey = -1; // bow style picked by UACC (-1: none)
+    mutable double m8StyleParam = 0.0;
+    int m8PrevArt = -1, m8PrevContact = -1;
+    double impSpeedNow = 1.0, impPressNow = 0.0, impPhase = 0.0, impRate = 2.0;
+
+    int bowStyleNow() const
+    {
+        if (pp.bowStyle != m8StyleParam)
+        {
+            m8StyleParam = pp.bowStyle;
+            m8StyleKey = -1;
+        }
+        return m8StyleKey >= 0 ? m8StyleKey : (int) pp.bowStyle;
+    }
+    // the articulation that plays now (keyswitch or parameter), without unlatching anything
+    int articulationNow() const
+    {
+        const int a = m5Key >= 0 && pp.articulation == m5Param ? m5Key : (int) std::lround (pp.articulation);
+        return std::clamp (a, 0, (int) m7ArtLast);
+    }
+    int contactNow() const { return m7Contact(); }
+
+    void keyswitch (int index)
+    {
+        if (index >= m7ContactKey0 && index <= m7KeyLast) // M7: the contact keyswitches latch on their own
+        {
+            m7Contact();
+            m8PrevContact = m7ContactKey;
+            m7ContactKey = index - m7ContactKey0;
+        }
+        else if (index >= 0 && index <= m7ArtLast)
+        {
+            m5Articulation();
+            m8PrevArt = m5Key;
+            m5Key = index;
+        }
+    }
+    void keyswitchUp (int index)
+    {
+        if (index >= m7ContactKey0 && index <= m7KeyLast)
+        {
+            if (m7ContactKey == index - m7ContactKey0)
+                m7ContactKey = m8PrevContact;
+            m8PrevContact = -1;
+        }
+        else if (index >= 0 && index <= m7ArtLast)
+        {
+            if (m5Key == index)
+                m5Key = m8PrevArt;
+            m8PrevArt = -1;
+        }
+    }
+    void uacc (int articulation, int style, int contact)
+    {
+        m5Articulation();
+        m5Key = std::clamp (articulation, 0, (int) m7ArtLast);
+        m7Contact();
+        m7ContactKey = std::clamp (contact, 0, 2);
+        bowStyleNow();
+        m8StyleKey = std::clamp (style, 0, 5);
+        m8PrevArt = m8PrevContact = -1;
+    }
+    // back to the parameters: bit 0 the articulation, 1 the bow style, 2 the contact point
+    void clearKeyswitches (int mask)
+    {
+        if (mask & 1)
+            m5Key = m8PrevArt = -1;
+        if (mask & 2)
+            m8StyleKey = -1;
+        if (mask & 4)
+            m7ContactKey = m8PrevContact = -1;
+    }
+
+    // Attack weight: the dynamics' share of the bite (d^2 at 1), swung around d = attackRef
+    double m8AttackD2() const
+    {
+        const double r = pp.attackRef * pp.attackRef;
+        return std::max (0.0, r + pp.attackWeight * (d * d - r));
+    }
+    // Imperfection: each stroke a little faster or slower and heavier or lighter than meant, and
+    // the arm's speed wobbling slowly within it
+    void m8ImperfectStroke()
+    {
+        const double k = std::clamp (pp.imperfection, 0.0, 1.0);
+        impSpeedNow = std::clamp (1.0 + k * pp.impSpeed * rng.gauss(), 0.6, 1.4);
+        impPressNow = std::clamp (k * pp.impPress * rng.gauss(), -0.2, 0.2);
+        impRate = 1.5 + 1.5 * (rng.uni() + 1.0);
+    }
+    double m8ImperfectShape (double dt)
+    {
+        impPhase += 2.0 * pi * impRate * dt;
+        if (impPhase > 2.0 * pi)
+            impPhase -= 2.0 * pi;
+        return impSpeedNow * (1.0 + std::clamp (pp.imperfection, 0.0, 1.0) * pp.impWobble * std::sin (impPhase));
+    }
 };
+
+// 2.3: UACC (Universal Articulation Controller Codes, Spitfire's convention for CC32): the value ->
+// the articulation (PlayerParams::articulation order), bow style and contact point it latches.
+// Only the values with a clear Octavio meaning are mapped; others return false (ignored).
+//   1-9 long -> Arco (Auto bowing); 8 long soft (flautando) -> Arco sul tasto; 10 long harmonic ->
+//   Harmonics; 11 tremolo; 13 tremolo soft -> tremolo sul tasto; 14 tremolo hard -> tremolo sul
+//   ponticello; 15 measured tremolo -> Tremolo; 20-29 legato -> Arco, Legato; 40 short -> Staccato;
+//   41 short alternative -> Martele; 42 very short -> Spiccato; 43 very short soft -> Sautille;
+//   44 short leisurely -> Detache; 50-55 (shorts, Octavio: portato at 50) -> Portato;
+//   56 pizzicato; 57 (Octavio) left-hand pizz; 58 Bartok pizz; 59-60 col legno -> Col legno battuto
+inline bool uaccMap (int value, int& articulation, int& style, int& contact)
+{
+    articulation = 0;
+    style = 0;
+    contact = 0;
+    if (value >= 1 && value <= 9)
+        contact = value == 8 ? 2 : 0;
+    else if (value == 10)
+        articulation = 4;
+    else if (value >= 11 && value <= 15)
+    {
+        articulation = 5;
+        contact = value == 13 ? 2 : value == 14 ? 1 : 0;
+    }
+    else if (value >= 20 && value <= 29)
+        style = 1;
+    else if (value == 40)
+        style = 3;
+    else if (value == 41)
+        style = 4;
+    else if (value == 42)
+        style = 5;
+    else if (value == 43)
+        articulation = 6;
+    else if (value == 44)
+        style = 2;
+    else if (value == 50)
+        articulation = 7;
+    else if (value == 56)
+        articulation = 1;
+    else if (value == 57)
+        articulation = 3;
+    else if (value == 58)
+        articulation = 2;
+    else if (value == 59 || value == 60)
+        articulation = 8;
+    else
+        return false;
+    return true;
+}
 } // namespace o2

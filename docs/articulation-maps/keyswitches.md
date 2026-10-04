@@ -1,6 +1,6 @@
 # Octavio 2 keyswitches
 
-Fixed keys, whatever the Octave setting. Latching: a keyswitch stays in force until another one in its group, or until the Articulation / Contact Point parameter is changed. The two groups combine (tremolo sul ponticello: F1 then A#1).
+Twelve keys from Keyswitch Start (C1 = MIDI 24 by default; the table shows the default), whatever the Octave setting. Latching (the default Keyswitch Behaviour): a keyswitch stays in force until another one in its group, or until the Articulation / Contact Point parameter is changed. Momentary: only while the key is held. Off: the keys play as ordinary notes. The two groups combine (tremolo sul ponticello: F1 then A#1). A moved block keeps the order: key n of it is row n. UACC (CC32) is in README.md.
 
 | MIDI note | Name (C4 = 60) | FL Studio name (C5 = 60) | Switches to | Group |
 |---|---|---|---|---|

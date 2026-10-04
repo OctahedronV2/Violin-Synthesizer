@@ -73,6 +73,11 @@ struct EngineSettings
     double tremoloRate = 12.0; // strokes per second (free tremolo)
     int tremoloSync = 0; // 0 free, 1 16ths, 2 16th triplets, 3 32nds (needs tempo)
     double tempo = 0.0; // the host's tempo, bpm (0 = unknown)
+    // 2.3 (each default plays exactly as 2.2)
+    unsigned seed = 0; // the performance's random wander (Take); 0 = the seed prepare() was given
+    double imperfection = 0.0; // PlayerParams::imperfection, 0..1; also loosens the note timing
+    double velocitySensitivity = 1.0; // PlayerParams::velSens
+    double attackWeight = 1.0; // PlayerParams::attackWeight
 };
 
 class Engine
@@ -107,6 +112,10 @@ public:
             violin->s[i].rng = Rng();
             violin->s[i].rng.s ^= 0x51ED2701ull * (seed + 7 * i);
         }
+        looseRng = Rng();
+        looseRng.s ^= 0x9D2C5680ull * (seed + 3);
+        looseT = -1;
+        looseDelay = 0;
         const PlayerParams keep = player->pp;
         *player = Player();
         player->pp = keep;
@@ -150,6 +159,11 @@ public:
     void noteOff (int64_t when, int pitch) { push ({ when, Ev::off, pitch, 0, 0 }); }
     void controller (int64_t when, int cc, double v127) { push ({ when, Ev::cc, cc, v127, 0 }); }
     void allNotesOff (int64_t when) { push ({ when, Ev::allOff, 0, 0, 0 }); }
+    // 2.3: a keyswitch by index (0..8 articulation, 9..11 contact point; up: a Momentary key let
+    // go), a UACC value (CC32), or back to the parameters (Player::clearKeyswitches' mask)
+    void keyswitch (int64_t when, int index, bool down) { push ({ when, Ev::keys, index, down ? 0.0 : 1.0, 0 }); }
+    void uacc (int64_t when, int value) { push ({ when, Ev::keys, value, 2.0, 0 }); }
+    void clearKeyswitches (int64_t when, int mask) { push ({ when, Ev::keys, mask, 3.0, 0 }); }
     // M7 MPE, per note by its pitch: bend in cents, pressure 0..1 (-1: none), timbre (CC74) 0..127.
     // Sent before the note-on, they set how the note starts.
     void noteBend (int64_t when, int pitch, double cents) { push ({ when, Ev::bend, pitch, cents, 0 }); }
@@ -304,7 +318,8 @@ private:
             allOff,
             bend, // M7 MPE
             pressure,
-            timbre
+            timbre,
+            keys // 2.3: keyswitch (b 0), its release (1), UACC (2), clear (3)
         };
         int64_t t;
         int type;
@@ -316,6 +331,8 @@ private:
     {
         if (! radiation)
             return;
+        if (settings.seed != 0 && settings.seed != seed)
+            reseed (settings.seed);
         applyStyle();
         radiation->setBrightness (settings.brightnessDb);
         radiation->setHall (settings.hall);
@@ -370,7 +387,28 @@ private:
         player->pp.tremoloRate = settings.tremoloRate;
         player->pp.tremoloSync = settings.tremoloSync;
         player->pp.tempo = settings.tempo;
+        player->pp.imperfection = settings.imperfection;
+        player->pp.velSens = settings.velocitySensitivity;
+        player->pp.attackWeight = settings.attackWeight;
         applyTuning();
+    }
+
+    // 2.3: a new Take: the strings', player's and timing's random wander start again from this
+    // seed (as reset() seeds them), without touching what sounds
+    void reseed (unsigned s)
+    {
+        seed = s;
+        for (int i = 0; i < 4; ++i)
+        {
+            violin->s[i].rng = Rng();
+            violin->s[i].rng.s ^= 0x51ED2701ull * (seed + 7 * i);
+        }
+        player->rng = Rng();
+        player->rng.s ^= 0x2545F4914F6CDD1Dull * (seed + 1);
+        player->pp.seed = seed;
+        styleBase.seed = seed;
+        looseRng = Rng();
+        looseRng.s ^= 0x9D2C5680ull * (seed + 3);
     }
 
     // M7: the player style, as offsets on the parameters it had in Modern soloist (the base,
@@ -442,6 +480,18 @@ private:
 
     void push (Ev e)
     {
+        // 2.3 Imperfection: notes start a little late (Live) or either side of the beat (Studio),
+        // the notes of a chord together
+        if (e.type == Ev::on && settings.imperfection > 0.0)
+        {
+            if (e.t != looseT)
+            {
+                looseT = e.t;
+                const double u = looseRng.uni(), k = std::clamp (settings.imperfection, 0.0, 1.0);
+                looseDelay = (int64_t) std::llround (k * looseMax * rate * (settings.studio ? u : 0.5 * (u + 1.0)));
+            }
+            e.t = std::max ((int64_t) 0, e.t + looseDelay);
+        }
         if (settings.studio)
         {
             e.t += lookAheadSamples;
@@ -529,6 +579,20 @@ private:
                 case Ev::timbre:
                     player->mpeTimbre (e.a, e.b);
                     break;
+                case Ev::keys:
+                    if (e.b == 0.0)
+                        player->keyswitch (e.a);
+                    else if (e.b == 1.0)
+                        player->keyswitchUp (e.a);
+                    else if (e.b == 3.0)
+                        player->clearKeyswitches (e.a);
+                    else
+                    {
+                        int art, style, contact;
+                        if (uaccMap (e.a, art, style, contact))
+                            player->uacc (art, style, contact);
+                    }
+                    break;
             }
         }
     }
@@ -611,6 +675,10 @@ private:
     Decim dec, dec2, lowDec, lowDec2;
     EngineSettings settings;
     unsigned seed = 1;
+    // 2.3 Imperfection's loose timing: the latest note-on's own time and delay (samples)
+    static constexpr double looseMax = 0.03; // s, at Imperfection 1
+    Rng looseRng;
+    int64_t looseT = -1, looseDelay = 0;
     // M7 styles and intonation
     PlayerParams styleBase;
     int styleNow = styleModern;
