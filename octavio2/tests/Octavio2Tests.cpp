@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <map>
 #include <string>
 
 namespace
@@ -306,4 +307,120 @@ TEST_CASE ("Octavio 2's interface paints every tab while it plays", "[octavio2]"
             }
         }
     }
+}
+
+// ---------------------------------------------------------------- M7 instrument
+TEST_CASE ("Octavio 2's M7 articulations and instrument parts play stably at every velocity on every string",
+           "[octavio2][m7]")
+{
+    struct Setting
+    {
+        const char* id;
+        float value;
+        double minDb; // at velocity 127
+    };
+    const Setting settings[] = { { "articulation", 5, -50 }, { "articulation", 6, -60 }, { "articulation", 7, -55 },
+                                 { "articulation", 8, -80 }, { "contact", 1, -50 },      { "contact", 2, -55 },
+                                 { "strings", 1, -50 },      { "strings", 2, -50 },      { "rosin", 0, -50 },
+                                 { "rosin", 2, -50 },        { "rosin", 3, -50 },        { "bow", 1, -50 },
+                                 { "tremoloSync", 3, -50 } };
+    // the 2.1 violin's own peaks: already above full scale on the open A at velocity 127 (+2.5 dB),
+    // so each setting is held to the default's peak + 3 dB (no runaway), not to 0 dBFS
+    std::map<int, double> reference;
+    for (const int note : { 55, 62, 69, 76 })
+        for (const int velocity : { 1, 127 })
+        {
+            octavio2::Processor p;
+            setParam (p, "octave", 2.0f);
+            reference[note * 1000 + velocity] = measure (play (p, 48000.0, note, 0.8, 1.2, velocity)).peak;
+        }
+    for (const auto& s : settings)
+        for (const int note : { 55, 62, 69, 76 })
+            for (const int velocity : { 1, 127 })
+            {
+                octavio2::Processor p;
+                setParam (p, "octave", 2.0f);
+                setParam (p, s.id, s.value);
+                if (std::string (s.id) == "tremoloSync")
+                    setParam (p, "articulation", 5);
+                const auto out = play (p, 48000.0, note, 0.8, 1.2, velocity);
+                const auto l = measure (out);
+                const double ref = reference[note * 1000 + velocity];
+                INFO (s.id << " = " << s.value << ", note " << note << ", velocity " << velocity << ": " << dB (l.rms)
+                           << " dB RMS, peak " << dB (l.peak) << " dB (default " << dB (ref) << " dB)");
+                CHECK (l.finite);
+                CHECK (dB (l.peak) < std::max (dB (ref), -6.0) + 3.0);
+                if (velocity == 127)
+                    CHECK (dB (l.rms) > s.minDb);
+            }
+}
+
+TEST_CASE ("Octavio 2's M7 keyswitches pick tremolo, col legno and the contact point", "[octavio2][m7]")
+{
+    // A4 (MIDI 57 at Octave +1) after the keyswitches; returns the peak level after 2 s
+    auto run = [] (std::initializer_list<int> keys, juce::AudioBuffer<float>& all)
+    {
+        octavio2::Processor p;
+        setParam (p, "room", 0.0f);
+        const int block = 480;
+        p.prepareToPlay (48000.0, block);
+        juce::AudioBuffer<float> buf (2, block);
+        all.setSize (2, 3 * 48000);
+        double late = 0;
+        for (int pos = 0, k = 0; pos < 3 * 48000; pos += block, ++k)
+        {
+            juce::MidiBuffer midi;
+            if (k == 0)
+                for (int key : keys)
+                    midi.addEvent (juce::MidiMessage::noteOn (1, key, (juce::uint8) 100), 0);
+            if (k == 10)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 100), 0);
+            p.processBlock (buf, midi);
+            for (int c = 0; c < 2; ++c)
+                all.copyFrom (c, pos, buf, c, 0, block);
+            if (pos > 2 * 48000)
+                late = std::max (late, (double) buf.getMagnitude (0, block));
+        }
+        return late;
+    };
+    juce::AudioBuffer<float> arco, tremolo, pont, colLegno;
+    const double bowed = run ({}, arco), struck = run ({ 32 }, colLegno);
+    run ({ 29 }, tremolo);
+    run ({ 34 }, pont);
+    INFO ("bowed " << dB (bowed) << " dB, col legno " << dB (struck) << " dB late");
+    CHECK (dB (struck) < dB (bowed) - 10.0); // the struck note has died away
+    auto differs = [&] (const juce::AudioBuffer<float>& x)
+    {
+        double d = 0;
+        for (int i = 24000; i < 96000; ++i)
+            d = std::max (d, (double) std::abs (x.getSample (0, i) - arco.getSample (0, i)));
+        return d;
+    };
+    CHECK (differs (tremolo) > 1e-3);
+    CHECK (differs (pont) > 1e-3);
+    CHECK (measure (tremolo).finite);
+    CHECK (measure (pont).finite);
+}
+
+TEST_CASE ("Octavio 2's M7 parts default to the 2.1 violin", "[octavio2][m7]")
+{
+    octavio2::Processor p;
+    const auto e = octavio2::params::Reader (p.getParameters()).read();
+    const o2::EngineSettings d;
+    CHECK (e.strings == d.strings);
+    CHECK (e.rosin == d.rosin);
+    CHECK (e.bow == d.bow);
+    CHECK (e.contact == 0);
+    CHECK (e.articulation == 0);
+    CHECK (d.strings == 0);
+    CHECK (d.rosin == 1);
+    CHECK (d.bow == 0);
+    // the standard rosin is the strings' own defaults
+    const auto r = o2::Violin::rosin (1);
+    const o2::Params P;
+    CHECK (r.muS == P.muS);
+    CHECK (r.tauG == P.tauG);
+    CHECK (r.ya == P.ya);
+    CHECK (r.sigma0 == P.sigma0);
+    CHECK (r.grain == P.grain);
 }

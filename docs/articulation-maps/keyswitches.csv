@@ -1,0 +1,13 @@
+note,name_c4_60,name_fl_studio,articulation,group
+24,C1,C2,Arco,articulation
+25,C#1,C#2,Pizzicato,articulation
+26,D1,D2,Bartok pizz,articulation
+27,D#1,D#2,Left-hand pizz,articulation
+28,E1,E2,Harmonics,articulation
+29,F1,F2,Tremolo,articulation
+30,F#1,F#2,Sautille,articulation
+31,G1,G2,Portato,articulation
+32,G#1,G#2,Col legno battuto,articulation
+33,A1,A2,Ordinario,contact
+34,A#1,A#2,Sul ponticello,contact
+35,B1,B2,Sul tasto,contact

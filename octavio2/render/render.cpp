@@ -19,6 +19,9 @@
 //   Live mode: no lengths), studio (the plugin's Studio mode: look-ahead)
 //   hall=0..8 (0 none, 1 Arvedi near seat), bright=dB (5), reverb=dB (0), volume=dB (0),
 //   vibrato=x (1), velCurve=x (1), data=octavio2/data
+// M7: articulation=0..8 (5 tremolo, 6 sautille, 7 portato, 8 col legno), contact=0..2 (ord, sul
+//   ponticello, sul tasto), strings=0..2 (synthetic, gut, steel), rosin=0..3 (light, standard, dark,
+//   baroque), bow=0..1 (modern, baroque), tremoloRate=/s, tremoloSync=0..3 with tempo=bpm
 
 #include "../core/Engine.h"
 #include "../core/Wav.h"
@@ -364,6 +367,16 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.wolf = opt ("wolf", es.wolf);
     es.hold = opt ("hold", es.hold);
     es.modalBody = opt ("modalBody", es.modalBody) != 0;
+    // the player's and M7's choices (as the plugin's parameters set them)
+    es.articulation = (int) opt ("articulation", es.articulation);
+    es.bowStyle = (int) opt ("bowStyle", es.bowStyle);
+    es.strings = (int) opt ("strings", es.strings);
+    es.rosin = (int) opt ("rosin", es.rosin);
+    es.bow = (int) opt ("bow", es.bow);
+    es.contact = (int) opt ("contact", es.contact);
+    es.tremoloRate = opt ("tremoloRate", es.tremoloRate);
+    es.tremoloSync = (int) opt ("tremoloSync", es.tremoloSync);
+    es.tempo = opt ("tempo", es.tempo);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);

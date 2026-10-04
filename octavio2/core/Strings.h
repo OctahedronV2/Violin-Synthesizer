@@ -289,16 +289,16 @@ struct String
     // Fit M first-order allpasses with one shared coefficient to the stiff-string partials
     // f_n = n f1 sqrt(1 + B n^2) of the open string. Done once; setPitch reuses it (a fingered
     // string is stiffer, B ~ 1/L^2, but the difference is about a cent at partial 10).
-    void fitDispersion()
+    void fitDispersion() { fitAllpass (d.f0, d.B, fs, *P, dispM, dispA); }
+    static void fitAllpass (double f, double Bn, double fs, const Params& p, int& dispM, double& dispA)
     {
         dispM = 0;
         dispA = 0.0;
-        const double f = d.f0, Bn = d.B;
-        if (! P->dispersion || Bn <= 0)
+        if (! p.dispersion || Bn <= 0)
             return;
         double best = 1e30;
         const int nmax = std::min (40, (int) (0.45 * fs / f));
-        for (int m = 1; m <= P->maxAllpass; ++m)
+        for (int m = 1; m <= p.maxAllpass; ++m)
             for (double a = -0.02; a > -0.95; a -= 0.005)
             {
                 double err = 0;
@@ -318,6 +318,49 @@ struct String
                 }
             }
     }
+
+    // M7: another string set on this string while it plays: new impedance, stiffness and loss
+    // (dispersion fit made beforehand), same open pitch, finger and ear
+    void setData (const StringData& sd, int apM, double apCoef)
+    {
+        d = sd;
+        dispM = apM;
+        dispA = apCoef;
+        setPitch (note);
+    }
+
+    // M7: col legno battuto. The stick strikes the string at the bow point (the caller sets beta
+    // first): the string there is pushed at the stick's speed v (m/s) for the contact time tc (s,
+    // a half sine), then the stick bounces off and the string rings. knock (N at the board): the
+    // wood's own click, heard straight from the stick (String::direct), decaying over knockTime.
+    void strike (double v, double tc, double knock, double knockTime = 0.003)
+    {
+        stkV = v;
+        stkTc = std::max (1.0, tc * fs);
+        stkT = 0.0;
+        stkKnock = knock;
+        stkKnockTau = std::max (1.0, knockTime * fs);
+        stkOn = true;
+    }
+    double strikeWave()
+    {
+        if (! stkOn)
+            return 0.0;
+        const double u = stkT < stkTc ? stkV * std::sin (pi * stkT / stkTc) : 0.0;
+        if (stkKnock > 0.0)
+        {
+            const double s = std::exp (-stkT / stkKnockTau), wn = rng.uni();
+            stkHp = 0.9 * stkHp + 0.1 * wn; // band-passed near 1-4 kHz: wood, not metal
+            stkLp = 0.75 * stkLp + 0.25 * (wn - stkHp);
+            direct += stkKnock * s * stkLp * 4.0;
+        }
+        stkT += 1.0;
+        if (stkT > std::max (stkTc, 10.0 * stkKnockTau))
+            stkOn = false;
+        return u;
+    }
+    bool stkOn = false;
+    double stkV = 0.0, stkT = 0.0, stkTc = 1.0, stkKnock = 0.0, stkKnockTau = 1.0, stkHp = 0.0, stkLp = 0.0;
 
     // A new note: the finger lands, the ear's correction starts again from zero.
     void setNote (double n) { setPitch (n, true); }
@@ -616,7 +659,7 @@ struct String
         slipped = false;
         hiss = 0.0;
         direct = 0.0;
-        const double plW = pluckWave();
+        const double plW = pluckWave() + strikeWave(); // M7: strikeWave is 0 unless col legno
         const bool wasStick = stickAll;
         // Torsion: the bow drags the string's surface, so it also twists the string. Twist
         // waves travel torsionSpeed times faster with impedance torsionImpedance * Z (as seen
@@ -913,12 +956,96 @@ struct Violin
         return bridgeModes == 1 ? sd[i] : generic[i];
     }
 
+    // ---------------------------------------------------------------- M7 instrument parts
+    // String sets, as scales on the synthetic set's fitted data (0 synthetic = the data above,
+    // unchanged). Z = T / (2 L f0) at a fixed pitch, so it follows the tension.
+    //  Gut (baroque, plain A and E, plain or wound D, wound G): about 15-25% less tension, more
+    //  internal loss, most at the top (the gut's own damping: darker, quicker ring), plain gut is
+    //  thick so stiffer (B ~ E d^4 / T: gut's lower modulus is more than made up by its diameter).
+    //  Steel (steel core, fiddle): a little more tension, much less internal loss (bright, long ring),
+    //  stiffer core.
+    struct StringSet
+    {
+        double Z[4], B[4], lo[4], hi[4];
+    };
+    static const StringSet& stringSet (int set)
+    {
+        static const StringSet sets[3] = {
+            { { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 } },
+            { { 0.85, 0.82, 0.8, 0.75 }, { 1.0, 2.0, 1.5, 1.2 }, { 0.7, 0.7, 0.7, 0.7 }, { 0.4, 0.4, 0.45, 0.5 } },
+            { { 1.05, 1.05, 1.08, 1.05 }, { 1.3, 1.3, 1.3, 1.1 }, { 1.3, 1.3, 1.3, 1.2 }, { 1.6, 1.6, 1.5, 1.3 } },
+        };
+        return sets[std::clamp (set, 0, 2)];
+    }
+    static StringData stringData (int i, int set, int bridgeModes)
+    {
+        StringData d = defaults (i, bridgeModes);
+        if (set == 0)
+            return d;
+        const StringSet& k = stringSet (set);
+        d.Z *= k.Z[i];
+        d.B *= k.B[i];
+        d.t60lo *= k.lo[i];
+        d.t60hi *= k.hi[i];
+        return d;
+    }
+    // Switch string set (audio thread safe: no allocation; the dispersion fits are made in init)
+    void setStringSet (int set)
+    {
+        set = std::clamp (set, 0, 2);
+        if (set == strings)
+            return;
+        strings = set;
+        for (int i = 0; i < 4; ++i)
+        {
+            StringData d = stringData (i, set, p.bridgeModes);
+            d.f0 = s[i].d.f0; // keep the tuning
+            s[i].setData (d, setM[set][i], setA[set][i]);
+        }
+    }
+    int strings = 0;
+    int setM[3][4] = {};
+    double setA[3][4] = {};
+
+    // Rosin (thermal friction law, vW26): how much it grips cold (muS), how hot it must get to
+    // soften (tauG, K above ambient), how much grip is left when hot (ya), the pre-sliding layer's
+    // stiffness (sigma0) and its unevenness (grain). 1 Standard = the Params defaults.
+    struct Rosin
+    {
+        double muS, tauG, ya, sigma0, grain;
+    };
+    static Rosin rosin (int k)
+    {
+        static const Rosin r[4] = {
+            { 0.95, 32.0, 0.45, 3.5e5, 0.025 }, // light: hard, pale, smooth
+            { 1.05, 25.0, 0.4, 3.0e5, 0.03 }, // standard
+            { 1.12, 19.0, 0.36, 2.6e5, 0.04 }, // dark: soft, sticky, grips and bites
+            { 1.15, 17.0, 0.33, 2.3e5, 0.045 }, // baroque: softest, most grip and grit
+        };
+        return r[std::clamp (k, 0, 3)];
+    }
+    void setRosin (int k)
+    {
+        const Rosin r = rosin (k);
+        p.muS = r.muS;
+        p.tauG = r.tauG;
+        p.ya = r.ya;
+        p.sigma0 = r.sigma0;
+        p.grain = r.grain;
+    }
+
     void init()
     {
         fs = p.fs;
+        for (int set = 0; set < 3; ++set)
+            for (int i = 0; i < 4; ++i)
+            {
+                const StringData d = stringData (i, set, p.bridgeModes);
+                String::fitAllpass (d.f0, d.B, fs, p, setM[set][i], setA[set][i]);
+            }
         for (int i = 0; i < 4; ++i)
         {
-            s[i].init (defaults (i, p.bridgeModes), p);
+            s[i].init (stringData (i, strings, p.bridgeModes), p);
             s[i].clear();
             coupling[i] = 1.0;
             reflect[i] = 1.0;

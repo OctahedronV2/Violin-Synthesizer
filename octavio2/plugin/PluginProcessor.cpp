@@ -181,9 +181,10 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
-        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic) are
-        // fixed keys, whatever the Octave setting
-        if (m.getNoteNumber() >= 24 && m.getNoteNumber() <= 28)
+        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7:
+        // 29-32 Tremolo, Sautille, Portato, Col legno, 33-35 the contact point) are fixed keys,
+        // whatever the Octave setting
+        if (m.getNoteNumber() >= params::keyswitchFirst && m.getNoteNumber() <= params::keyswitchLast)
         {
             engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
             return;
@@ -250,11 +251,15 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     juce::ScopedNoDenormals noDenormals;
     const auto startTicks = juce::Time::getHighResolutionTicks();
     const int n = buffer.getNumSamples();
-    engine->setSettings (reader.read());
+    auto settings = reader.read();
     if (auto* head = getPlayHead())
         if (const auto pos = head->getPosition())
             if (const auto bpm = pos->getBpm())
+            {
                 telemetry.bpm.store (static_cast<float> (*bpm));
+                settings.tempo = *bpm; // M7: tempo-synced tremolo
+            }
+    engine->setSettings (settings);
 
     keysToAudio.popAll (
         [this] (const KeyEvent& e)

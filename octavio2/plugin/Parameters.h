@@ -35,6 +35,13 @@ inline const juce::ParameterID movement { "movement", 1 };
 inline const juce::ParameterID distance { "distance", 1 };
 inline const juce::ParameterID bridge { "bridge", 1 };
 inline const juce::ParameterID mute { "mute", 1 };
+// M7 instrument: string set, rosin, bow, contact point, tremolo
+inline const juce::ParameterID strings { "strings", 1 };
+inline const juce::ParameterID rosin { "rosin", 1 };
+inline const juce::ParameterID bow { "bow", 1 };
+inline const juce::ParameterID contact { "contact", 1 };
+inline const juce::ParameterID tremoloSpeed { "tremoloSpeed", 1 };
+inline const juce::ParameterID tremoloSync { "tremoloSync", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -46,6 +53,16 @@ const juce::StringArray& violinNames();
 const juce::StringArray& micNames();
 const juce::StringArray& articulationNames();
 const juce::StringArray& bowStyleNames();
+// M7 instrument
+const juce::StringArray& stringsNames();
+const juce::StringArray& rosinNames();
+const juce::StringArray& bowNames();
+const juce::StringArray& contactNames();
+const juce::StringArray& tremoloSyncNames();
+
+// Keyswitches are fixed keys, whatever the Octave: C1 (MIDI 24) .. B1 (35). 24-32 pick the
+// Articulation (in its order), 33-35 the contact point (ordinario, sul ponticello, sul tasto).
+inline constexpr int keyswitchFirst = 24, keyswitchLast = 35;
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -67,5 +84,6 @@ private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
     std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
         *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
+    std::atomic<float>*strings, *rosin, *bow, *contact, *tremoloSpeed, *tremoloSync; // M7 instrument
 };
 } // namespace octavio2::params
