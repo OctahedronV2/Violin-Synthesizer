@@ -191,6 +191,7 @@ struct String
     double fingerG = 1.0;
     double slipLp[4] = {}, slipNoiseA = 0.0;
     double hiss = 0.0; // rough-friction force sent straight to the bridge this sample
+    double direct = 0.0; // M5: sound radiated straight from the string/fingerboard (Bartok slap), not via the bridge
     double noiseGain = 1.0; // set by the player: how settled the stroke is (less hiss while the note starts)
     double damp = 0.0; // extra loss per round trip from a finger touching or lifting (0..1), set by the player
     double dBr = 2, dN = 2; // one-way bow->bridge, nut round trip
@@ -216,6 +217,13 @@ struct String
     // dispersion fit made once per string at the open pitch, reused by setPitch
     int dispM = 0;
     double dispA = 0.0;
+    // M5: shaped pluck (see pluck()) and the light finger (setTouch)
+    bool plOn = false;
+    double plU0 = 0.0, plPull = 0.0, plTau = 1.0, plT = 0.0, plClickAt = -1.0, plClickAmp = 0.0, clickHp = 0.0,
+           clickLp = 0.0, plClickTau = 1.0, plKick = 0.5;
+    bool touchOn = false;
+    double touchX = 0.0, touchR = 0.0, touchA = 1.0;
+    Delay hTo, hBack;
 
     void init (const StringData& sd, const Params& p)
     {
@@ -312,6 +320,8 @@ struct String
         // the nut side loses the extra delay of the bow-width gaps
         dN = std::max (1.0,
                        N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
+        if (touchOn) // bow point to the touching finger, one way (at least 2 samples left beyond it)
+            touchA = std::clamp (touchX * period / 2.0 - dBr - (K - 1) * gap, 1.0, std::max (1.0, 0.5 * dN - 1.0));
     }
 
     int bowPointsNow() const { return std::clamp (P->bowPoints, 1, 4); }
@@ -535,7 +545,7 @@ struct String
         const double vinB = fromBr.read (dBr);
         fromBr.push (bBr);
         // nut loop: loss, dispersion, inverting reflection at the nut / finger
-        double x = nutLoop.read (dN);
+        double x = nutLoop.read (touchOn ? std::max (2.0, dN - 2.0 * touchA) : dN);
         lp = (1 - dark) * x + dark * lp;
         x = g * fingerG * (1.0 - damp) * lp;
         for (int i = 0; i < M; ++i)
@@ -545,13 +555,23 @@ struct String
             apY[i] = y;
             x = y;
         }
-        const double vinN = -x;
+        const double Zs = P->perString ? d.Z : 0.2;
+        double vinN = -x;
+        if (touchOn) // the light finger: a dashpot junction between the bow and the nut
+        {
+            const double a = hTo.read (touchA), b = vinN;
+            const double vH = 2.0 * Zs * (a + b) / (2.0 * Zs + touchR);
+            nutLoop.push (vH - b);
+            vinN = hBack.read (touchA);
+            hBack.push (vH - a);
+        }
 
         const int K = bowPointsNow();
         const double gap = gapSamples();
-        const double Zs = P->perString ? d.Z : 0.2;
         slipped = false;
         hiss = 0.0;
+        direct = 0.0;
+        const double plW = pluckWave();
         const bool wasStick = stickAll;
         // Torsion: the bow drags the string's surface, so it also twists the string. Twist
         // waves travel torsionSpeed times faster with impedance torsionImpedance * Z (as seen
@@ -601,14 +621,14 @@ struct String
                 const double a = 1.0 / Ys;
                 f = a * (contact (k, vBow, vh, fk, a) - vh);
             }
-            const double dv = f / (2.0 * Zs);
+            const double dv = f / (2.0 * Zs) + (k == 0 ? plW : 0.0);
             const double v = vh + f * Ys;
             if (k == 0)
                 toBr.push (fromN[k] + dv);
             else
                 gapL[k - 1].push (fromN[k] + dv);
             if (k == K - 1)
-                nutLoop.push (fromB[k] + dv);
+                (touchOn ? hTo : nutLoop).push (fromB[k] + dv);
             else
                 gapR[k].push (fromB[k] + dv);
             if (tors)
@@ -656,19 +676,117 @@ struct String
         ++samples;
     }
 
-    // Pluck: set an initial triangular displacement at fraction p from the bridge
-    // (as velocity waves: a step in each direction), amplitude in m/s-equivalent.
-    void pluck (double p, double amp)
+    // ---------------------------------------------------------------- M5: plucks and the light finger
+    // The old placeholder (kept for before/after comparisons, PlayerParams::pizzModel 0): one
+    // velocity impulse pushed towards the bridge and the nut at the bow point.
+    void pluckImpulse (double amp)
     {
-        // simplest: an impulse of velocity at the pluck point, both directions
-        // (a 'plucked' spectrum ~ sin(n pi p)/n after integration through the body is close enough)
-        const double d1 = std::max (1.0, p * N / 2.0);
-        (void) d1;
-        for (int i = 0; i < 1; ++i)
+        toBr.push (amp);
+        nutLoop.push (amp);
+    }
+
+    // A shaped pluck at the junction (bow point 0, so the caller sets beta to the plucking point
+    // first). The finger pulls the string aside by h metres with a force applied at the point
+    // (velocity wave u = F / 2Z into both directions), then lets go:
+    //  - the pull is a raised-cosine ramp lasting a whole number of periods (at least two, about
+    //    `pull` seconds), whose spectrum then has zeros at every
+    //    partial, so the string follows it quasi-statically and nothing rings before the release
+    //    (an instant initial shape would hit the bridge and body with a step of the static force);
+    //  - the release is the force falling as (1 + t/tau) exp(-t/tau): a soft fingertip rolling off
+    //    the string (tau ~ 0.5 ms) is a 12 dB/octave low-pass on the pluck above 1/(2 pi tau), a
+    //    nail (tau ~ 0.05 ms) lets the whole spectrum through. The plucking point (beta) carves
+    //    the sin(n pi beta) comb, the bridge and body do the rest.
+    // clickAt > 0 (s after the release): a Bartok snap, the string slaps the fingerboard: a bright
+    // knock (clickAmp, decaying over clickTime) heard straight from the fingerboard (String::direct,
+    // added by the Engine after the body) and a little through the bridge, and the board stopping
+    // the swing for an instant on each of the next four periods (kick x the pluck's wave, halving).
+    // The pull adds latency: the release comes about pull seconds after the call.
+    void pluck (double h,
+                double tau,
+                double clickAt = 0.0,
+                double clickAmp = 0.0,
+                double pull = 0.0,
+                double clickTime = 0.0015,
+                double kick = 0.5)
+    {
+        const double L = f1 > 0.0 ? 0.325 * d.f0 / f1 : 0.325; // vibrating length, m
+        const double c = 2.0 * 0.325 * d.f0; // wave speed, m/s
+        const double b = std::clamp (beta, 0.02, 0.98);
+        plU0 = c * h / (2.0 * b * (1.0 - b) * L);
+        plPull = std::max (2.0, std::ceil (pull * fs / period)) * period; // whole periods: zeros on every partial
+        plTau = std::max (0.5, tau * fs);
+        plT = 0.0;
+        plOn = true;
+        plClickAt = clickAt > 0.0 ? plPull + clickAt * fs : -1.0;
+        plClickAmp = clickAmp;
+        plClickTau = std::max (1.0, clickTime * fs);
+        plKick = kick;
+    }
+    bool plucking() const { return plOn; }
+    // samples until the release starts (for timing), and the time the pull takes
+    double pluckLatency() const { return plOn ? std::max (0.0, plPull - plT) : 0.0; }
+
+    // The pluck's velocity wave for this sample (called once per tick)
+    double pluckWave()
+    {
+        if (! plOn)
+            return 0.0;
+        double u;
+        if (plT < plPull)
+            u = plU0 * 0.5 * (1.0 - std::cos (pi * plT / plPull));
+        else
         {
-            toBr.push (amp);
-            nutLoop.push (amp);
+            const double x = (plT - plPull) / plTau;
+            u = plU0 * (1.0 + x) * std::exp (-x);
+            if (x > 30.0)
+            {
+                u = 0.0;
+                if (plClickAt < 0.0 || plT > plClickAt + std::max (8.0 * plClickTau, 4.0 * period))
+                    plOn = false;
+            }
         }
+        if (plClickAt > 0.0)
+        {
+            // the board stops the swing (0.12 ms contact), and the string comes back to slap it
+            // again on each of the next few periods, each time softer: a rattle that clips the
+            // string's swing and makes the slapped string itself bright
+            const double k = plT - plClickAt, w = 0.00012 * fs;
+            const int cyc = k >= 0.0 ? (int) (k / period) : -1;
+            const double kk = k - cyc * period;
+            if (cyc >= 0 && cyc < 4 && kk < w)
+                u -= plKick * plU0 * std::pow (0.5, cyc) * std::sin (pi * kk / w);
+            if (k >= 0.0 && k < 8.0 * plClickTau) // the knock and rattle: a decaying bright burst
+            {
+                const double s = std::exp (-k / plClickTau);
+                const double wn = rng.uni();
+                clickHp = 0.94 * clickHp + 0.06 * wn; // high-passed near 1 kHz
+                clickLp = 0.82 * clickLp + 0.18 * (wn - clickHp); // ... and low-passed near 3 kHz
+                const double knock = plClickAmp * s * clickLp * 4.0;
+                hiss += 0.01 * knock; // a little through the bridge and body
+                direct = knock; // and straight from the fingerboard into the air (Engine adds it)
+            }
+        }
+        plT += 1.0;
+        return u;
+    }
+
+    // Light finger touching the string at fraction x from the bridge (harmonics): a dashpot of
+    // resistance R (kg/s) at that point, v = 2Z (a + b) / (2Z + R). Partials with a node there
+    // pass untouched, all others lose energy at every pass. The nut-side loop is split there
+    // into point->finger, finger->nut->finger and finger->point. x = 0 takes the finger away.
+    // R is a pressure: 0 = not touching (transparent), ~Z = harmonic, very large = a stop.
+    void setTouch (double x, double R)
+    {
+        const bool on = x > 0.0;
+        if (on && ! touchOn)
+        {
+            hTo.clear();
+            hBack.clear();
+        }
+        touchOn = on;
+        touchX = x;
+        touchR = std::max (0.0, R);
+        setBeta (beta);
     }
 
     void clear()
@@ -676,6 +794,8 @@ struct String
         toBr.clear();
         fromBr.clear();
         nutLoop.clear();
+        hTo.clear();
+        hBack.clear();
         for (auto& x : gapR)
             x.clear();
         for (auto& x : gapL)

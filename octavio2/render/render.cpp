@@ -8,6 +8,8 @@
 // Options: any Params field (strings) or PlayerParams field (player), by name, e.g.
 //   bowPoints=3 friction=hyperbolic admittance=0 vibWidthHi=40 speedRange=0.3 seed=2
 // Also: fs=192000 (internal rate, default 96000), slips=1 prints Helmholtz health per note.
+// M5: articulation=0..4 (arco, pizz, Bartok pizz, left-hand pizz, harmonic; keyswitches MIDI 24-28
+// do the same inside the file), pizzModel=0 (the old placeholder pluck), pizz*/bartok*/lh*/harm*.
 //
 // sound=out.wav renders through o2::Engine instead, the plugin's own code path (player, strings,
 // body, mics, hall), and writes stereo float at 48 kHz:
@@ -223,6 +225,32 @@ static void playerOpts (PlayerParams& q)
     O (earWindow);
     O (earWait);
     O (earPeriods);
+    // M5 articulations
+    O (articulation);
+    O (keyswitchBase);
+    O (pizzModel);
+    O (pizzImpulse);
+    O (pizzPointMM);
+    O (pizzAmpPP);
+    O (pizzAmpFF);
+    O (pizzTau);
+    O (pizzBright);
+    O (pizzTouch);
+    O (pizzPull);
+    O (pizzStopLoss);
+    O (pizzTouchDamp);
+    O (pizzOffDamp);
+    O (bartokAmp);
+    O (bartokTau);
+    O (bartokPointMM);
+    O (bartokClick);
+    O (bartokClickTime);
+    O (bartokKick);
+    O (lhAmp);
+    O (lhTau);
+    O (lhFromNut);
+    O (harmTouch);
+    O (harmForce);
 #undef O
 }
 

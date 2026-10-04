@@ -117,16 +117,19 @@ public:
         while (n > 0)
         {
             const int m = std::min (n, Radiation::maxBlock);
-            double force[Radiation::maxBlock];
+            double force[Radiation::maxBlock], direct[Radiation::maxBlock];
             for (int i = 0; i < m; ++i)
             {
                 dispatch();
                 double vb[4], fb[4];
                 player->tick (vb, fb);
                 const int over = (int) std::lround (violin->p.fs / rate);
+                direct[i] = 0.0;
                 for (int k = 0; k < over; ++k)
                 {
                     const double F = violin->tick (vb, fb);
+                    for (int s = 0; s < 4; ++s) // M5: the Bartok slap heard from the fingerboard
+                        direct[i] += violin->s[s].direct / over;
                     if (over == 4)
                     {
                         dec2.push (F);
@@ -142,6 +145,12 @@ public:
             }
             scopeWritten.store (scopeWrite, std::memory_order_release);
             radiation->process (force, outL, outR, m);
+            const double dg = directGain * std::pow (10.0, settings.volumeDb / 20.0);
+            for (int i = 0; i < m; ++i) // M5: sound that does not come through the bridge (0 unless a Bartok slap)
+            {
+                outL[i] += (float) (dg * direct[i]);
+                outR[i] += (float) (dg * direct[i]);
+            }
             outL += m;
             outR += m;
             n -= m;
@@ -317,6 +326,7 @@ private:
             h = 0;
     }
 
+    double directGain = 0.1; // M5: N of slap -> output units (fitted to the Philharmonia snap pizz)
     std::unique_ptr<Violin> violin;
     double hissBase = Params {}.slipNoise;
     std::unique_ptr<Player> player;

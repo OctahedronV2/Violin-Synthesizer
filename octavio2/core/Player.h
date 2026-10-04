@@ -141,6 +141,31 @@ struct PlayerParams
     double earUp = 0.25, earDown = 0.15, earMax = 2.106, earMin = 0.4, earRelax = 0.3, earWindow = 0.005,
            earWait = 0.05, earPeriods = 6.0;
     unsigned seed = 1;
+
+    // ---------------------------------------------------------------- M5 articulations
+    // articulation: 0 Arco, 1 Pizzicato, 2 Bartok (snap) pizz, 3 Left-hand pizz, 4 Harmonic. The
+    // keyswitches keyswitchBase .. keyswitchBase + 4 (MIDI 24..28 = C1..E1 with C4 = 60, "C0..E0"
+    // in the C3 = 60 naming) select the same five and win over this until it changes.
+    double articulation = 0, keyswitchBase = 24;
+    double pizzModel = 1; // 0: the 2.0 placeholder impulse (comparisons only), 1: the shaped pluck
+    double pizzImpulse = 0.3; // placeholder amplitude at velocity 127
+    // right-hand pizz: plucked pizzPointMM from the bridge (over the end of the fingerboard),
+    // displacement pizzAmpPP .. pizzAmpFF (m, exponential in the dynamics), release time
+    // pizzTau (s), shortened by pizzBright at ff (a harder pluck leaves the finger faster)
+    double pizzPointMM = 70.0, pizzAmpPP = 0.4e-3, pizzAmpFF = 1.5e-3, pizzTau = 0.1e-3, pizzBright = 0.5;
+    // the plucking finger touches a ringing string first (pizzTouch s, loss pizzTouchDamp per round
+    // trip); after the note-off a stopped note's finger eases off (loss pizzOffDamp per round trip)
+    double pizzTouch = 0.004, pizzTouchDamp = 0.3, pizzOffDamp = 0.015;
+    double pizzPull = 0.015; // s the finger takes to pull the string aside (whole periods, at least two)
+    double pizzStopLoss = 0.02; // loss per round trip at the stopping fingertip while a plucked stopped note rings
+    // Bartok: pulled up and let go so it slaps the fingerboard: bartokAmp x the displacement, a
+    // nail-like release, the slap's knock (N at ff) a little after the release
+    double bartokAmp = 0.7, bartokTau = 0.06e-3, bartokPointMM = 90.0, bartokClick = 10.0, bartokClickTime = 0.004;
+    double bartokKick = 1.5; // how hard the board stops the string (x the pluck's wave), each rattle half the last
+    // left-hand pizz: a left finger plucks lhFromNut of the string from the nut, softer and duller
+    double lhAmp = 0.6, lhTau = 0.25e-3, lhFromNut = 0.2;
+    // harmonics: the light finger's resistance in units of the string's impedance
+    double harmTouch = 1.0, harmForce = 0.3; // ... and the bow force on a harmonic, x the normal
 };
 
 struct Player
@@ -246,6 +271,8 @@ struct Player
     // ---------------------------------------------------------------- string choice
     int chooseString (int pitch, int avoid1 = -1, int avoid2 = -1) const
     {
+        if (m5String >= 0) // M5: a harmonic's string, picked by m5Harmonic
+            return m5String;
         int best = -1;
         double bestCost = 1e30;
         for (int s = 0; s < 4; ++s)
@@ -370,6 +397,8 @@ struct Player
     // ---------------------------------------------------------------- events
     void noteOn (int pitch, double vel127)
     {
+        if (m5NoteOn (pitch, vel127)) // M5: keyswitches, plucked and harmonic notes
+            return;
         const bool anyHeld = nHeld > 0;
         const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
         if (! chord)
@@ -538,6 +567,9 @@ struct Player
 
     void noteOff (int pitch)
     {
+        pitch = m5NoteOff (pitch); // M5: plucked notes end here, harmonics map to their finger
+        if (pitch < 0)
+            return;
         int k = 0;
         bool found = false;
         int str = -1;
@@ -706,6 +738,7 @@ struct Player
             double dmp = std::max (pp.liftDamp * S.dampEnv, pp.openMute * S.muteEnv);
             if (stopping && S.bowed && std::abs (v) < 0.02)
                 dmp = std::max (dmp, stD);
+            dmp = std::max (dmp, m5Damp (s)); // M5: plucking finger, pizz note-off
             vn->s[s].damp = dmp;
             {
                 const double age = t - std::max (S.noteOn, S.landAt);
@@ -767,6 +800,7 @@ struct Player
                 S.earT = 0.0;
                 S.ear += (1.0 - S.ear) * std::min (1.0, dt / pp.earRelax);
             }
+            ft *= m5Force (s); // M5: light bow on a harmonic
             S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
             const double tau
                 = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
@@ -775,11 +809,237 @@ struct Player
                 S.force = 0.0;
             force[s] = S.force;
             vBow[s] = S.force > 0.0 ? v : 0.0;
-            vn->s[s].setBeta (betaFor (s));
+            vn->s[s].setBeta (m5Beta (s) > 0.0 ? m5Beta (s) : betaFor (s)); // M5: a plucked string keeps its point
             vn->s[s].hairFrac = hair / pp.bowLength;
             vn->s[s].widthScale = pp.tiltPP + (1.0 - pp.tiltPP) * d;
         }
         t += dt;
+    }
+
+    // ================================================================ M5 articulations
+    // Pizzicato (right hand, Bartok snap, left hand) and harmonics (natural, artificial). Plucked
+    // notes bypass the bow: the left hand stops the note, the plucking finger touches the string
+    // (damping what rings), pulls and lets go (String::pluck). Harmonic notes are bowed: the player
+    // picks a string and node that sound the pitch (natural: 1/2, 1/3, 1/4 of the string from the
+    // nut), else an artificial harmonic (the note two octaves down stopped, a light finger a fourth
+    // above it), and puts the light finger on (String::setTouch).
+    enum M5Art : int
+    {
+        artArco,
+        artPizz,
+        artBartok,
+        artLeftPizz,
+        artHarmonic
+    };
+    int m5Key = -1; // articulation picked by keyswitch (-1: none yet)
+    double m5Param = 0.0; // the last PlayerParams::articulation seen (a change wins over the keyswitch)
+    int m5String = -1; // forces chooseString while a harmonic is fingered
+    bool m5Busy = false;
+    int m5Pluck[128] = {}; // pitch -> string + 1 of a plucked note still held
+    int m5Harm[128] = {}; // pitch -> finger pitch + 1 of a held harmonic
+    struct M5Str
+    {
+        double pluckAt = -1.0, h = 0.0, tau = 0.0, clickAt = 0.0, clickAmp = 0.0, impulse = 0.0;
+        double beta = 0.0; // the plucking point, held while the string rings unbowed
+        double offAt = -1.0;
+    } m5[4];
+
+    int m5Articulation()
+    {
+        if (pp.articulation != m5Param)
+        {
+            m5Param = pp.articulation;
+            m5Key = -1;
+        }
+        return std::clamp (m5Key >= 0 ? m5Key : (int) std::lround (pp.articulation), 0, 4);
+    }
+
+    bool m5NoteOn (int pitch, double vel127)
+    {
+        if (m5Busy)
+            return false;
+        const int ks = (int) pp.keyswitchBase;
+        if (ks > 0 && pitch >= ks && pitch <= ks + 4)
+        {
+            m5Articulation();
+            m5Key = pitch - ks;
+            return true;
+        }
+        const int art = m5Articulation();
+        if (art == artPizz || art == artBartok || art == artLeftPizz)
+        {
+            m5PluckNote (pitch, vel127, art);
+            return true;
+        }
+        if (art == artHarmonic && m5Harmonic (pitch, vel127))
+            return true;
+        for (int k = 0; k < 4; ++k) // an ordinary note: the light finger is lifted
+            if (vn->s[k].touchOn)
+                vn->s[k].setTouch (0.0, 0.0);
+        return false;
+    }
+
+    int m5NoteOff (int pitch)
+    {
+        if (pitch < 0 || pitch > 127)
+            return pitch;
+        if (m5Pluck[pitch] > 0)
+        {
+            m5[m5Pluck[pitch] - 1].offAt = t;
+            m5Pluck[pitch] = 0;
+            return -1;
+        }
+        if (m5Harm[pitch] > 0)
+        {
+            const int fp = m5Harm[pitch] - 1;
+            m5Harm[pitch] = 0;
+            return fp;
+        }
+        return pitch;
+    }
+
+    void m5PluckNote (int pitch, double vel127, int art)
+    {
+        int s = -1;
+        if (art == artLeftPizz) // the left hand plucks open strings
+            for (int k = 0; k < 4; ++k)
+                if (pitch == (int) openPitch[k])
+                    s = k;
+        if (s < 0)
+            s = chooseString (pitch);
+        Str& S = st[s];
+        const double semis = std::max (0.0, pitch - openPitch[s]);
+        if (semis > 0 && ! inReach (semis))
+            handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
+        S.slideT0 = -1.0;
+        S.target = S.pitch = pitch;
+        S.vibWidthTarget = 0.0;
+        S.lifted = semis == 0;
+        S.noteOn = t;
+        S.bowed = false;
+        vn->s[s].setNote (pitch);
+        if (vn->s[s].touchOn)
+            vn->s[s].setTouch (0.0, 0.0);
+        const double dd = dynFromVel (vel127);
+        const double L = stringLength * std::pow (2.0, -semis / 12.0);
+        M5Str& M = m5[s];
+        M.h = pp.pizzAmpPP * std::pow (pp.pizzAmpFF / pp.pizzAmpPP, dd);
+        M.tau = pp.pizzTau * (1.0 - pp.pizzBright * dd);
+        M.clickAt = M.clickAmp = 0.0;
+        double pointM = pp.pizzPointMM * 1e-3;
+        if (art == artBartok)
+        {
+            M.h *= pp.bartokAmp;
+            M.tau = pp.bartokTau;
+            pointM = pp.bartokPointMM * 1e-3;
+            M.clickAt = 0.3 / vn->s[s].f1; // it swings past the middle and hits the board
+            M.clickAmp = pp.bartokClick * (0.3 + 0.7 * dd);
+        }
+        M.beta = std::clamp (pointM / L, 0.04, 0.5);
+        if (art == artLeftPizz)
+        {
+            M.h *= pp.lhAmp;
+            M.tau = pp.lhTau;
+            M.beta = std::clamp (pp.lhFromNut, 0.04, 0.5); // near the nut: the same comb as near the bridge
+        }
+        M.impulse = pp.pizzImpulse * vel127 / 127.0;
+        M.pluckAt = t + pp.pizzTouch;
+        M.offAt = -1.0;
+        lastString = s;
+        lastOn = t;
+        m5Pluck[pitch & 127] = s + 1;
+    }
+
+    // per string per sample: runs a due pluck and returns the plucking/lifting finger's loss
+    double m5Damp (int s)
+    {
+        M5Str& M = m5[s];
+        double dmp = 0.0;
+        if (M.pluckAt >= 0.0)
+        {
+            if (t < M.pluckAt)
+                dmp = pp.pizzTouchDamp;
+            else
+            {
+                M.pluckAt = -1.0;
+                vn->s[s].setBeta (M.beta);
+                if (pp.pizzModel < 0.5)
+                    vn->s[s].pluckImpulse (M.impulse);
+                else
+                    vn->s[s].pluck (M.h, M.tau, M.clickAt, M.clickAmp, pp.pizzPull, pp.bartokClickTime, pp.bartokKick);
+            }
+        }
+        if (M.beta > 0.0 && ! st[s].lifted) // a stopped plucked note: the fingertip is a lossy stop
+            dmp = std::max (dmp, pp.pizzStopLoss);
+        if (M.offAt >= 0.0 && ! st[s].lifted)
+            dmp = std::max (dmp, pp.pizzOffDamp);
+        return dmp;
+    }
+
+    // a bowed harmonic takes a light bow: the bow sees only the segment up to the light finger, so the
+    // playable force window is lower (Fmax ~ 1/beta). The ear listens for the harmonic, not the
+    // string's fundamental, so its multiple-slip correction is held off on a touched string.
+    double m5Force (int s)
+    {
+        if (! vn->s[s].touchOn)
+            return 1.0;
+        st[s].ear = 1.0;
+        st[s].earHigh = 0;
+        return pp.harmForce;
+    }
+
+    double m5Beta (int s)
+    {
+        if (st[s].bowed)
+            m5[s].beta = 0.0;
+        return m5[s].beta;
+    }
+
+    // Harmonic: the string and node, then the ordinary bowed note on the finger pitch
+    bool m5Harmonic (int pitch, double vel127)
+    {
+        int s = -1, n = 0;
+        for (int k : { 2, 3, 4 })
+        {
+            for (int q = 0; q < 4 && s < 0; ++q)
+            {
+                const int c = (q + lastString) % 4; // from the string in use
+                if (std::abs (pitch - (openPitch[c] + 12.0 * std::log2 ((double) k))) < 0.5)
+                    s = c;
+            }
+            if (s >= 0)
+            {
+                n = k;
+                break;
+            }
+        }
+        double finger, x;
+        if (s >= 0)
+        {
+            finger = openPitch[s];
+            x = 1.0 - 1.0 / n;
+        }
+        else
+        {
+            finger = pitch - 24; // artificial: the stopped note, the light finger a fourth above
+            if (finger < openPitch[0] + 1)
+                return false;
+            s = chooseString ((int) finger);
+            if (finger - openPitch[s] < 1 || finger - openPitch[s] > 12)
+                return false;
+            x = 0.75;
+        }
+        for (int k = 0; k < 4; ++k)
+            if (k != s && vn->s[k].touchOn)
+                vn->s[k].setTouch (0.0, 0.0);
+        m5Busy = true;
+        m5String = s;
+        noteOn ((int) finger, vel127);
+        m5String = -1;
+        m5Busy = false;
+        vn->s[s].setTouch (x, pp.harmTouch * vn->s[s].d.Z);
+        m5Harm[pitch & 127] = (int) finger + 1;
+        return true;
     }
 };
 } // namespace o2
