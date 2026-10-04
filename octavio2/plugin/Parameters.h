@@ -14,6 +14,7 @@ inline const juce::ParameterID octave { "octave", 1 };
 inline const juce::ParameterID velocityCurve { "velocityCurve", 1 };
 inline const juce::ParameterID vibrato { "vibrato", 1 };
 inline const juce::ParameterID brightness { "brightness", 1 };
+inline const juce::ParameterID hiss { "hiss", 1 };
 inline const juce::ParameterID room { "room", 1 };
 inline const juce::ParameterID reverb { "reverb", 1 };
 inline const juce::ParameterID volume { "volume", 1 };
@@ -54,6 +55,6 @@ public:
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
-    std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute;
+    std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss;
 };
 } // namespace octavio2::params

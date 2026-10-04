@@ -39,6 +39,6 @@ The same layout carries over to the orchestra plugin. Change the product and art
 
 ## Making a release
 
-1. Set the version in `project(Octavio VERSION …)` in `CMakeLists.txt` and write the notes in `docs/releases/v<version>.md`, in a pull request.
+1. Set the version in `VERSION` of `juce_add_plugin(Octavio2 …)` in `octavio2/CMakeLists.txt` (Octavio 2, from 2.0 on; v1.x tags still ship Octavio 1) and write the notes in `docs/releases/v<version>.md`, in a pull request.
 2. After it is merged, open **Actions > Build > Run workflow**, choose `main`, tick **release** and start it. (Pushing a `v<version>` tag to that commit does the same.)
 3. The run checks everything on all three platforms, then the Publish release job tags the commit and creates the release with the zips attached. If the release was already made by hand on GitHub, the job only attaches the zips.

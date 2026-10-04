@@ -29,7 +29,7 @@ ToneView::ToneView (Processor& p)
               { "Levaggi", "dark, round" },
               { "Iowa", "from recordings" } }),
       strings (nullptr, {}, previewItems ({ "Synthetic", "Gut", "Steel" })),
-      rosin (nullptr, {}, previewItems ({ "Light", "Standard", "Dark", "Baroque" })),
+      rosin (&p.getParameters(), params::id::hiss.getParamID(), previewItems ({ "Natural", "3x", "6x" })),
       bow (nullptr, {}, previewItems ({ "Modern", "Baroque" })),
       mute (&p.getParameters(), params::id::mute.getParamID(), previewItems ({ "Off", "Sordino", "Practice" })),
       quality (nullptr, {}, previewItems ({ "High (96 kHz strings)", "Eco" })),
@@ -75,8 +75,8 @@ ToneView::ToneView (Processor& p)
 {
     body.setTooltip ("Measured violin bodies, made full band. Iowa is estimated from recordings.");
     strings.setTooltip ("String types arrive with the styles milestone (M7).");
-    rosin.setPreviewActive (1);
-    rosin.setTooltip ("Rosin types arrive with the second bow-physics milestone (M2).");
+    rosin.setTooltip ("The hiss of the hair sliding on the string. Natural is a real violin's balance as heard "
+                      "in the room; 3x and 6x bring it forward.");
     bow.setTooltip ("The baroque bow arrives with the styles milestone (M7).");
     mute.setTooltip (
         "A mute adds mass to the bridge: sordino veils the tone, the practice mute is for quiet practice.");
@@ -166,7 +166,7 @@ void ToneView::paint (juce::Graphics& g)
     drawPanel (g, { 24, y, 360, 576 }, "Instrument");
     drawLabel (g, "Body (measured violins)", 40, y + 50);
     drawLabel (g, "Strings", 40, y + 282);
-    drawLabel (g, "Rosin", 40, y + 342);
+    drawLabel (g, "Bow hiss", 40, y + 342);
     drawLabel (g, "Bow", 40, y + 402);
     drawLabel (g, "Tuning", 40, y + 462);
     for (int k = 0; k < 2; ++k)

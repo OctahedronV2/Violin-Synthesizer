@@ -86,6 +86,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                                                               "Mute",
                                                               juce::StringArray { "Off", "Con sordino", "Practice" },
                                                               0));
+    // the hair's hiss as it slides (M2, Jake 2026-10-04: natural by default, louder as options)
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::hiss,
+                                                              "Bow Hiss",
+                                                              juce::StringArray { "Natural", "3x", "6x" },
+                                                              0));
     return layout;
 }
 
@@ -105,7 +110,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       movement (s.getRawParameterValue (id::movement.getParamID())),
       distance (s.getRawParameterValue (id::distance.getParamID())),
       bridge (s.getRawParameterValue (id::bridge.getParamID())),
-      mute (s.getRawParameterValue (id::mute.getParamID()))
+      mute (s.getRawParameterValue (id::mute.getParamID())),
+      hiss (s.getRawParameterValue (id::hiss.getParamID()))
 {
 }
 
@@ -127,6 +133,8 @@ o2::EngineSettings Reader::read() const
     e.distance = distance->load();
     e.bridgeHz = bridge->load();
     e.mute = juce::roundToInt (mute->load());
+    static constexpr double hissScale[] { 1.0, 3.0, 6.0 };
+    e.hiss = hissScale[juce::jlimit (0, 2, juce::roundToInt (hiss->load()))];
     return e;
 }
 

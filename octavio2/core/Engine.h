@@ -38,6 +38,7 @@ struct EngineSettings
     double distance = 2.0; // m, 0.5..10
     double bridgeHz = 2900.0; // bridge rocking resonance, 2400 (dark) .. 3600 (bright)
     int mute = 0; // 0 off, 1 con sordino, 2 practice mute
+    double hiss = 1.0; // bow hiss (Params::slipNoise) scale: 1 natural, 3, 6 (M2)
 };
 
 class Engine
@@ -208,6 +209,7 @@ private:
         radiation->setMovement (settings.movement);
         radiation->setDistance (settings.distance);
         radiation->setBridge (settings.bridgeHz, settings.mute);
+        violin->p.slipNoise = hissBase * settings.hiss;
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;
@@ -316,6 +318,7 @@ private:
     }
 
     std::unique_ptr<Violin> violin;
+    double hissBase = Params {}.slipNoise;
     std::unique_ptr<Player> player;
     std::unique_ptr<Radiation> radiation;
     Decim dec, dec2;
