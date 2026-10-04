@@ -391,6 +391,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
             }
     engine->setSettings (currentSettings());
     updateTuning();
+    updateTimeline(); // 2.3
 
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
@@ -474,23 +475,38 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     T.slideFrom.store (static_cast<float> (S.slideFrom));
     T.target.store (static_cast<float> (S.target));
     T.changing.store (pl.changing);
-    T.dynMode.store (pl.manDyn ? 2 : 0);
-    T.vibMode.store (pl.ccVib >= 0.0 ? 2 : 0);
-    T.rateMode.store (pl.ccRate > 0.0 ? 2 : 0);
-    T.contactMode.store (pl.ccContact > 0.0 ? 2 : 0);
+    // 2.3: who is in charge (o2::DimMode, = ui::Mode)
+    T.dynMode.store (pl.userMode[o2::dimDynamics]);
+    T.vibMode.store (pl.userMode[o2::dimVibWidth]);
+    T.rateMode.store (pl.userMode[o2::dimVibRate]);
+    T.contactMode.store (pl.userMode[o2::dimContact]);
+    for (size_t k = 0; k < (size_t) o2::dimCount; ++k)
+        T.dimMode[k].store (pl.userMode[k]);
+    T.ccHolds[o2::dimDynamics].store (pl.manDyn);
+    T.ccHolds[o2::dimVibWidth].store (pl.ccVib >= 0.0);
+    T.ccHolds[o2::dimVibRate].store (pl.ccRate > 0.0);
+    T.ccHolds[o2::dimContact].store (pl.ccContact > 0.0);
+    T.ccHolds[o2::dimPressure].store (pl.pressHeld);
 
     const double now = engine->seconds();
     if (now >= nextHistoryT)
     {
         nextHistoryT = now + 0.01;
         const auto i = T.historyCount.load (std::memory_order_relaxed);
-        T.history[static_cast<size_t> (i % Telemetry::historySize)]
-            = { static_cast<float> (now),
-                static_cast<float> (pl.dEff()),
-                sounding ? static_cast<float> (S.vibWidth) : 0.0f,
-                static_cast<float> (pl.betaFor (s)),
-                static_cast<float> (S.vibRate),
-                sounding };
+        auto& point = T.history[static_cast<size_t> (i % Telemetry::historySize)];
+        point = { static_cast<float> (now),
+                  static_cast<float> (pl.dEff()),
+                  sounding ? static_cast<float> (S.vibWidth) : 0.0f,
+                  static_cast<float> (pl.betaFor (s)),
+                  static_cast<float> (S.vibRate),
+                  sounding };
+        // 2.3: where on the host's timeline, and the player's levels before its shaping
+        double beat = 0.0;
+        point.beat = engine->beatNow (beat) ? beat : -1e9;
+        point.dynBase = static_cast<float> (pl.d);
+        point.vibBase = sounding ? static_cast<float> (pl.baseVibWidth (s)) : 0.0f;
+        point.contactBase = static_cast<float> (pl.baseContact (s));
+        point.rateBase = static_cast<float> (pl.baseVibRate (s));
         T.historyCount.store (i + 1, std::memory_order_release);
     }
 }
@@ -592,6 +608,8 @@ void Processor::getStateInformation (juce::MemoryBlock& destData)
     auto state = parameters.copyState();
     state.removeChild (state.getChildWithName (MidiMap::tag), nullptr);
     state.appendChild (midiMap.toTree(), nullptr);
+    state.removeChild (state.getChildWithName (CurveModel::tag), nullptr); // 2.3
+    state.appendChild (curves.toTree(), nullptr);
     if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -605,6 +623,9 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
         const auto map = state.getChildWithName (MidiMap::tag);
         midiMap.fromTree (map); // none (saved before M6): the Octavio 2 map
         state.removeChild (map, nullptr);
+        const auto drawn = state.getChildWithName (CurveModel::tag); // 2.3: none before 2.3
+        curves.fromTree (drawn);
+        state.removeChild (drawn, nullptr);
         parameters.replaceState (state);
         presets->restoreFromState();
         // M7: the project's Scala tuning
@@ -614,6 +635,53 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
         else
             clearScala();
     }
+}
+// ---------------------------------------------------------------- 2.3 curves
+// Audio thread, each block: the host's timeline and the drawn curves to the engine, and the
+// controller lanes the editor let go of (a badge set back to Auto).
+void Processor::updateTimeline()
+{
+    bool playing = false;
+    double ppq = 0.0;
+    if (auto* head = getPlayHead())
+        if (const auto pos = head->getPosition())
+        {
+            if (const auto p = pos->getPpqPosition())
+            {
+                ppq = *p;
+                playing = pos->getIsPlaying();
+                telemetry.hasTimeline.store (true, std::memory_order_relaxed);
+            }
+            if (const auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
+                telemetry.barLength.store (4.0f * (float) sig->numerator / (float) sig->denominator);
+        }
+    engine->setTimeline (playing, ppq, engineTime (0), (hostBpm > 0.0 ? hostBpm : 120.0) / 60.0);
+    engine->setCurves (curves.forAudio());
+    if (const int release = releaseRequests.exchange (0))
+        for (int k = 0; k < o2::dimCount; ++k)
+            if (release & (1 << k))
+                engine->getPlayer().releaseUser (k);
+    telemetry.playing.store (playing, std::memory_order_relaxed);
+    double beat = 0.0;
+    if (engine->beatNow (beat))
+        telemetry.beat.store (beat, std::memory_order_relaxed);
+}
+
+int Processor::getDimMode (int dim) const
+{
+    return juce::roundToInt (parameters.getRawParameterValue (params::dimModeId (dim).getParamID())->load());
+}
+
+void Processor::setDimMode (int dim, int mode)
+{
+    if (auto* p = parameters.getParameter (params::dimModeId (dim).getParamID()))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) mode));
+        p->endChangeGesture();
+    }
+    if (mode == o2::modeAuto)
+        releaseRequests.fetch_or (1 << dim);
 }
 } // namespace octavio2
 

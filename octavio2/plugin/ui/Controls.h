@@ -48,6 +48,8 @@ public:
 
     void setCaption (const juce::String& c) { caption = c; }
     void setBadge (std::optional<Mode> m) { badge = m; }
+    // 2.3: where the badge sits (this knob's coordinates), for a clickable ModeBadge child
+    juce::Point<float> badgeCentre() const;
     void setColour (juce::Colour c) { colour = c; }
     // a preview of a later control: shown at `value` (0..1) with this text
     void setPreview (float value, const juce::String& text, const juce::String& when);

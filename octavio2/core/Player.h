@@ -25,6 +25,7 @@
 // and drawn curves (CC1/26/19/74) that take over from the player.
 
 #pragma once
+#include "Curves.h" // 2.3
 #include "Strings.h"
 
 namespace o2
@@ -521,9 +522,118 @@ struct Player
     {
         return pp.shapeAmount == 1.0 ? sus : std::clamp (1.0 - (1.0 - sus) * pp.shapeAmount, 0.05, 1.0);
     }
-    // drawn curves (CC lanes) that have taken over a dimension; -1 / false = the player's own
+    // drawn curves (CC lanes) that have taken over a dimension; -1 / false = the player's own.
+    // 2.3: manDyn = a CC1 lane holds the dynamics (Guided or Manual, see userMode below)
     bool manDyn = false;
     double ccDyn = 0.6, ccVib = -1.0, ccRate = -1.0, ccContact = -1.0;
+
+    // ================================================================ 2.3 Auto / Guided / Manual
+    // (core/Curves.h). mode: the plugin's mode parameters per o2::Dim. drawn: the Curves tab's
+    // curve at the beat heard now (0..1, -1 none; the engine sets it). A drawn curve counts only
+    // when its dimension is not Auto; a controller (CC1/26/19/74/22) counts in any mode and makes
+    // Auto Guided. userMode/userVal: what is in charge now and the user's value in the
+    // dimension's unit (refreshUser keeps them). All defaults: the 2.2 player, bit for bit.
+    int mode[dimCount] = {};
+    double drawn[dimCount] = { -1.0, -1.0, -1.0, -1.0, -1.0 };
+    bool pressHeld = false; // a CC22 lane holds the pressure
+    double ccPress = 0.5; // its value, 0..1
+    int userMode[dimCount] = {};
+    double userVal[dimCount] = {};
+
+    // every block (Engine::applySettings): Manual without a lane follows the knobs too
+    void setModes (const int* m)
+    {
+        for (int k = 0; k < dimCount; ++k)
+            mode[k] = std::clamp (m[k], 0, 2);
+        refreshUser();
+    }
+    void setDrawn (int k, double v)
+    {
+        if (drawn[k] != v)
+        {
+            drawn[k] = v;
+            refreshUser();
+        }
+    }
+    // a badge click (back to Auto) or CC121: the controller lane lets go of dimension k
+    void releaseUser (int k)
+    {
+        if (k == dimDynamics)
+            manDyn = false;
+        else if (k == dimVibWidth)
+            ccVib = -1.0;
+        else if (k == dimVibRate)
+            ccRate = -1.0;
+        else if (k == dimContact)
+            ccContact = -1.0;
+        else if (k == dimPressure)
+        {
+            pressHeld = false;
+            pressTrim = 0.0;
+        }
+        refreshUser();
+    }
+    // the value Manual uses when neither a curve nor a controller gives one: the knobs
+    double manualDefault (int k) const
+    {
+        switch (k)
+        {
+            case dimDynamics:
+                return std::clamp (0.6 + pp.dynBias, 0.0, 1.0);
+            case dimVibWidth:
+                return 30.0 * pp.vibAmount;
+            case dimVibRate:
+                return pp.vibRate + pp.vibRateAdd;
+            case dimContact:
+                return std::clamp (0.09 * pp.contactScale, 0.02, 0.3);
+            default:
+                return 0.5;
+        }
+    }
+    void refreshUser()
+    {
+        const int before = userMode[dimDynamics];
+        for (int k = 0; k < dimCount; ++k)
+        {
+            double v = -1.0;
+            if (k < laneCount && drawn[k] >= 0.0 && mode[k] != modeAuto)
+                v = laneToUnit (k, drawn[k]);
+            else if (k == dimDynamics && manDyn)
+                v = ccDyn;
+            else if (k == dimVibWidth && ccVib >= 0.0)
+                v = ccVib;
+            else if (k == dimVibRate && ccRate > 0.0)
+                v = ccRate;
+            else if (k == dimContact && ccContact > 0.0)
+                v = ccContact;
+            else if (k == dimPressure && pressHeld)
+                v = ccPress;
+            if (v >= 0.0)
+                userMode[k] = mode[k] == modeAuto ? modeGuided : mode[k];
+            else
+                userMode[k] = mode[k] == modeManual ? modeManual : modeAuto;
+            userVal[k] = v >= 0.0 ? v : manualDefault (k);
+        }
+        // the dynamics follow the user's value at once (a new stroke or slur reads it too)
+        if (userMode[dimDynamics] != modeAuto)
+            dTarget = userVal[dimDynamics];
+        else if (before != modeAuto)
+            dTarget = std::clamp (dynFromVel (lastVel) + phraseOff, 0.0, 1.0);
+    }
+
+    // What the player would set before its micro-shaping, for the Curves tab's "Guess curves"
+    // and the MIDI export: played back Guided, these give the same performance.
+    double baseVibWidth (int s) const
+    {
+        return userMode[dimVibWidth] != modeAuto ? userVal[dimVibWidth]
+                                                 : st[s].vibWidthTarget * vibScale * pp.vibAmount;
+    }
+    double baseVibRate (int s) const
+    {
+        return userMode[dimVibRate] != modeAuto ? userVal[dimVibRate]
+                                                : pp.vibRate + pp.vibRateDyn * d + st[s].rateAdd + pp.vibRateAdd;
+    }
+    double baseContact (int s) const { return betaFor (s, true); }
 
     struct Str
     {
@@ -825,7 +935,8 @@ struct Player
     void updateEnvelope (int s)
     {
         double e = 0.0;
-        if (! manDyn && pp.phrase > 0.0 && pp.mdvDepth > 0.0 && nHeld > 0 && ! releasing && s >= 0)
+        if (userMode[dimDynamics] != modeManual && pp.phrase > 0.0 && pp.mdvDepth > 0.0 && nHeld > 0 && ! releasing
+            && s >= 0)
             e = swell (st[s]);
         dEnv += (e - dEnv) * std::min (1.0, 1.0 / (fs * 0.05));
     }
@@ -852,13 +963,28 @@ struct Player
     }
 
     // ---------------------------------------------------------------- bow targets from dynamics
-    double betaFor (int s) const
+    // base (2.3): without the player's micro-shaping (quick passages, the swell), for the curves
+    double betaFor (int s, bool base = false) const
     {
-        if (ccContact > 0.0)
-            return ccContact;
+        // 2.3: Manual is the user's value; Guided is it with the player's shaping on top
+        const int um = userMode[dimContact];
+        if (um == modeManual || (um == modeGuided && base))
+            return userVal[dimContact];
+        if (um == modeGuided)
+        {
+            const double cBase = pp.contactPP + (pp.contactFF - pp.contactPP) * d;
+            const double shaping = (quick ? pp.quickContact : 1.0) * contactMM / std::max (1e-3, cBase);
+            return std::clamp (userVal[dimContact] * shaping, 0.02, 0.3);
+        }
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
         if (const double mm = m7ContactMM(); mm > 0.0) // M7: sul ponticello, sul tasto
             return std::clamp (mm * 1e-3 / L, 0.02, 0.3);
+        if (base)
+        {
+            const double cBase = (pp.contactPP + (pp.contactFF - pp.contactPP) * d)
+                * std::pow (L / stringLength, pp.contactFollow) * pp.contactScale * mpeContact;
+            return std::clamp (cBase * 1e-3 / L, 0.02, 0.3);
+        }
         // on a shorter (stopped) string the player moves the bow towards the bridge too
         const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow)
             * pp.contactScale * mpeContact;
@@ -871,8 +997,9 @@ struct Player
         const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
-        const double p
-            = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim + m7Press(),
+        const double p = userMode[dimPressure] == modeManual // 2.3: Manual = the CC22 lane's place
+            ? std::clamp (userVal[dimPressure], 0.02, 0.95)
+            : std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim + m7Press(),
                           0.02,
                           0.95);
         return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
@@ -896,8 +1023,9 @@ struct Player
     // jump: a new stroke takes the dynamics at once; a slur glides there (dynGlide)
     void setStroke (double vel127, bool jump = true)
     {
-        dTarget = manDyn ? ccDyn : std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
-        if (mpeDyn >= 0.0 && ! manDyn) // M7: MPE pressure is the note's dynamics
+        dTarget = userMode[dimDynamics] != modeAuto ? userVal[dimDynamics]
+                                                    : std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
+        if (mpeDyn >= 0.0 && userMode[dimDynamics] == modeAuto) // M7: MPE pressure is the note's dynamics
             dTarget = mpeDyn;
         if (jump)
             d = dTarget;
@@ -970,6 +1098,8 @@ struct Player
         S.rateAdd = pp.vibRateHigh * std::clamp (semis / 12.0, 0.0, 1.5);
         S.vibWidthTarget *= 1.0 + pp.vibStress * noteWeight;
         S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd) * (1.0 + S.wanderR);
+        if (userMode[dimVibRate] != modeAuto) // 2.3: the user's rate (Guided: with the note's wander)
+            S.vibRate = userVal[dimVibRate] * (userMode[dimVibRate] == modeGuided ? 1.0 + S.wanderR : 1.0);
     }
 
     // ---------------------------------------------------------------- M4: note decisions
@@ -1117,8 +1247,9 @@ struct Player
             // a slur keeps the bow going; each note's velocity sets where the dynamics go
             noteNow = pitch;
             const double dNew = std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
-            dTarget = manDyn ? ccDyn : (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
-            if (mpeDyn >= 0.0 && ! manDyn) // M7: MPE pressure is the note's dynamics
+            dTarget = userMode[dimDynamics] != modeAuto ? userVal[dimDynamics]
+                                                        : (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
+            if (mpeDyn >= 0.0 && userMode[dimDynamics] == modeAuto) // M7: MPE pressure is the note's dynamics
                 dTarget = mpeDyn;
             nHeld = 0; // slurred-over notes no longer sound
             m7PulseAt = t; // M7: a portato note's pulse
@@ -1234,7 +1365,18 @@ struct Player
         else if (cc == 21)
             centsTrim = v127 - 64.0;
         else if (cc == 22)
+        {
             pressTrim = (v127 - 64.0) / 64.0 * 0.3;
+            // 2.3: the pressure lane: an offset (Guided, as before) or the place itself (Manual)
+            ccPress = v127 / 127.0;
+            if (! pressHeld)
+            {
+                pressHeld = true;
+                refreshUser();
+            }
+            else
+                userVal[dimPressure] = ccPress;
+        }
         else if (cc == 23)
             biteTrim = std::max (0.0, v127 - 64.0) / 64.0;
         else if (cc == 24)
@@ -1246,22 +1388,36 @@ struct Player
         // and phrasing), CC26 vibrato width (0.5 cents p-p per step), CC19 vibrato rate
         // (4 + 4 * v/127 Hz), CC74 contact point (127 = 2% of the string from the bridge,
         // 0 = 22%). CC121 (reset all controllers) gives every dimension back to the player.
+        // 2.3: a lane makes an Auto dimension Guided (the player shapes around it); the mode
+        // parameter can make it Manual (exactly the lane). A drawn curve in the plugin wins.
         else if (pp.drawnCurves > 0.0 && cc == 1)
         {
             manDyn = true;
             ccDyn = v127 / 127.0;
-            dTarget = ccDyn;
+            refreshUser(); // sets dTarget
         }
         else if (pp.drawnCurves > 0.0 && cc == 26)
-            ccVib = v127 * 0.5;
+        {
+            ccVib = laneToUnit (dimVibWidth, v127 / 127.0);
+            refreshUser();
+        }
         else if (pp.drawnCurves > 0.0 && cc == 19)
-            ccRate = 4.0 + 4.0 * v127 / 127.0;
+        {
+            ccRate = laneToUnit (dimVibRate, v127 / 127.0);
+            refreshUser();
+        }
         else if (pp.drawnCurves > 0.0 && cc == 74)
-            ccContact = 0.02 + 0.2 * (1.0 - v127 / 127.0);
+        {
+            ccContact = laneToUnit (dimContact, v127 / 127.0);
+            refreshUser();
+        }
         else if (cc == 121)
         {
             manDyn = false;
             ccVib = ccRate = ccContact = -1.0;
+            pressHeld = false; // 2.3
+            pressTrim = 0.0;
+            refreshUser();
             bendCents = 0.0; // M6
         }
     }
@@ -1471,7 +1627,11 @@ struct Player
                 const double age = t - S.noteOn;
                 const double q = S.vibSqueeze, delay = pp.vibDelay * pp.vibDelayScale * q;
                 const double env = std::clamp ((age - delay) / (pp.vibBloom * pp.vibDelayScale * q), 0.0, 1.0);
-                double w = S.vibWidthTarget * vibScale * pp.vibAmount * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
+                // 2.3: Guided takes the level from the user, the bloom, growth, wander and taper
+                // stay the player's; Manual is the user's width as it is (below)
+                const double level = userMode[dimVibWidth] == modeGuided ? userVal[dimVibWidth]
+                                                                         : S.vibWidthTarget * vibScale * pp.vibAmount;
+                double w = level * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
                 w *= std::min (pp.vibGrowMax, pp.vibGrowStart + pp.vibGrow * std::max (0.0, age - delay));
                 const double taper = (vibEnd >= 0.0 ? vibEnd : pp.vibTaper) * q;
                 if (S.planEnd > 0.0 && taper > 0.0)
@@ -1479,18 +1639,21 @@ struct Player
                     const double k = std::clamp ((S.planEnd - t) / taper * 1.5 - 0.5, 0.0, 1.0);
                     w *= k * k * (3 - 2 * k);
                 }
-                if (ccVib >= 0.0)
-                    w = ccVib;
+                if (userMode[dimVibWidth] == modeManual) // 2.3 (2.2: any CC26 lane)
+                    w = userVal[dimVibWidth];
                 S.vibWidth += (w - S.vibWidth) * std::min (1.0, dt / 0.05);
                 S.vibPhase += 2 * pi * S.vibRate * dt;
                 if (S.vibPhase > 2 * pi)
                 {
                     S.vibPhase -= 2 * pi;
-                    // per-cycle wander: no two cycles alike
-                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd)
-                        * (1.0 + S.wanderR + 0.04 * rng.gauss());
-                    if (ccRate > 0.0)
-                        S.vibRate = ccRate;
+                    // per-cycle wander: no two cycles alike (2.3: around the user's rate when Guided)
+                    const double jitter = 0.04 * rng.gauss();
+                    const double rate = userMode[dimVibRate] == modeGuided
+                        ? userVal[dimVibRate]
+                        : pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd;
+                    S.vibRate = rate * (1.0 + S.wanderR + jitter);
+                    if (userMode[dimVibRate] == modeManual)
+                        S.vibRate = userVal[dimVibRate];
                 }
             }
             else
@@ -1719,7 +1882,7 @@ struct Player
         if (nHeld > 0 && held[nHeld - 1].pitch == pitch)
         {
             mpeDyn = v;
-            if (v >= 0.0 && ! manDyn)
+            if (v >= 0.0 && userMode[dimDynamics] == modeAuto)
                 dTarget = std::clamp (v, 0.0, 1.0);
         }
     }

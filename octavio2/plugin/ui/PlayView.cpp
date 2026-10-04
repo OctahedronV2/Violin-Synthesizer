@@ -14,11 +14,6 @@ juce::String contactName (float beta)
     return beta < 0.06f ? "sul ponticello side" : beta > 0.16f ? "sul tasto side" : "normal";
 }
 
-Mode modeOf (int m)
-{
-    return m == 2 ? Mode::manual : m == 1 ? Mode::guided : Mode::autoMode;
-}
-
 void line (juce::Graphics& g, float x0, float y0, float x1, float y1, juce::Colour c, float w = 1)
 {
     g.setColour (c);
@@ -85,23 +80,28 @@ PlayView::PlayView (Processor& p)
                       { "Sordino" } })
 {
     dynamics.setCaption ("Level, from velocity");
-    dynamics.setBadge (Mode::autoMode);
+    // 2.3: the Dynamics, Vibrato, Portamento and String preference badges are clickable
+    // ModeBadges (children of this view, placed in resized)
     expression.setCaption ("How much the player shapes");
-    expression.setBadge (Mode::autoMode);
     expression.setTooltip ("Phrasing: how much the player shapes the line (phrase arcs, swells, stresses). 0: every "
                            "note at its velocity's level.");
     vibrato.setCaption ("Width scale on context vibrato");
-    vibrato.setBadge (Mode::autoMode);
     portamento.setCaption ("Slides between positions");
-    portamento.setBadge (Mode::autoMode);
     portamento.setTooltip ("How slowly the finger slides when the hand shifts position. 0: clean shifts.");
     stringPreference.setCaption (juce::String::fromUTF8 ("Bright ←  → dark"));
-    stringPreference.setBadge (Mode::autoMode);
     stringPreference.setTooltip (
         "Bright: low positions and higher strings. Dark: high positions on the lower strings.");
     room.setCaption ("Room and distance");
     for (auto* k : { &dynamics, &expression, &vibrato, &portamento, &stringPreference, &room })
         addAndMakeVisible (k);
+    for (auto* b : { &dynamicsBadge,
+                     &vibratoBadge,
+                     &portamentoBadge,
+                     &stringPreferenceBadge,
+                     &contactBadge,
+                     &vibratoNowBadge,
+                     &pressureNowBadge })
+        addAndMakeVisible (b);
     articulation.setLayout (0, 30, 4);
     articulation.setTooltip ("The player picks the articulation from how you play (Auto). Choosing one arrives with "
                              "the player milestone (M4).");
@@ -129,17 +129,38 @@ void PlayView::resized()
     }
     articulation.setBounds (130, juce::roundToInt (646 - top), 1050, 30);
     articulation.setVisible (! s);
+    // 2.3: the clickable badges, where the knobs and panels draw them
+    const std::pair<ModeBadge*, Knob*> onKnobs[] = { { &dynamicsBadge, &dynamics },
+                                                     { &vibratoBadge, &vibrato },
+                                                     { &portamentoBadge, &portamento },
+                                                     { &stringPreferenceBadge, &stringPreference } };
+    for (auto [b, k] : onKnobs)
+    {
+        b->placeAt (k->getPosition().toFloat() + k->badgeCentre());
+        b->setVisible (! s);
+    }
+    // the fingerboard's Contact readout and the Now panel's Vibrato and Bow rows (paintFingerboard,
+    // paintNow)
+    contactBadge.placeAt ({ 24 + 18 + 3 * 146 + 7 * 7.6f + 14, 116 - top + 318 - 36 - 4 });
+    auto nowRow = [] (const char* label, int row) -> juce::Point<float>
+    {
+        return { 800 + 16 + juce::GlyphArrangement::getStringWidth (Fonts::sans (12), label) + 14,
+                 116 - top + 118 + 34.0f * row - 2 };
+    };
+    vibratoNowBadge.placeAt (nowRow ("Vibrato", 1));
+    pressureNowBadge.placeAt (nowRow ("Bow speed / force", 2));
+    vibratoNowBadge.setVisible (! s);
+    pressureNowBadge.setVisible (! s);
 }
 
 void PlayView::updateBadges()
 {
-    // a drawn curve (CC lane) takes its dimension over; a String preference guides the fingering
-    const auto& T = processor.getTelemetry();
-    dynamics.setBadge (modeOf (T.dynMode.load()));
-    vibrato.setBadge (modeOf (std::max (T.vibMode.load(), T.rateMode.load())));
-    const float pref
-        = processor.getParameters().getRawParameterValue (params::id::stringPreference.getParamID())->load();
-    stringPreference.setBadge (std::abs (pref) >= 0.5f ? Mode::guided : Mode::autoMode);
+    // 2.3: the badges are ModeBadges (they follow the modes themselves); the Dynamics card says
+    // who sets the level
+    const auto dm = ModeBadge::displayed (processor, o2::dimDynamics);
+    dynamics.setCaption (dm == Mode::autoMode     ? "Level, from velocity"
+                             : dm == Mode::guided ? "Your curve, the player's swells"
+                                                  : "Exactly your curve or CC1");
 }
 
 void PlayView::timerCallback()
@@ -177,7 +198,7 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
 {
     const auto& T = processor.getTelemetry();
     const float x = r.getX(), y = r.getY(), w = r.getWidth(), h = r.getHeight();
-    drawPanel (g, r, "What the player is doing", "live view");
+    drawPanel (g, r, "What the player is doing", "A / G / M: who is in charge (click a badge to change it)");
     const float nut = x + 70, bridge = x + w - 150, L = bridge - nut;
     const float boardTop = y + 64, spN = 22, spB = 30, cy = boardTop + 70;
     const int active = T.note.load() >= 0 ? T.string.load() : -1;
@@ -368,7 +389,7 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
           Mode::autoMode },
         { "Contact",
           juce::String (beta, 2) + juce::String::fromUTF8 (" · ") + contactName (beta),
-          modeOf (T.contactMode.load()) },
+          std::nullopt }, // 2.3: contactBadge, a clickable ModeBadge
         { "Bow left", juce::String (juce::roundToInt (left)) + " of 62 cm", std::nullopt },
     };
     float rx = x + 18;
@@ -472,7 +493,11 @@ void PlayView::paintNow (juce::Graphics& g, juce::Rectangle<float> r)
         drawText (g, row.value, x + w - 16, ry + 2, Fonts::sans (12.5f), colours::text, juce::Justification::right);
         const float bx = x + 16 + juce::GlyphArrangement::getStringWidth (Fonts::sans (12), row.label) + 14;
         if (row.badge)
-            drawBadge (g, { bx, ry - 2 }, Mode::autoMode);
+        {
+            // 2.3: Vibrato and Bow speed / force have clickable ModeBadges (vibratoNowBadge, pressureNowBadge)
+            if (juce::String (row.label) != "Vibrato" && juce::String (row.label) != "Bow speed / force")
+                drawBadge (g, { bx, ry - 2 }, Mode::autoMode);
+        }
         else
         {
             g.setColour (helmColour);

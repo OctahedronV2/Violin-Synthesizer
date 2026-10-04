@@ -1,4 +1,5 @@
 #include "MidiView.h"
+#include "ModeBadge.h"
 
 namespace octavio2::ui
 {
@@ -186,6 +187,23 @@ public:
         remove.setTooltip ("Remove this row.");
         for (auto* c : std::initializer_list<juce::Component*> { &target, &lo, &hi, &invert, &remove })
             addAndMakeVisible (c);
+        // 2.3: a row driving one of the player's dimensions shows who is in charge (click to choose)
+        if (const int k = dimOf (e.target); k >= 0)
+        {
+            badge = std::make_unique<ModeBadge> (view.processor, k);
+            addAndMakeVisible (*badge);
+        }
+    }
+
+    // 2.3: the o2::Dim a player target drives, or -1
+    static int dimOf (int target)
+    {
+        return target == 1 ? o2::dimDynamics
+            : target == 26 ? o2::dimVibWidth
+            : target == 19 ? o2::dimVibRate
+            : target == 74 ? o2::dimContact
+            : target == 22 ? o2::dimPressure
+                           : -1;
     }
 
     juce::String rangeText (float x) const
@@ -209,6 +227,8 @@ public:
         hi.setBounds (420, 4, 62, rowH - 9);
         invert.setBounds (490, 3, 30, rowH - 7);
         remove.setBounds (getWidth() - 30, 3, 26, rowH - 7);
+        if (badge != nullptr)
+            badge->placeAt ({ 538, 14 });
     }
 
     void paint (juce::Graphics& g) override
@@ -231,12 +251,10 @@ public:
         drawText (g, MidiMap::sourceName (entry.cc), 64, 19, Fonts::sans (11.5f), colours::muted);
         // who has the dimension now (the drawn curves take it over from the player)
         const int t = entry.target;
-        const int k = t == 1 ? 0 : t == 26 ? 1 : t == 19 ? 2 : t == 74 ? 3 : -1;
-        if (k >= 0)
+        if (const int k = dimOf (t); k >= 0) // 2.3: the badge is a ModeBadge child
         {
-            const bool taken = view.shownTaken[(size_t) k];
-            drawBadge (g, { 538, 14 }, taken ? Mode::guided : Mode::autoMode);
-            drawText (g, taken ? "guided" : "auto", 550, 18, Fonts::sans (11), colours::muted);
+            const int m = (int) ModeBadge::displayed (view.processor, k);
+            drawText (g, m == 2 ? "manual" : m == 1 ? "guided" : "auto", 552, 18, Fonts::sans (11), colours::muted);
         }
         else if (t == MidiMap::slurPedal)
             drawText (g,
@@ -261,6 +279,7 @@ public:
     juce::ComboBox target;
     DragValue lo, hi;
     Pill invert, remove;
+    std::unique_ptr<ModeBadge> badge; // 2.3
 };
 
 //==============================================================================
@@ -521,12 +540,13 @@ void MidiView::timerCallback()
         rebuildRows();
 
     // what the player does with the drawn curves now, and the pedal
-    const auto& pl = processor.getEngine().getPlayer();
-    const std::array<bool, 4> taken { pl.manDyn, pl.ccVib >= 0.0, pl.ccRate >= 0.0, pl.ccContact >= 0.0 };
+    std::array<int, o2::dimCount> modes {}; // 2.3: what each dimension's badge shows
+    for (int k = 0; k < o2::dimCount; ++k)
+        modes[(size_t) k] = (int) ModeBadge::displayed (processor, k);
     const bool pedal = processor.isPedalDown();
-    if (taken != shownTaken || pedal != shownPedal)
+    if (modes != shownModes || pedal != shownPedal)
     {
-        shownTaken = taken;
+        shownModes = modes;
         shownPedal = pedal;
         for (auto& r : rows)
             r->repaint();
@@ -580,8 +600,8 @@ void MidiView::paint (juce::Graphics& g)
               Fonts::mono (11),
               colours::muted);
     drawText (g,
-              juce::String::fromUTF8 ("Pitch wheel: bowed notes ± Pitch bend · CC121 gives the curves back to the "
-                                      "player"),
+              juce::String::fromUTF8 ("A CC lane guides its dimension (G) · click a badge for Manual · CC121 "
+                                      "gives it back"),
               x + 16,
               y + 552,
               Fonts::sans (11),

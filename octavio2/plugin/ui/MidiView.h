@@ -52,7 +52,7 @@ private:
     int learnRow = noLearn, learnTarget = 0, learnStart = 0;
     int lastIncoming = 0;
     bool shownPedal = false;
-    std::array<bool, 4> shownTaken {};
+    std::array<int, 5> shownModes {}; // 2.3: per o2::Dim, as its badge shows it
     juce::String incomingText;
 };
 } // namespace octavio2::ui

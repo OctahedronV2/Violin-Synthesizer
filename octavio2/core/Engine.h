@@ -73,6 +73,8 @@ struct EngineSettings
     double tremoloRate = 12.0; // strokes per second (free tremolo)
     int tremoloSync = 0; // 0 free, 1 16ths, 2 16th triplets, 3 32nds (needs tempo)
     double tempo = 0.0; // the host's tempo, bpm (0 = unknown)
+    // 2.3: who is in charge of each dimension (o2::Dim order; o2::DimMode values, 0 = Auto)
+    int dimMode[dimCount] = {};
 };
 
 class Engine
@@ -121,6 +123,8 @@ public:
         head = tail = 0;
         for (int p = 0; p < 128; ++p)
             held[p] = sounding[p] = 0;
+        drawnActive = false; // 2.3: the new player has no curve yet
+        curveLeft = curveEvery;
         applySettings();
     }
 
@@ -191,6 +195,11 @@ public:
             for (int i = 0; i < m; ++i)
             {
                 dispatch();
+                if (--curveLeft <= 0) // 2.3: the drawn curves, every millisecond
+                {
+                    curveLeft = curveEvery;
+                    applyCurves();
+                }
                 double vb[4], fb[4];
                 player->tick (vb, fb);
                 const int over = (int) std::lround (violin->p.fs / rate);
@@ -288,6 +297,31 @@ public:
     const Trace& traceEntry (uint64_t i) const { return trace[i & (traceSize - 1)]; }
     uint64_t traceCount() const { return traceWritten.load (std::memory_order_acquire); }
 
+    // ---------------------------------------------------------------- 2.3 drawn curves
+    // Audio thread, once per block. curves: the set to follow (nullptr: none), valid until the
+    // next call. The host's timeline: playing, and the beat of engine sample atClock as the
+    // events use it (the engine hears it latencySamples later). Stopped: the curves rest.
+    void setCurves (const CurveSet* c)
+    {
+        if (c != curves)
+            for (auto& h : curveHint)
+                h = -1;
+        curves = c;
+    }
+    void setTimeline (bool playing, double ppqAtClock, int64_t atClock, double beatsPerSecond)
+    {
+        timelinePlaying = playing && beatsPerSecond > 0.0;
+        timelinePpq = ppqAtClock;
+        timelineClock = atClock;
+        timelineBeatsPerSample = beatsPerSecond / rate;
+    }
+    // the beat heard now, if the timeline plays
+    bool beatNow (double& beat) const
+    {
+        beat = timelinePpq + (double) (clock - latencySamples() - timelineClock) * timelineBeatsPerSample;
+        return timelinePlaying;
+    }
+
     // for tests and the renderer
     Player& getPlayer() { return *player; }
     Violin& getViolin() { return *violin; }
@@ -370,6 +404,7 @@ private:
         player->pp.tremoloRate = settings.tremoloRate;
         player->pp.tremoloSync = settings.tremoloSync;
         player->pp.tempo = settings.tempo;
+        player->setModes (settings.dimMode); // 2.3
         applyTuning();
     }
 
@@ -559,6 +594,24 @@ private:
         }
     }
 
+    // 2.3: the drawn curves at the beat heard now, to the player (only while the timeline plays)
+    void applyCurves()
+    {
+        double beat = 0.0;
+        if (curves != nullptr && beatNow (beat))
+        {
+            for (int k = 0; k < laneCount; ++k)
+                player->setDrawn (k, curves->lane[k].n > 0 ? curves->lane[k].at (beat, curveHint[k]) : -1.0);
+            drawnActive = true;
+        }
+        else if (drawnActive)
+        {
+            for (int k = 0; k < laneCount; ++k)
+                player->setDrawn (k, -1.0);
+            drawnActive = false;
+        }
+    }
+
     void traceNow()
     {
         const Player& p = *player;
@@ -635,5 +688,13 @@ private:
     Trace trace[traceSize] = {};
     std::atomic<uint64_t> traceWritten { 0 };
     int traceLeft = traceEvery;
+    // 2.3 drawn curves
+    static constexpr int curveEvery = 48; // samples (1 ms)
+    const CurveSet* curves = nullptr;
+    int curveHint[laneCount] = { -1, -1, -1, -1 };
+    int curveLeft = curveEvery;
+    bool timelinePlaying = false, drawnActive = false;
+    double timelinePpq = 0.0, timelineBeatsPerSample = 0.0;
+    int64_t timelineClock = 0;
 };
 } // namespace o2

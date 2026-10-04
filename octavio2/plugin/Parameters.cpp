@@ -100,6 +100,20 @@ const juce::StringArray& micNames()
     return names;
 }
 
+// 2.3
+const juce::ParameterID& dimModeId (int dim)
+{
+    static const juce::ParameterID* ids[o2::dimCount]
+        = { &id::modeDynamics, &id::modeVibrato, &id::modeVibratoRate, &id::modeContact, &id::modePressure };
+    return *ids[juce::jlimit (0, o2::dimCount - 1, dim)];
+}
+
+const juce::StringArray& dimModeNames()
+{
+    static const juce::StringArray names { "Auto", "Guided", "Manual" };
+    return names;
+}
+
 namespace
 {
 std::unique_ptr<juce::AudioParameterFloat> floatParam (const juce::ParameterID& id,
@@ -210,6 +224,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::contactStyle, "Contact", contactNames(), 0));
     layout.add (floatParam (id::tremoloSpeed, "Tremolo Speed", { 4.0f, 24.0f }, 12.0f, "/s", 1));
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::tremoloSync, "Tremolo Sync", tremoloSyncNames(), 0));
+    // ---- 2.3 curves (append only): Auto = the player decides (the 2.2 sound), Guided = your
+    // curve or controller with the player's shaping on top, Manual = exactly your curve
+    static const char* modeNames[o2::dimCount]
+        = { "Dynamics Mode", "Vibrato Width Mode", "Vibrato Rate Mode", "Contact Point Mode", "Bow Pressure Mode" };
+    for (int k = 0; k < o2::dimCount; ++k)
+        layout.add (std::make_unique<juce::AudioParameterChoice> (dimModeId (k), modeNames[k], dimModeNames(), 0));
     return layout;
 }
 
@@ -261,6 +281,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       tremoloSpeed (s.getRawParameterValue (id::tremoloSpeed.getParamID())),
       tremoloSync (s.getRawParameterValue (id::tremoloSync.getParamID()))
 {
+    for (int k = 0; k < o2::dimCount; ++k) // 2.3
+        dimModes[(size_t) k] = s.getRawParameterValue (dimModeId (k).getParamID());
 }
 
 o2::EngineSettings Reader::read() const
@@ -312,6 +334,8 @@ o2::EngineSettings Reader::read() const
     e.contactStyle = juce::roundToInt (contactStyle->load());
     e.tremoloRate = tremoloSpeed->load();
     e.tremoloSync = juce::roundToInt (tremoloSync->load());
+    for (int k = 0; k < o2::dimCount; ++k) // 2.3
+        e.dimMode[k] = juce::roundToInt (dimModes[(size_t) k]->load());
     return e;
 }
 

@@ -112,7 +112,8 @@ void Presets::setUserFolder (const juce::File& f)
 bool Presets::isPerformanceParameter (const juce::String& id)
 {
     static const juce::StringArray ids { "mode", "octave", "bendRange", "mpe", "mpeBendRange" };
-    return ids.contains (id);
+    // 2.3: who is in charge of each dimension belongs to the project's curves, not the sound
+    return ids.contains (id) || id.startsWith ("mode");
 }
 
 void Presets::refresh()

@@ -59,6 +59,7 @@ juce_add_binary_data(Octavio2Data
 set_target_properties(Octavio2Data PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 target_sources(Octavio2 PRIVATE
+    plugin/Curves.cpp
     plugin/MidiMap.cpp
     plugin/Parameters.cpp
     plugin/Presets.cpp
@@ -68,6 +69,7 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/CurvesView.cpp
     plugin/ui/Keyboard.cpp
     plugin/ui/MidiView.cpp
+    plugin/ui/ModeBadge.cpp
     plugin/ui/NoteTrack.cpp
     plugin/ui/ArticulationView.cpp
     plugin/ui/BowView.cpp
