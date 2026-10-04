@@ -20,6 +20,8 @@
 #include "../core/Wav.h"
 #include "Midi.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -67,6 +69,163 @@ static void writeStereo (const std::string& path, const std::vector<float>& l, c
 static const char* halls[] = { "arvedi-near",  "arvedi-far",   "detmold",          "church",
                                "maida-vale-4", "maida-vale-5", "wdr-control-room", "wdr-studio" };
 
+// experiments: any of the strings' and bow's continuous Params
+static void stringOpts (Params& p)
+{
+#define O(name) p.name = opt (#name, p.name)
+    O (muS);
+    O (muD);
+    O (v0);
+    O (aT);
+    O (bT);
+    O (cT);
+    O (tauG);
+    O (ya);
+    O (xi);
+    O (bowWidth);
+    O (hairStiffness);
+    O (hairEnds);
+    O (sigma0);
+    O (sigma1);
+    O (zba);
+    p.epIters = (int) opt ("epIters", p.epIters);
+    O (hairDamping);
+    O (grain);
+    O (grainHz);
+    O (grainFade);
+    O (tuneCents);
+    O (earCarry);
+    O (slipNoise);
+    O (slipNoiseHz);
+    O (slipNoiseExp);
+    O (slipNoiseFade);
+    O (slipNoiseOut);
+    O (torsionSpeed);
+    O (torsionImpedance);
+    O (torsionQ);
+    O (fingerLoss);
+    O (admScale);
+#undef O
+}
+
+// PlayerParams fields given on the command line
+static void playerOpts (PlayerParams& q)
+{
+#define O(name) q.name = opt (#name, q.name)
+    O (velLo);
+    O (velHi);
+    O (velCurve);
+    O (speedLo);
+    O (speedRange);
+    O (speedCurve);
+    O (contactPP);
+    O (contactFF);
+    O (cLower);
+    O (cUpper);
+    O (posLo);
+    O (posRange);
+    O (forceCap);
+    O (tiltPP);
+    O (accel);
+    O (accelFF);
+    O (landTime);
+    O (biteFF);
+    O (biteTime);
+    O (changeDip);
+    O (liveDistribute);
+    O (retakeAfter);
+    O (retakeRoom);
+    O (retakeMin);
+    O (budgetSoft);
+    O (strokeTaper);
+    O (taperDepth);
+    O (taperLiveMax);
+    O (releaseTime);
+    O (crossTime);
+    O (bowLength);
+    O (shiftBase);
+    O (shiftPerSemi);
+    O (shiftLighten);
+    O (vibDelay);
+    O (vibBloom);
+    O (vibWidthLo);
+    O (vibWidthHi);
+    O (vibRate);
+    O (vibRateDyn);
+    O (vibGrowStart);
+    O (vibGrow);
+    O (vibGrowMax);
+    O (vibTaper);
+    O (vibPosition);
+    O (vibShort);
+    O (vibWander);
+    O (liftAfter);
+    O (liftDamp);
+    O (liftDampTime);
+    O (chordWindow);
+    O (speedMap);
+    O (contactFollow);
+    O (speedPP);
+    O (speedFF);
+    O (slurFollow);
+    O (slurMaxNotes);
+    O (slurMaxTime);
+    O (slurAccent);
+    O (shapeIOI);
+    O (stopBelow);
+    O (forceSus);
+    O (forceTau);
+    O (forceHold);
+    O (stopAccel);
+    O (stopForce);
+    O (stopTime);
+    O (strokeSus);
+    O (quickIOI);
+    O (quickRun);
+    O (quickP);
+    O (qForceSus);
+    O (qForceTau);
+    O (qForceHold);
+    O (qStrokeSus);
+    O (qStrokeTau);
+    O (qStopForce);
+    O (qStopTime);
+    O (qStopAccel);
+    O (stopDamp);
+    O (openMute);
+    O (openMuteTime);
+    O (qStopDamp);
+    O (quickContact);
+    O (strokeTau);
+    O (dynGlide);
+    O (reg55);
+    O (reg61);
+    O (reg67);
+    O (reg73);
+    O (reg79);
+    O (reg85);
+    O (reg91);
+    O (reg97);
+    O (speedG);
+    O (speedD);
+    O (speedA);
+    O (speedE);
+    O (crossBite);
+    O (crossBiteTime);
+    O (noiseStart);
+    O (noiseRise);
+    O (bite);
+    O (earUp);
+    O (earDown);
+    O (earMax);
+    O (earMin);
+    O (earRelax);
+    O (earWindow);
+    O (earWait);
+    O (earPeriods);
+#undef O
+}
+
 // MIDI -> o2::Engine (the plugin's path) -> stereo
 static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<CcEvent>& ccs)
 {
@@ -79,9 +238,21 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         const WavData w = readWavFile (dir + "/" + name);
         return w.channels.empty() ? std::vector<float>() : w.channels[0];
     };
-    data.body = mono ("body-fullband-balanced-48k.wav");
-    data.bodyLeft = mono ("body-directional-left-48k.wav");
-    data.bodyRight = mono ("body-directional-right-48k.wav");
+    for (const char* b : { "stoppani", "klimke", "levaggi", "iowa" })
+        data.bodies.push_back (mono (std::string ("bodies/") + b + "-48k.wav"));
+    for (const char* m : { "front", "above", "ear", "side" })
+    {
+        const WavData w = readWavFile (dir + "/mics/" + m + "-48k.wav");
+        if (w.channels.size() != 6)
+        {
+            std::fprintf (stderr, "cannot read %s/mics/%s-48k.wav\n", dir.c_str(), m);
+            return 1;
+        }
+        std::array<std::vector<float>, 6> irs;
+        for (size_t k = 0; k < 6; ++k)
+            irs[k] = w.channels[k];
+        data.mics.push_back (irs);
+    }
     for (const char* h : halls)
     {
         const WavData w = readWavFile (dir + "/halls/" + h + ".wav");
@@ -92,7 +263,7 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         }
         data.halls.push_back ({ w.channels[0], w.channels[1] });
     }
-    if (data.body.empty() || data.bodyLeft.empty() || data.bodyRight.empty())
+    if (std::any_of (data.bodies.begin(), data.bodies.end(), [] (const auto& b) { return b.empty(); }))
     {
         std::fprintf (stderr, "cannot read the bodies in %s\n", dir.c_str());
         return 1;
@@ -108,7 +279,19 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.volumeDb = opt ("volume", es.volumeDb);
     es.vibrato = opt ("vibrato", es.vibrato);
     es.velocityCurve = opt ("velCurve", es.velocityCurve);
+    es.violin = (int) opt ("violin", es.violin);
+    es.mic = (int) opt ("mic", es.mic);
+    es.width = opt ("width", es.width);
+    es.movement = opt ("movement", es.movement);
+    es.distance = opt ("distance", es.distance);
+    es.bridgeHz = opt ("bridge", es.bridgeHz);
+    es.mute = (int) opt ("mute", es.mute);
+    if (opts.count ("size"))
+        engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
+    playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
+    stringOpts (engine->getViolin().p); // and any continuous strings Params field
+    engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;
     auto at = [&] (double t)
@@ -226,35 +409,7 @@ int main (int argc, char** argv)
         p.friction = opts["friction"] == "hyperbolic" ? Friction::hyperbolic
             : opts["friction"] == "thermalHyp"        ? Friction::thermalHyp
                                                       : Friction::thermal;
-#define O(name) p.name = opt (#name, p.name)
-    O (muS);
-    O (muD);
-    O (v0);
-    O (aT);
-    O (bT);
-    O (cT);
-    O (tauG);
-    O (ya);
-    O (xi);
-    O (bowWidth);
-    O (hairStiffness);
-    O (hairDamping);
-    O (grain);
-    O (grainHz);
-    O (grainFade);
-    O (tuneCents);
-    O (earCarry);
-    O (slipNoise);
-    O (slipNoiseHz);
-    O (slipNoiseExp);
-    O (slipNoiseFade);
-    O (slipNoiseOut);
-    O (torsionSpeed);
-    O (torsionImpedance);
-    O (torsionQ);
-    O (fingerLoss);
-    O (admScale);
-#undef O
+    stringOpts (p);
     p.bowPoints = (int) opt ("bowPoints", p.bowPoints);
     p.dispersion = opt ("dispersion", p.dispersion) != 0;
     p.torsion = opt ("torsion", p.torsion) != 0;
@@ -267,109 +422,7 @@ int main (int argc, char** argv)
 
     auto player = std::make_unique<Player>();
     PlayerParams& q = player->pp;
-#define O(name) q.name = opt (#name, q.name)
-    O (velLo);
-    O (velHi);
-    O (velCurve);
-    O (speedLo);
-    O (speedRange);
-    O (speedCurve);
-    O (contactPP);
-    O (contactFF);
-    O (cLower);
-    O (cUpper);
-    O (posLo);
-    O (posRange);
-    O (accel);
-    O (accelFF);
-    O (landTime);
-    O (biteFF);
-    O (biteTime);
-    O (changeDip);
-    O (releaseTime);
-    O (crossTime);
-    O (bowLength);
-    O (shiftBase);
-    O (shiftPerSemi);
-    O (shiftLighten);
-    O (vibDelay);
-    O (vibBloom);
-    O (vibWidthLo);
-    O (vibWidthHi);
-    O (vibRate);
-    O (vibRateDyn);
-    O (vibGrowStart);
-    O (vibGrow);
-    O (vibGrowMax);
-    O (vibTaper);
-    O (vibPosition);
-    O (vibShort);
-    O (vibWander);
-    O (liftAfter);
-    O (liftDamp);
-    O (liftDampTime);
-    O (chordWindow);
-    O (speedMap);
-    O (contactFollow);
-    O (speedPP);
-    O (speedFF);
-    O (slurFollow);
-    O (slurMaxNotes);
-    O (slurMaxTime);
-    O (slurAccent);
-    O (shapeIOI);
-    O (stopBelow);
-    O (forceSus);
-    O (forceTau);
-    O (forceHold);
-    O (stopAccel);
-    O (stopForce);
-    O (stopTime);
-    O (strokeSus);
-    O (quickIOI);
-    O (quickRun);
-    O (quickP);
-    O (qForceSus);
-    O (qForceTau);
-    O (qForceHold);
-    O (qStrokeSus);
-    O (qStrokeTau);
-    O (qStopForce);
-    O (qStopTime);
-    O (qStopAccel);
-    O (stopDamp);
-    O (openMute);
-    O (openMuteTime);
-    O (qStopDamp);
-    O (quickContact);
-    O (strokeTau);
-    O (dynGlide);
-    O (reg55);
-    O (reg61);
-    O (reg67);
-    O (reg73);
-    O (reg79);
-    O (reg85);
-    O (reg91);
-    O (reg97);
-    O (speedG);
-    O (speedD);
-    O (speedA);
-    O (speedE);
-    O (crossBite);
-    O (crossBiteTime);
-    O (noiseStart);
-    O (noiseRise);
-    O (bite);
-    O (earUp);
-    O (earDown);
-    O (earMax);
-    O (earMin);
-    O (earRelax);
-    O (earWindow);
-    O (earWait);
-    O (earPeriods);
-#undef O
+    playerOpts (q);
     q.seed = seed;
     player->log = opt ("log", 0) != 0;
     const double sr = 48000.0;

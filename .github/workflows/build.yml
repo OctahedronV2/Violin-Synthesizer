@@ -532,18 +532,21 @@ jobs:
           if [ "$REF_TYPE" = tag ]; then
             tag="$REF_NAME"
           else
-            version=$(sed -nE 's/^project\(Octavio VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
-            [ -n "$version" ] || { echo "No version in CMakeLists.txt"; exit 1; }
+            # Octavio 2 is the product released from 2.0 on; Octavio 1 stays at its last release
+            version=$(sed -nE 's/^ *VERSION ([0-9.]+)$/\1/p' octavio2/CMakeLists.txt | head -1)
+            [ -n "$version" ] || { echo "No version in octavio2/CMakeLists.txt"; exit 1; }
             tag="v$version"
           fi
+          # v1.x tags ship Octavio 1, v2.x and later Octavio 2
+          if [[ "$tag" == v1.* ]]; then zips=(dist/Octavio-*.zip); else zips=(dist/Octavio2-*.zip); fi
           notes="docs/releases/$tag.md"
           if [ -f "$notes" ]; then notes_args=(--notes-file "$notes"); else notes_args=(--generate-notes); fi
           ls -la dist
 
           if gh release view "$tag" > /dev/null 2>&1; then
             # Made by hand on GitHub first: just attach the plugins.
-            gh release upload "$tag" dist/Octavio-*.zip --clobber
+            gh release upload "$tag" "${zips[@]}" --clobber
           else
             # Creates the tag on this commit when it does not exist yet.
-            gh release create "$tag" dist/Octavio-*.zip --target "$GITHUB_SHA" --title "Octavio ${tag#v}" "${notes_args[@]}"
+            gh release create "$tag" "${zips[@]}" --target "$GITHUB_SHA" --title "Octavio ${tag#v}" "${notes_args[@]}"
           fi

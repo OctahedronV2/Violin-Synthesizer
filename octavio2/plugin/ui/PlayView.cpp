@@ -304,7 +304,7 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
     g.drawDashedLine ({ bx, yy, bridge, yy }, dash, 2);
     drawText (g, "contact " + juce::String (beta, 2), bx + 10, yy + 16, Fonts::mono (10), colours::muted);
     // readout row
-    const float ry = y + h - 22;
+    const float ry = y + h - 36; // the values sit 19 units above the panel edge
     const bool sounding = active >= 0;
     struct Item
     {

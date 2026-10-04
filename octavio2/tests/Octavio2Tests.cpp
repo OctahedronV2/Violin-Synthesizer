@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <string>
 
 namespace
 {
@@ -95,6 +96,32 @@ TEST_CASE ("Octavio 2 is silent for notes outside the violin", "[octavio2]")
     setParam (p, "room", 0.0f); // no hall, so nothing else can sound
     const auto out = play (p, 48000.0, 40, 0.5, 1.0); // E2, below the G string
     CHECK (measure (out).peak < 1e-6);
+}
+
+TEST_CASE ("Octavio 2 plays through every violin, microphone, mute and distance", "[octavio2]")
+{
+    // each setting loads its own impulse responses or filters: all must sound, none blow up
+    struct Setting
+    {
+        const char* id;
+        float value;
+    };
+    const Setting settings[]
+        = { { "violin", 1 }, { "violin", 2 },  { "violin", 3 },     { "mic", 1 },         { "mic", 2 },
+            { "mic", 3 },    { "mute", 1 },    { "mute", 2 },       { "distance", 0.5f }, { "distance", 10 },
+            { "width", 0 },  { "width", 200 }, { "movement", 100 }, { "bridge", 2400 },   { "bridge", 3600 } };
+    for (const auto& s : settings)
+    {
+        octavio2::Processor p;
+        setParam (p, "octave", 2.0f);
+        setParam (p, s.id, s.value);
+        const auto out = play (p, 48000.0, 69, 1.0, 1.5);
+        const auto sounding = measure (out, (int) (0.2 * 48000), 48000);
+        INFO (s.id << " = " << s.value << ": " << dB (sounding.rms) << " dB RMS, peak " << dB (sounding.peak) << " dB");
+        CHECK (sounding.finite);
+        CHECK (dB (sounding.rms) > (std::string (s.id) == "mute" ? -60.0 : -45.0));
+        CHECK (sounding.peak < 1.0);
+    }
 }
 
 TEST_CASE ("Octavio 2 Studio mode plays its look-ahead later and reports it as latency", "[octavio2]")

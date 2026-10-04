@@ -63,8 +63,17 @@ struct PlayerParams
     // force inside the Schelleng window: F = Fmin^(1-p) Fmax^p, p = posLo + posRange * d
     double cLower = 0.0042, cUpper = 0.75; // measured coefficients (SGA08, D string, kg/s)
     double posLo = 0.55, posRange = 0.2712;
-    double accel = 12.82; // bow acceleration limit, m/s^2 (higher at ff)
-    double accelFF = 30.0;
+    // the most a player presses (N): real ff tops out around 2-3 N; above that the rosin layer
+    // pulls an open string flat (M2: -40 to -60 cents at the 4 N velocity 127 asked for)
+    double forceCap = 2.0;
+    // the player tilts the stick towards the fingerboard at pp, so only part of the ribbon
+    // touches the string: the hair's width on the string is tiltPP of the full width at pp,
+    // all of it at ff
+    double tiltPP = 1.0; // 1 = off: in M2 a narrower contact made pp brighter, against real violins
+    // bow acceleration limit, m/s^2 (higher at ff); 20/40 turn the bow round a little quicker
+    // than 12.8/30 did (Jake's pick, bow-change listening test 2026-10-03)
+    double accel = 20.0;
+    double accelFF = 40.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
     double changeDip = 0.25; // force reduction at a bow change
@@ -78,6 +87,22 @@ struct PlayerParams
     double stopDamp = 0.0, qStopDamp = 0.0;
     double crossTime = 0.02; // string crossing: force moves to the new string, s
     double bowLength = 0.62; // hair, m
+    // bow distribution in Live mode (no note lengths): in a run of short strokes (under
+    // taperLiveMax s) the player learns how long they last and spreads the bow so a stroke fits
+    // the hair it has (0 = off); long notes keep their speed and change bow when the hair runs out
+    double liveDistribute = 1.0;
+    // a lifted bow is set down again where the next stroke has at least retakeRoom m of hair,
+    // once it has been off the string for retakeAfter s
+    // and at least retakeMin m from the end it starts at (players don't start at the very frog)
+    double retakeAfter = 0.25, retakeRoom = 0.4, retakeMin = 0.12;
+    // nearing the end of the hair the bow slows (decelerating at budgetSoft m/s^2) so the change
+    // it is forced into is a gentle one, as a player saves bow (0 = off)
+    double budgetSoft = 4.0;
+    // a separate stroke eases off over its last strokeTaper s (bow speed, and the force with it,
+    // down by taperDepth): the stroke's sound rounds off into the change as a player's does.
+    // Studio knows the note's length; Live guesses it from the last strokes when they are short
+    // (under taperLiveMax s) and recovers if the note goes on (0 = off)
+    double strokeTaper = 0.22, taperDepth = 0.65, taperLiveMax = 0.8; // Jake's pick (version C)
     // left hand
     double shiftBase = 0.045, shiftPerSemi = 0.006; // slide time, s
     double shiftLighten = 0.2; // bow force reduction during a slide
@@ -151,6 +176,9 @@ struct Player
     double strokeStart = -1.0, lastStop = -10.0;
     double nextDur = 0.0; // set by the host before noteOn: how long the coming note lasts (0 = unknown)
     double strokeCap = 0.0; // bow speed that makes the stroke fit the hair left (0 = none)
+    double strokeEst = 0.0; // how long strokes last lately (Live bow distribution), s
+    double lastBudget = -10.0; // when the hair last ran out
+    double strokeLen = 0.0; // the stroke's expected length for the taper (0 = unknown)
     double d = 0.6; // dynamics of the current stroke
     double dTarget = 0.6, noteNow = 69.0;
     int slurNotes = 0;
@@ -263,7 +291,7 @@ struct Player
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
         const double p = std::clamp (pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
-        return std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax));
+        return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
     }
 
     double regTrim (double pitch) const
@@ -413,7 +441,14 @@ struct Player
             noteNow = pitch;
             setStroke (vel127);
             const bool bowMoving = std::abs (v) > 0.01;
-            if (bowMoving)
+            if (bowMoving && strokeStart >= 0.0)
+            {
+                const double len = t - strokeStart;
+                strokeEst = strokeEst <= 0.0 ? len : strokeEst + 0.5 * (len - strokeEst);
+            }
+            if (bowMoving && t - lastBudget < 0.15)
+                ; // the bow has just changed at the end of the hair: this note takes that bow
+            else if (bowMoving)
                 dir = -dir; // bow change
             else if (t - lastStop > 0.8)
                 dir = hair > 0.5 * pp.bowLength ? -1.0 : 1.0; // retake: start where the bow is
@@ -424,11 +459,22 @@ struct Player
             const double room = dir > 0 ? pp.bowLength - hair : hair;
             if (! bowMoving && room < 0.12)
                 dir = -dir;
+            // a bow that has been off the string is set down where the stroke has room
+            if (! bowMoving && t - lastStop > pp.retakeAfter && pp.retakeRoom > 0.0)
+            {
+                const double r = std::min (pp.retakeRoom, pp.bowLength - pp.retakeMin);
+                hair = dir > 0 ? std::clamp (hair, pp.retakeMin, pp.bowLength - r)
+                               : std::clamp (hair, r, pp.bowLength - pp.retakeMin);
+            }
             // the stroke's length, when the host knows it (a score, Studio look-ahead): spread
             // the bow so the note does not run out of hair (no slower than half speed)
             strokeCap = 0.0;
             if (nextDur > 0.0)
                 strokeCap = 0.9 * (dir > 0 ? pp.bowLength - hair : hair) / nextDur;
+            else if (pp.liveDistribute > 0.0 && strokeEst > 0.0 && strokeEst < pp.taperLiveMax)
+                strokeCap = 0.85 * (dir > 0 ? pp.bowLength - hair : hair)
+                    / (pp.liveDistribute * std::clamp (strokeEst, 0.1, 3.0));
+            strokeLen = nextDur > 0.0 ? nextDur : (strokeEst > 0.0 && strokeEst < pp.taperLiveMax ? strokeEst : 0.0);
             changing = bowMoving;
             releasing = false;
             stopping = false;
@@ -542,6 +588,7 @@ struct Player
             {
                 dir = -dir;
                 changing = true;
+                lastBudget = t;
                 if (log)
                     std::fprintf (stderr, "budget change %.3f hair %.3f dir %+.0f v %+.3f\n", t, hair, -dir, v);
             }
@@ -557,9 +604,25 @@ struct Player
         if (shaped)
             shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
         expr += (exprTarget - expr) * std::min (1.0, dt / 0.015);
+        if (pp.strokeTaper > 0.0 && strokeLen > 0.0 && nHeld > 0)
+        {
+            const double age = t - strokeStart, taper = std::min (pp.strokeTaper, 0.4 * strokeLen);
+            const double down = std::clamp ((age - (strokeLen - taper)) / taper, 0.0, 1.0);
+            const double up = std::clamp ((age - strokeLen - 0.05) / 0.2, 0.0, 1.0); // the note goes on
+            const double k = down * down * (3 - 2 * down) * (1.0 - up * up * (3 - 2 * up));
+            shape *= 1.0 - pp.taperDepth * k;
+        }
         vTarget = dir * V * shape * balance[lastString] * expr;
         if (strokeCap > 0.0 && std::abs (vTarget) > strokeCap)
             vTarget *= std::max (0.5, strokeCap / std::abs (vTarget));
+        if (pp.budgetSoft > 0.0 && ! releasing && nHeld > 0)
+        {
+            // slow down in time for the end of the hair
+            const double room = std::max (0.0, (dir > 0 ? pp.bowLength - hair : hair) - 0.01);
+            const double vMax = std::max (0.05, std::sqrt (2.0 * pp.budgetSoft * room));
+            if (std::abs (vTarget) > vMax)
+                vTarget = vTarget > 0 ? vMax : -vMax;
+        }
         if (releasing)
         {
             // keep moving while the hair leaves the string, then slow down
@@ -713,6 +776,8 @@ struct Player
             force[s] = S.force;
             vBow[s] = S.force > 0.0 ? v : 0.0;
             vn->s[s].setBeta (betaFor (s));
+            vn->s[s].hairFrac = hair / pp.bowLength;
+            vn->s[s].widthScale = pp.tiltPP + (1.0 - pp.tiltPP) * d;
         }
         t += dt;
     }

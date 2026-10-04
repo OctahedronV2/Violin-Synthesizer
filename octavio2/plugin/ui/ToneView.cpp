@@ -22,17 +22,16 @@ std::vector<Choices::Item> previewItems (std::initializer_list<const char*> name
 
 ToneView::ToneView (Processor& p)
     : processor (p),
-      body (nullptr,
-            {},
-            { { "Measured violin", "full band, directional" },
-              { "Stoppani", "warm, even" },
+      body (&p.getParameters(),
+            params::id::violin.getParamID(),
+            { { "Stoppani", "warm, even" },
               { "Klimke", "bright, focused" },
               { "Levaggi", "dark, round" },
-              { "TU Berlin", "balanced" } }),
+              { "Iowa", "from recordings" } }),
       strings (nullptr, {}, previewItems ({ "Synthetic", "Gut", "Steel" })),
-      rosin (nullptr, {}, previewItems ({ "Light", "Standard", "Dark", "Baroque" })),
+      rosin (&p.getParameters(), params::id::hiss.getParamID(), previewItems ({ "Natural", "3x", "6x" })),
       bow (nullptr, {}, previewItems ({ "Modern", "Baroque" })),
-      mute (nullptr, {}, previewItems ({ "Off", "Sordino", "Practice" })),
+      mute (&p.getParameters(), params::id::mute.getParamID(), previewItems ({ "Off", "Sordino", "Practice" })),
       quality (nullptr, {}, previewItems ({ "High (96 kHz strings)", "Eco" })),
       rooms (&p.getParameters(),
              params::id::room.getParamID(),
@@ -45,7 +44,11 @@ ToneView::ToneView (Processor& p)
                              "Maida Vale 5",
                              "WDR control",
                              "WDR studio" })),
-      bridge (nullptr, {}, "Bridge", Knob::Style::small),
+      bridge (&p.getParameters(),
+              params::id::bridge.getParamID(),
+              "Bridge",
+              Knob::Style::small,
+              [] (float v) { return juce::String (v / 1000.0f, 2) + " kHz"; }),
       sympathetic (nullptr, {}, "Sympathetic", Knob::Style::small),
       wolf (nullptr, {}, "Wolf", Knob::Style::small),
       hold (nullptr, {}, "Hold", Knob::Style::small),
@@ -53,30 +56,63 @@ ToneView::ToneView (Processor& p)
       imperfection (nullptr, {}, "Imperfection", Knob::Style::small),
       reverb (&p.getParameters(), params::id::reverb.getParamID(), "Reverb", Knob::Style::small, db),
       volume (&p.getParameters(), params::id::volume.getParamID(), "Volume", Knob::Style::small, db),
-      width (nullptr, {}, "Width", Knob::Style::small),
-      movement (nullptr, {}, "Movement", Knob::Style::small)
+      width (&p.getParameters(),
+             params::id::width.getParamID(),
+             "Width",
+             Knob::Style::small,
+             [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
+      movement (&p.getParameters(),
+                params::id::movement.getParamID(),
+                "Movement",
+                Knob::Style::small,
+                [] (float v)
+                { return v < 0.5f ? juce::String ("still") : juce::String (juce::roundToInt (v)) + " %"; }),
+      distance (&p.getParameters(),
+                params::id::distance.getParamID(),
+                "Distance",
+                Knob::Style::small,
+                [] (float v) { return juce::String (v, 1) + " m"; })
 {
-    body.setTooltip ("More measured bodies arrive with the radiation milestone (M1).");
+    body.setTooltip ("Measured violin bodies, made full band. Iowa is estimated from recordings.");
     strings.setTooltip ("String types arrive with the styles milestone (M7).");
-    rosin.setPreviewActive (1);
-    rosin.setTooltip ("Rosin types arrive with the second bow-physics milestone (M2).");
+    rosin.setTooltip ("The hiss of the hair sliding on the string. Natural is a real violin's balance as heard "
+                      "in the room; 3x and 6x bring it forward.");
     bow.setTooltip ("The baroque bow arrives with the styles milestone (M7).");
-    mute.setTooltip ("Mutes arrive with the radiation milestone (M1).");
+    mute.setTooltip (
+        "A mute adds mass to the bridge: sordino veils the tone, the practice mute is for quiet practice.");
     quality.setTooltip ("Eco arrives with the optimisation milestone (M8).");
     rooms.setTooltip ("Measured rooms (impulse responses, credits in the About box). Close mics: the violin alone.");
-    bridge.setPreview (0.5f, "2.9 kHz", "the bridge milestone (M3)");
+    bridge.setTooltip ("The bridge's rocking resonance: lower is darker, higher is brighter.");
     sympathetic.setPreview (0.6f, "60 %", "the bridge milestone (M3)");
     wolf.setPreview (0.3f, "30 %", "the bridge milestone (M3)");
     hold.setPreview (0.45f, "chin", "the bridge milestone (M3)");
     imperfection.setPreview (0.1f, "10 %", "the player milestone (M4)");
-    width.setPreview (0.6f, "60 %", "the radiation milestone (M1)");
-    movement.setPreview (0.3f, "sway", "the radiation milestone (M1)");
+    width.setTooltip ("0: both speakers hear one direction. 100 %: the two microphones as placed.");
+    movement.setTooltip ("The player's slow sway, which turns the violin between directions.");
+    distance.setTooltip ("How far the microphones are: the room's share, its delay and the air's treble loss.");
+    micAttachment
+        = std::make_unique<juce::ParameterAttachment> (*p.getParameters().getParameter (params::id::mic.getParamID()),
+                                                       [this] (float v)
+                                                       {
+                                                           mic = juce::roundToInt (v);
+                                                           repaint();
+                                                       });
+    micAttachment->sendInitialUpdate();
     brilliance.setTooltip ("A high shelf at 1.5 kHz on the bridge force (the strings' sparkle).");
     reverb.setTooltip ("The room's level against the direct sound.");
     for (auto* c : { &body, &strings, &rosin, &bow, &mute, &quality, &rooms })
         addAndMakeVisible (c);
-    for (auto* k :
-         { &bridge, &sympathetic, &wolf, &hold, &brilliance, &imperfection, &reverb, &volume, &width, &movement })
+    for (auto* k : { &bridge,
+                     &sympathetic,
+                     &wolf,
+                     &hold,
+                     &brilliance,
+                     &imperfection,
+                     &reverb,
+                     &volume,
+                     &width,
+                     &movement,
+                     &distance })
         addAndMakeVisible (k);
     startTimerHz (30);
 }
@@ -86,7 +122,7 @@ void ToneView::resized()
     const int y = juce::roundToInt (116 - top);
     // instrument
     body.setLayout (1, 30, 6);
-    body.setBounds (40, y + 60, 328, 5 * 39);
+    body.setBounds (40, y + 60, 328, 4 * 39);
     strings.setLayout (0, 30, 4, 104);
     strings.setBounds (40, y + 290, 328, 30);
     rosin.setLayout (0, 30, 4, 77);
@@ -109,10 +145,10 @@ void ToneView::resized()
     rooms.setLayout (3, 32, 8);
     rooms.setBounds (784, y + 314, 376, 3 * 44);
     i = 0;
-    for (auto* k : { &reverb, &volume, &width, &movement })
+    for (auto* k : { &distance, &reverb, &width, &movement, &volume })
     {
-        const int cx = 768 + 62 + i * 95, cy = y + 504;
-        k->setBounds (cx - 47, cy - 44, 94, 100);
+        const int cx = 768 + 52 + i * 76, cy = y + 504;
+        k->setBounds (cx - 38, cy - 44, 76, 100);
         ++i;
     }
 }
@@ -130,7 +166,7 @@ void ToneView::paint (juce::Graphics& g)
     drawPanel (g, { 24, y, 360, 576 }, "Instrument");
     drawLabel (g, "Body (measured violins)", 40, y + 50);
     drawLabel (g, "Strings", 40, y + 282);
-    drawLabel (g, "Rosin", 40, y + 342);
+    drawLabel (g, "Bow hiss", 40, y + 342);
     drawLabel (g, "Bow", 40, y + 402);
     drawLabel (g, "Tuning", 40, y + 462);
     for (int k = 0; k < 2; ++k)
@@ -225,6 +261,36 @@ void ToneView::paintScope (juce::Graphics& g, juce::Rectangle<float> r)
     g.strokePath (p, juce::PathStrokeType (1.8f));
 }
 
+juce::Point<float> ToneView::micPoint (int index) const
+{
+    // around the violin drawn by paintMics (centre 972, 286 in design units, relative to top)
+    const float cx = 768 + 204, cy = 116 - top + 186;
+    const juce::Point<float> at[]
+        = { { cx - 150, cy + 30 }, { cx + 76, cy - 60 }, { cx - 110, cy - 100 }, { cx + 150, cy + 20 } };
+    return at[juce::jlimit (0, 3, index)];
+}
+
+int ToneView::micAt (juce::Point<float> p) const
+{
+    for (int k = 0; k < params::micNames().size(); ++k)
+        if (p.getDistanceFrom (micPoint (k)) < 22
+            || juce::Rectangle<float> (micPoint (k).x - 46, micPoint (k).y + 12, 92, 20).contains (p))
+            return k;
+    return -1;
+}
+
+void ToneView::mouseUp (const juce::MouseEvent& e)
+{
+    const int k = micAt (e.position);
+    if (k >= 0 && e.mouseWasClicked())
+        micAttachment->setValueAsCompleteGesture ((float) k);
+}
+
+void ToneView::mouseMove (const juce::MouseEvent& e)
+{
+    setMouseCursor (micAt (e.position) >= 0 ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+}
+
 void ToneView::paintMics (juce::Graphics& g, float x3, float y)
 {
     const float cx = x3 + 204, cy = y + 186;
@@ -244,7 +310,7 @@ void ToneView::paintMics (juce::Graphics& g, float x3, float y)
     g.setColour (juce::Colour (0xff3a2516));
     g.fillEllipse (cx - 8, cy - 144, 16, 16);
     drawText (g,
-              "violin seen from above (more microphones with M1)",
+              "violin seen from above: click a microphone",
               cx,
               cy + 92,
               Fonts::sans (10),
@@ -252,20 +318,26 @@ void ToneView::paintMics (juce::Graphics& g, float x3, float y)
               juce::Justification::horizontallyCentred);
     struct Mic
     {
-        const char* name;
+        juce::String name;
         float x, y;
         bool on;
     };
-    const Mic mics[] = { { "Front", cx - 150, cy + 30, true },
-                         { "Above", cx + 76, cy - 60, false },
-                         { "Player's ear", cx - 110, cy - 100, false },
-                         { "Side", cx + 150, cy + 20, false } };
+    std::vector<Mic> mics;
+    for (int k = 0; k < params::micNames().size(); ++k)
+    {
+        const auto pt = micPoint (k);
+        mics.push_back ({ params::micNames()[k], pt.x, pt.y, k == mic });
+    }
     for (const auto& m : mics)
     {
         if (m.on)
         {
             juce::Path beam;
-            beam.addTriangle (m.x, m.y, cx - 40, cy - 10, cx - 40, cy + 40);
+            // a cone from the microphone to the violin's near side
+            const juce::Point<float> c (cx, cy), at (m.x, m.y);
+            const auto d = (c - at) / c.getDistanceFrom (at);
+            const juce::Point<float> nrm (-d.y, d.x), base = c - d * 24.0f;
+            beam.addTriangle (at, base + nrm * 34.0f, base - nrm * 34.0f);
             g.setColour (colours::amber.withAlpha (0.12f));
             g.fillPath (beam);
         }
