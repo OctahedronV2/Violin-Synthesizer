@@ -35,6 +35,15 @@ inline const juce::ParameterID movement { "movement", 1 };
 inline const juce::ParameterID distance { "distance", 1 };
 inline const juce::ParameterID bridge { "bridge", 1 };
 inline const juce::ParameterID mute { "mute", 1 };
+// M6 views (Play, Bow and Left hand tabs)
+inline const juce::ParameterID portamento { "portamento", 1 };
+inline const juce::ParameterID stringPreference { "stringPreference", 1 };
+inline const juce::ParameterID vibratoRate { "vibratoRate", 1 };
+inline const juce::ParameterID vibratoDelay { "vibratoDelay", 1 };
+inline const juce::ParameterID bowChange { "bowChange", 1 };
+inline const juce::ParameterID strokeShaping { "strokeShaping", 1 };
+inline const juce::ParameterID bite { "bite", 1 };
+inline const juce::ParameterID contact { "contact", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -67,5 +76,8 @@ private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
     std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
         *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
+    // M6 views
+    std::atomic<float>*portamento, *stringPreference, *vibratoRate, *vibratoDelay, *bowChange, *strokeShaping, *bite,
+        *contact;
 };
 } // namespace octavio2::params

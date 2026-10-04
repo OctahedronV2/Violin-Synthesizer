@@ -68,6 +68,8 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/MidiView.cpp
     plugin/ui/NoteTrack.cpp
     plugin/ui/ArticulationView.cpp
+    plugin/ui/BowView.cpp
+    plugin/ui/LeftHandView.cpp
     plugin/ui/PlaceholderView.cpp
     plugin/ui/PlayView.cpp
     plugin/ui/Theme.cpp

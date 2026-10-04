@@ -50,6 +50,15 @@ struct EngineSettings
     bool fingerPlan = false; // Viterbi fingering and anticipated shifts (Studio look-ahead)
     bool drawnCurves = true; // CC lanes take over the player's dimension
     bool modalBody = true; // the bridge modes radiate below 1.5 kHz (Radiation::setModalBody)
+    // M6 views: the Play, Bow and Left hand tabs' controls (PlayerParams' M6 block)
+    double portamento = 1.0; // PlayerParams::slideScale
+    double stringPreference = 0.0; // PlayerParams::stringPref, -1 bright .. +1 dark
+    double vibratoRate = 0.0; // Hz, PlayerParams::vibRateAdd
+    double vibratoDelay = 1.0; // PlayerParams::vibDelayScale
+    double bowChange = 1.0; // PlayerParams::accelScale
+    double strokeShaping = 1.0; // PlayerParams::shapeAmount
+    double bite = 1.0; // PlayerParams::biteScale
+    double contact = 1.0; // PlayerParams::contactScale
 };
 
 class Engine
@@ -162,6 +171,11 @@ public:
                 force[i] = dec.out();
                 low[i] = lowDec.out();
                 scope[(size_t) (scopeWrite++ & (scopeSize - 1))] = (float) force[i];
+                if (--traceLeft <= 0)
+                {
+                    traceLeft = traceEvery;
+                    traceNow();
+                }
                 ++clock;
             }
             scopeWritten.store (scopeWrite, std::memory_order_release);
@@ -203,6 +217,28 @@ public:
     float scopeSample (int64_t i) const { return scope[(size_t) (i & (scopeSize - 1))]; }
     int64_t scopeCount() const { return scopeWritten.load (std::memory_order_acquire); }
     double seconds() const { return (double) clock / rate; }
+
+    // M6: the bow and the left hand every 5 ms of engine time (the Bow and Left hand tabs). Read
+    // as the note log: a reader keeps its own count, at most traceSize - 64 behind the writer.
+    struct Trace
+    {
+        float t = 0; // engine seconds
+        float speed = 0; // bow speed, m/s, + down-bow
+        float force = 0; // N on the sounding string
+        float hair = 0; // where the string is on the hair, 0 frog .. 1 tip
+        float contact = 0; // bow-bridge distance / string length
+        float dynamics = 0; // 0..1
+        float pitch = 0; // finger pitch on the sounding string (MIDI, with slide and vibrato)
+        float target = 0; // the note the finger goes to
+        float handPos = 2; // semitones above the open string where the first finger sits
+        float vibWidth = 0; // cents peak to peak
+        int string = 2; // 0 G .. 3 E
+        bool sounding = false, sliding = false, changing = false;
+    };
+    static constexpr uint64_t traceSize = 4096; // 20 s
+    static constexpr int traceEvery = 240; // samples (5 ms)
+    const Trace& traceEntry (uint64_t i) const { return trace[i & (traceSize - 1)]; }
+    uint64_t traceCount() const { return traceWritten.load (std::memory_order_acquire); }
 
     // for tests and the renderer
     Player& getPlayer() { return *player; }
@@ -257,6 +293,14 @@ private:
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;
+        player->pp.slideScale = settings.portamento;
+        player->pp.stringPref = settings.stringPreference;
+        player->pp.vibRateAdd = settings.vibratoRate;
+        player->pp.vibDelayScale = settings.vibratoDelay;
+        player->pp.accelScale = settings.bowChange;
+        player->pp.shapeAmount = settings.strokeShaping;
+        player->pp.biteScale = settings.bite;
+        player->pp.contactScale = settings.contact;
     }
 
     void push (Ev e)
@@ -369,6 +413,31 @@ private:
         }
     }
 
+    void traceNow()
+    {
+        const Player& p = *player;
+        const int s = std::clamp (p.lastString, 0, 3);
+        const auto& S = p.st[s];
+        Trace e;
+        e.t = (float) seconds();
+        e.speed = (float) p.v;
+        e.force = (float) S.force;
+        e.hair = (float) (p.hair / p.pp.bowLength);
+        e.contact = (float) p.betaFor (s);
+        e.dynamics = (float) p.dEff();
+        e.pitch = (float) S.pitch;
+        e.target = (float) S.target;
+        e.handPos = (float) p.handPos;
+        e.vibWidth = (float) S.vibWidth;
+        e.string = s;
+        e.sounding = p.nHeld > 0 && ! p.releasing;
+        e.sliding = S.slideT0 >= 0.0;
+        e.changing = p.changing;
+        const uint64_t w = traceWritten.load (std::memory_order_relaxed);
+        trace[w & (traceSize - 1)] = e;
+        traceWritten.store (w + 1, std::memory_order_release);
+    }
+
     void log (const NoteLog& n)
     {
         const uint64_t w = logWritten.load (std::memory_order_relaxed);
@@ -408,5 +477,8 @@ private:
     float scope[scopeSize] = {};
     int64_t scopeWrite = 0;
     std::atomic<int64_t> scopeWritten { 0 };
+    Trace trace[traceSize] = {};
+    std::atomic<uint64_t> traceWritten { 0 };
+    int traceLeft = traceEvery;
 };
 } // namespace o2

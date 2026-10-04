@@ -210,6 +210,20 @@ struct PlayerParams
     double lhAmp = 0.6, lhTau = 0.25e-3, lhFromNut = 0.2;
     // harmonics: the light finger's resistance in units of the string's impedance
     double harmTouch = 1.0, harmForce = 0.3; // ... and the bow force on a harmonic, x the normal
+
+    // ---------------------------------------------------------------- M6 plugin controls
+    // The user's scales on top of the player's (and its style's) own settings. At their defaults
+    // (1, or 0 for the offsets) every result is bit-identical to the fitted player.
+    double slideScale = 1.0; // Portamento: shift slide time x this (0: clean shifts)
+    // String preference: -1 bright (low positions, higher strings) .. +1 dark (high positions on
+    // lower strings); scales the string-choice costs (greedy and planned)
+    double stringPref = 0.0;
+    double vibRateAdd = 0.0; // Hz added to every note's vibrato rate
+    double vibDelayScale = 1.0; // vibrato delay and bloom time x this
+    double accelScale = 1.0; // bow acceleration (bow changes, getting up to speed) x this
+    double shapeAmount = 1.0; // stroke shaping (detache speed and force release, end taper) x this
+    double biteScale = 1.0; // the extra force at the start of a stroke x this
+    double contactScale = 1.0; // the contact point's distance from the bridge x this
 };
 
 struct Player
@@ -289,6 +303,11 @@ struct Player
     double pendingOff = -1.0; // Legato: the bow keeps going this long after the last note-off
     bool cutDone = false;
     double dEff() const { return std::clamp (d + dEnv, 0.0, 1.0); }
+    // M6 Stroke shaping: a sustain level (1 = no release) moved away from 1 by pp.shapeAmount
+    double shapedSus (double sus) const
+    {
+        return pp.shapeAmount == 1.0 ? sus : std::clamp (1.0 - (1.0 - sus) * pp.shapeAmount, 0.05, 1.0);
+    }
     // drawn curves (CC lanes) that have taken over a dimension; -1 / false = the player's own
     bool manDyn = false;
     double ccDyn = 0.6, ccVib = -1.0, ccRate = -1.0, ccContact = -1.0;
@@ -346,6 +365,15 @@ struct Player
     }
 
     // ---------------------------------------------------------------- string choice
+    // M6 String preference (pp.stringPref) as weights on the costs: 1, 1, 0 at the default
+    // (on a square-root scale: the greedy choice holds a position until a cost tips it over, so
+    // the first half of the knob would do little on a linear one)
+    double prefK() const { return pp.stringPref < 0.0 ? -std::sqrt (-pp.stringPref) : std::sqrt (pp.stringPref); }
+    double prefSemi() const { return 1.0 - 0.9 * prefK(); }
+    double prefHigh() const { return std::pow (6.0, -prefK()); }
+    double prefString (int s) const { return 0.9 * prefK() * (double) s; }
+    // bright still keeps long notes off open strings (they ring much louder than a stopped note)
+    double prefOpen() const { return 1.0 + 1.5 * std::max (0.0, -prefK()); }
     int chooseString (int pitch, int avoid1 = -1, int avoid2 = -1) const
     {
         if (m5String >= 0) // M5: a harmonic's string, picked by m5Harmonic
@@ -360,14 +388,14 @@ struct Player
             const double top = s == 3 ? 28 : 16;
             if (semis < 0 || semis > top)
                 continue;
-            double c = 0.12 * semis + 0.6 * std::max (0.0, semis - 7.0);
+            double c = 0.12 * semis * prefSemi() + 0.6 * prefHigh() * std::max (0.0, semis - 7.0) + prefString (s);
             c += 0.9 * std::abs (s - lastString);
             if (semis > 0)
                 c += inReach (semis)
                     ? 0.0
                     : 0.6 + 0.1 * std::min (std::abs (semis - handPos), std::abs (semis - handPos - 5.0));
             if (semis == 0 && pitch != 55)
-                c += 0.8; // open strings can't vibrate: a violinist mostly stops the note
+                c += 0.8 * prefOpen(); // open strings can't vibrate: a violinist mostly stops the note
             if (c < bestCost)
             {
                 bestCost = c;
@@ -393,9 +421,9 @@ struct Player
     double placeCost (int s, int pitch, double dur) const
     {
         const double semis = pitch - openPitch[s];
-        double c = 0.12 * semis + pp.costHigh * std::max (0.0, semis - 7.0);
+        double c = 0.12 * semis * prefSemi() + pp.costHigh * prefHigh() * std::max (0.0, semis - 7.0) + prefString (s);
         if (semis == 0 && pitch != 55) // an open string can't vibrate: avoided on expressive notes
-            c += dur <= 0.0 || dur > 0.25 ? pp.costOpen : 0.15 * pp.costOpen;
+            c += (dur <= 0.0 || dur > 0.25 ? pp.costOpen : 0.15 * pp.costOpen) * prefOpen();
         return c;
     }
     // moving from string s0 (hand at hp0) to pitch on s after gap seconds of rest
@@ -605,7 +633,8 @@ struct Player
             return ccContact;
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
         // on a shorter (stopped) string the player moves the bow towards the bridge too
-        const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow);
+        const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow)
+            * pp.contactScale;
         return std::clamp (c * 1e-3 / L, 0.02, 0.3);
     }
 
@@ -642,7 +671,7 @@ struct Player
         if (jump)
             d = dTarget;
         applyDyn();
-        accel = pp.accel + (pp.accelFF - pp.accel) * dTarget;
+        accel = (pp.accel + (pp.accelFF - pp.accel) * dTarget) * pp.accelScale;
     }
     void applyDyn()
     {
@@ -667,7 +696,7 @@ struct Player
         {
             S.slideFrom = S.pitch;
             S.slideT0 = t;
-            S.slideDur = pp.shiftBase + pp.shiftPerSemi * jump;
+            S.slideDur = std::max (0.004, (pp.shiftBase + pp.shiftPerSemi * jump) * pp.slideScale);
         }
         else if (pre) // a planned shift's slide carries on to the note; the ear starts afresh
             vn->s[s].fingerCents = 0.0;
@@ -695,7 +724,7 @@ struct Player
         S.wanderW = pp.vibWander * rng.gauss() * 0.5;
         S.rateAdd = pp.vibRateHigh * std::clamp (semis / 12.0, 0.0, 1.5);
         S.vibWidthTarget *= 1.0 + pp.vibStress * noteWeight;
-        S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR);
+        S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd) * (1.0 + S.wanderR);
     }
 
     // ---------------------------------------------------------------- M4: note decisions
@@ -725,7 +754,9 @@ struct Player
         preT = t + a.dt;
         prePitch = a.pitch;
         preString = s;
-        preDur = std::min (0.6 * a.dt, pp.shiftBase + pp.shiftPerSemi * std::abs (a.pitch - pitch));
+        preDur = std::min (
+            0.6 * a.dt,
+            std::max (0.004, (pp.shiftBase + pp.shiftPerSemi * std::abs (a.pitch - pitch)) * pp.slideScale));
     }
 
     // the stroke's articulation: the Bow style override, or inferred from length and gap (Auto)
@@ -1101,7 +1132,10 @@ struct Player
         const double balance[4] = { pp.speedG, pp.speedD, pp.speedA, pp.speedE };
         double shape = 1.0;
         if (shaped)
-            shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
+        {
+            const double sus = shapedSus (sSus);
+            shape = sus + (1.0 - sus) * std::exp (-(t - strokeStart) / sTau);
+        }
         expr += (exprTarget - expr) * std::min (1.0, dt / 0.015);
         if (pp.strokeTaper > 0.0 && strokeLen > 0.0 && nHeld > 0)
         {
@@ -1109,7 +1143,7 @@ struct Player
             const double down = std::clamp ((age - (strokeLen - taper)) / taper, 0.0, 1.0);
             const double up = std::clamp ((age - strokeLen - 0.05) / 0.2, 0.0, 1.0); // the note goes on
             const double k = down * down * (3 - 2 * down) * (1.0 - up * up * (3 - 2 * up));
-            shape *= 1.0 - pp.taperDepth * k;
+            shape *= 1.0 - std::min (0.95, pp.taperDepth * pp.shapeAmount) * k;
         }
         vTarget = dir * V * shape * balance[lastString] * expr;
         if (strokeCap > 0.0 && std::abs (vTarget) > strokeCap)
@@ -1162,8 +1196,8 @@ struct Player
             if (S.vibWidthTarget > 0.0 && S.bowed)
             {
                 const double age = t - S.noteOn;
-                const double q = S.vibSqueeze, delay = pp.vibDelay * q;
-                const double env = std::clamp ((age - delay) / (pp.vibBloom * q), 0.0, 1.0);
+                const double q = S.vibSqueeze, delay = pp.vibDelay * pp.vibDelayScale * q;
+                const double env = std::clamp ((age - delay) / (pp.vibBloom * pp.vibDelayScale * q), 0.0, 1.0);
                 double w = S.vibWidthTarget * vibScale * pp.vibAmount * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
                 w *= std::min (pp.vibGrowMax, pp.vibGrowStart + pp.vibGrow * std::max (0.0, age - delay));
                 const double taper = (vibEnd >= 0.0 ? vibEnd : pp.vibTaper) * q;
@@ -1180,7 +1214,8 @@ struct Player
                 {
                     S.vibPhase -= 2 * pi;
                     // per-cycle wander: no two cycles alike
-                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR + 0.04 * rng.gauss());
+                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd)
+                        * (1.0 + S.wanderR + 0.04 * rng.gauss());
                     if (ccRate > 0.0)
                         S.vibRate = ccRate;
                 }
@@ -1223,7 +1258,9 @@ struct Player
                 ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
-                ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim + strokeBite) * std::exp (-age / pp.biteTime);
+                ft *= 1.0
+                    + ((pp.bite + pp.biteFF * d * d) * pp.biteScale + biteTrim + strokeBite * pp.biteScale)
+                        * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
                 if (sliding)
@@ -1231,7 +1268,10 @@ struct Player
                 if (stopping)
                     ft *= stF;
                 if (shaped && age > fHold)
-                    ft *= fSus + (1.0 - fSus) * std::exp (-(age - fHold) / fTau);
+                {
+                    const double sus = shapedSus (fSus);
+                    ft *= sus + (1.0 - sus) * std::exp (-(age - fHold) / fTau);
+                }
             }
             // listening: every few ms compare the slip rate with the note's frequency
             if (S.bowed && ! releasing && S.force > 0.0)

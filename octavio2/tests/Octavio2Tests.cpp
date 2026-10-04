@@ -307,3 +307,120 @@ TEST_CASE ("Octavio 2's interface paints every tab while it plays", "[octavio2]"
         }
     }
 }
+
+// ---------------------------------------------------------------- M6 views (Play, Bow, Left hand)
+TEST_CASE ("Octavio 2 plays at every extreme of the Bow and Left hand controls", "[octavio2]")
+{
+    const std::pair<const char*, float> settings[] = { { "portamento", 0 },
+                                                       { "portamento", 300 },
+                                                       { "stringPreference", -100 },
+                                                       { "stringPreference", 100 },
+                                                       { "vibratoRate", -1.5f },
+                                                       { "vibratoRate", 1.5f },
+                                                       { "vibratoDelay", 25 },
+                                                       { "vibratoDelay", 300 },
+                                                       { "bowChange", 50 },
+                                                       { "bowChange", 200 },
+                                                       { "strokeShaping", 0 },
+                                                       { "strokeShaping", 150 },
+                                                       { "bite", 0 },
+                                                       { "bite", 200 },
+                                                       { "contact", -50 },
+                                                       { "contact", 50 } };
+    for (const auto& [id, value] : settings)
+    {
+        octavio2::Processor p;
+        setParam (p, "octave", 2.0f);
+        setParam (p, id, value);
+        const auto out = play (p, 48000.0, 69, 1.0, 2.0);
+        const auto l = measure (out);
+        INFO (id << " = " << value << ": " << dB (l.rms) << " dB RMS, peak " << dB (l.peak) << " dB");
+        CHECK (l.finite);
+        CHECK (dB (l.rms) > -45);
+        CHECK (l.peak < 1.0);
+    }
+}
+
+namespace
+{
+// a legato climb (each note overlaps the next: slurs), then separate notes coming down (strokes)
+void playPhrase (octavio2::Processor& p, double seconds)
+{
+    const double rate = 48000.0;
+    const int block = 480;
+    p.prepareToPlay (rate, block);
+    juce::AudioBuffer<float> buf (2, block);
+    const int notes[] = { 62, 66, 69, 74, 78, 81, 79, 76, 72, 69, 67, 74 };
+    const double step = 0.4;
+    for (int b = 0; b < (int) (seconds * rate / block); ++b)
+    {
+        juce::MidiBuffer midi;
+        const double t0 = b * block / rate, t1 = (b + 1) * block / rate;
+        for (int k = 0; k < 12; ++k)
+        {
+            const double on = k * step, off = k < 11 ? on + step * (k < 6 ? 1.1 : 0.7) : seconds + 1;
+            if (on >= t0 && on < t1)
+                midi.addEvent (juce::MidiMessage::noteOn (1, notes[k], (juce::uint8) 96), (int) ((on - t0) * rate));
+            if (off >= t0 && off < t1)
+                midi.addEvent (juce::MidiMessage::noteOff (1, notes[k]), (int) ((off - t0) * rate));
+        }
+        p.processBlock (buf, midi);
+    }
+}
+} // namespace
+
+TEST_CASE ("Octavio 2 traces the bow and the left hand for the Bow and Left hand tabs", "[octavio2]")
+{
+    const juce::ScopedJuceInitialiser_GUI gui;
+    int highest[2] = {};
+    for (const int pref : { 0, 100 })
+    {
+        octavio2::Processor p;
+        setParam (p, "octave", 2.0f);
+        setParam (p, "stringPreference", (float) pref);
+        playPhrase (p, 5.2);
+        auto& e = p.getEngine();
+        // the trace: one point every 5 ms, the bow both ways, the hair moving
+        const auto n = e.traceCount();
+        REQUIRE (n >= 1000);
+        bool down = false, up = false, slid = false, finite = true;
+        float hairLo = 1, hairHi = 0;
+        for (uint64_t i = n - 1000; i < n; ++i)
+        {
+            const auto& t = e.traceEntry (i);
+            finite = finite && std::isfinite (t.speed) && std::isfinite (t.pitch);
+            down = down || t.speed > 0.05f;
+            up = up || t.speed < -0.05f;
+            slid = slid || t.sliding;
+            hairLo = std::min (hairLo, t.hair);
+            hairHi = std::max (hairHi, t.hair);
+        }
+        CHECK (finite);
+        CHECK (down);
+        CHECK (up);
+        CHECK (hairHi - hairLo > 0.2f);
+        // the highest note (A5): which string the player took
+        for (uint64_t i = 0; i < e.logCount(); ++i)
+            if (e.logEntry (i).pitch == 81 && e.logEntry (i).kind != o2::Engine::NoteLog::off)
+                highest[pref != 0 ? 1 : 0] = e.logEntry (i).string;
+        if (pref == 100)
+            CHECK (slid); // the dark preference stays on lower strings and shifts up them
+        // the Play, Bow and Left hand tabs mid-phrase
+        const auto folder = juce::SystemStats::getEnvironmentVariable ("OCTAVIO2_SNAPSHOTS", {});
+        for (const int tab : { 0, 2, 3 })
+        {
+            p.editorTab = tab;
+            octavio2::Editor editor (p);
+            const auto image = editor.createComponentSnapshot (editor.getLocalBounds());
+            CHECK (image.getWidth() == octavio2::ui::designWidth);
+            if (folder.isNotEmpty())
+            {
+                juce::File file (folder + "/phrase-pref" + juce::String (pref) + "-" + juce::String (tab) + ".png");
+                file.deleteFile();
+                juce::FileOutputStream out (file);
+                juce::PNGImageFormat().writeImageToStream (image, out);
+            }
+        }
+    }
+    CHECK (highest[1] < highest[0]); // dark: A5 on a lower string
+}

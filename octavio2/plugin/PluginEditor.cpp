@@ -1,9 +1,10 @@
 #include "PluginEditor.h"
 
 #include "ui/ArticulationView.h"
+#include "ui/BowView.h"
 #include "ui/CurvesView.h"
+#include "ui/LeftHandView.h"
 #include "ui/MidiView.h"
-#include "ui/PlaceholderView.h"
 #include "ui/PlayView.h"
 #include "ui/ToneView.h"
 
@@ -83,15 +84,8 @@ Editor::Editor (Processor& p)
     keyboard.setBounds (24, 712, designWidth - 48, 58);
     canvas.views.push_back (std::make_unique<PlayView> (p));
     canvas.views.push_back (std::make_unique<CurvesView> (p));
-    canvas.views.push_back (
-        std::make_unique<PlaceholderView> ("Bow",
-                                           "The bow's plan and physics: speed, force and contact over each stroke, "
-                                           "where on the hair it plays, bow changes and how much bow is left.",
-                                           "Arrives with the player and bow-physics milestones (M2, M4)."));
-    canvas.views.push_back (std::make_unique<PlaceholderView> (
-        "Left hand",
-        "Fingering, positions and shifts, string choice, vibrato shape, and intonation (expressive, equal or just).",
-        "Arrives with the player milestone (M4)."));
+    canvas.views.push_back (std::make_unique<BowView> (p));
+    canvas.views.push_back (std::make_unique<LeftHandView> (p));
     canvas.views.push_back (std::make_unique<ArticulationView> (p));
     canvas.views.push_back (std::make_unique<ToneView> (p));
     canvas.views.push_back (std::make_unique<MidiView> (p));

@@ -23,6 +23,7 @@ private:
     void paintLookAhead (juce::Graphics&, juce::Rectangle<float>);
     void paintPlan (juce::Graphics&, juce::Rectangle<float>);
     bool studio() const;
+    void updateBadges();
 
     Processor& processor;
     Knob dynamics, expression, vibrato, portamento, stringPreference, room;

@@ -1,34 +1,22 @@
 #include "PlayView.h"
+#include "PlayerText.h"
 
 namespace octavio2::ui
 {
 namespace
 {
 constexpr float top = 104; // the views start below the header (mockup y 104)
-constexpr double openPitch[4] = { 55, 62, 69, 76 };
-const char* stringNames = "GDAE";
-
-juce::String ordinal (int n)
-{
-    static const char* s[] = { "th", "st", "nd", "rd" };
-    const int k = (n % 100 >= 11 && n % 100 <= 13) || n % 10 > 3 ? 0 : n % 10;
-    return juce::String (n) + s[k];
-}
-
-// the position a hand sits in, from where the first finger is (semitones above the open string)
-int positionOf (float handPos)
-{
-    static const int firstFinger[] = { 0, 2, 4, 5, 7, 9, 10, 12, 14, 15, 17, 19 }; // half, 1st .. 11th
-    int best = 1;
-    for (int p = 1; p < 12; ++p)
-        if (std::abs (firstFinger[p] - handPos) < std::abs (firstFinger[best] - handPos))
-            best = p;
-    return best;
-}
+const double* const openPitch = openPitches;
+const char* const stringNames = stringLetters;
 
 juce::String contactName (float beta)
 {
     return beta < 0.06f ? "sul ponticello side" : beta > 0.16f ? "sul tasto side" : "normal";
+}
+
+Mode modeOf (int m)
+{
+    return m == 2 ? Mode::manual : m == 1 ? Mode::guided : Mode::autoMode;
 }
 
 void line (juce::Graphics& g, float x0, float y0, float x1, float y1, juce::Colour c, float w = 1)
@@ -49,14 +37,26 @@ PlayView::PlayView (Processor& p)
                     return std::abs (v) < 0.5f ? juce::String ("as played")
                                                : (v > 0 ? "+" : "") + juce::String (juce::roundToInt (v)) + " %";
                 }),
-      expression (nullptr, {}, "Expression", Knob::Style::card),
+      expression (&p.getParameters(),
+                  params::id::phrasing.getParamID(),
+                  "Expression",
+                  Knob::Style::card,
+                  [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
       vibrato (&p.getParameters(),
                params::id::vibrato.getParamID(),
                "Vibrato",
                Knob::Style::card,
                [] (float v) { return juce::String (juce::roundToInt (v * 100)) + " %"; }),
-      portamento (nullptr, {}, "Portamento", Knob::Style::card),
-      stringPreference (nullptr, {}, "String preference", Knob::Style::card),
+      portamento (&p.getParameters(),
+                  params::id::portamento.getParamID(),
+                  "Portamento",
+                  Knob::Style::card,
+                  portamentoText),
+      stringPreference (&p.getParameters(),
+                        params::id::stringPreference.getParamID(),
+                        "String preference",
+                        Knob::Style::card,
+                        stringPreferenceText),
       room (&p.getParameters(),
             params::id::room.getParamID(),
             "Room",
@@ -87,13 +87,18 @@ PlayView::PlayView (Processor& p)
     dynamics.setCaption ("Level, from velocity");
     dynamics.setBadge (Mode::autoMode);
     expression.setCaption ("How much the player shapes");
-    expression.setPreview (0.55f, "55 %", "the player milestone (M4)");
+    expression.setBadge (Mode::autoMode);
+    expression.setTooltip ("Phrasing: how much the player shapes the line (phrase arcs, swells, stresses). 0: every "
+                           "note at its velocity's level.");
     vibrato.setCaption ("Width scale on context vibrato");
     vibrato.setBadge (Mode::autoMode);
     portamento.setCaption ("Slides between positions");
-    portamento.setPreview (0.22f, "Rare", "the player milestone (M4)");
+    portamento.setBadge (Mode::autoMode);
+    portamento.setTooltip ("How slowly the finger slides when the hand shifts position. 0: clean shifts.");
     stringPreference.setCaption (juce::String::fromUTF8 ("Bright ←  → dark"));
-    stringPreference.setPreview (0.5f, "Balanced", "the player milestone (M4)");
+    stringPreference.setBadge (Mode::autoMode);
+    stringPreference.setTooltip (
+        "Bright: low positions and higher strings. Dark: high positions on the lower strings.");
     room.setCaption ("Room and distance");
     for (auto* k : { &dynamics, &expression, &vibrato, &portamento, &stringPreference, &room })
         addAndMakeVisible (k);
@@ -126,6 +131,17 @@ void PlayView::resized()
     articulation.setVisible (! s);
 }
 
+void PlayView::updateBadges()
+{
+    // a drawn curve (CC lane) takes its dimension over; a String preference guides the fingering
+    const auto& T = processor.getTelemetry();
+    dynamics.setBadge (modeOf (T.dynMode.load()));
+    vibrato.setBadge (modeOf (std::max (T.vibMode.load(), T.rateMode.load())));
+    const float pref
+        = processor.getParameters().getRawParameterValue (params::id::stringPreference.getParamID())->load();
+    stringPreference.setBadge (std::abs (pref) >= 0.5f ? Mode::guided : Mode::autoMode);
+}
+
 void PlayView::timerCallback()
 {
     track.read (processor.getEngine());
@@ -137,6 +153,7 @@ void PlayView::timerCallback()
 
 void PlayView::paint (juce::Graphics& g)
 {
+    updateBadges(); // before the knobs paint (they are children)
     track.read (processor.getEngine());
     paintFingerboard (g, { 24, 116 - top, 760, 318 });
     if (studio())
@@ -235,8 +252,28 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
         const double semis = T.pitch.load() - openPitch[active];
         if (semis > 0.3)
         {
-            finger = juce::jlimit (1, 4, juce::roundToInt ((semis - hp) / 1.75) + 1);
+            finger = fingerOf (semis, hp);
             const float fx = along (semis), fy = stringY (active, fx);
+            // a shift: the finger slides along the string from where it left
+            if (T.sliding.load())
+            {
+                const float sx = along (std::max (0.0, T.slideFrom.load() - openPitch[active]));
+                const float tx = along (T.target.load() - openPitch[active]);
+                const float dash[] = { 4, 3 };
+                g.setColour (colours::steel);
+                g.drawDashedLine ({ sx, fy - 16, tx, fy - 16 }, dash, 2, 1.6f);
+                juce::Path head;
+                const float d = tx >= sx ? 1.0f : -1.0f;
+                head.addTriangle (tx, fy - 16, tx - 7 * d, fy - 20, tx - 7 * d, fy - 12);
+                g.fillPath (head);
+                drawText (g,
+                          "shift",
+                          (sx + tx) / 2,
+                          fy - 24,
+                          Fonts::sans (10.5f),
+                          colours::steel,
+                          juce::Justification::horizontallyCentred);
+            }
             if (T.vibWidth.load() > 3)
             {
                 juce::Path wave;
@@ -309,26 +346,39 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
     struct Item
     {
         juce::String label, value;
+        std::optional<Mode> mode;
     };
+    const float pref
+        = processor.getParameters().getRawParameterValue (params::id::stringPreference.getParamID())->load();
+    const Mode fingering = std::abs (pref) >= 0.5f ? Mode::guided : Mode::autoMode;
+    // the hair left before the bow must change (in the direction it is going), of 62 cm
+    const float left = (down ? 1.0f - hair : hair) * 62.0f;
     const Item items[] = {
-        { "String", sounding ? juce::String::charToString (stringNames[active]) : juce::String ("-") },
+        { "String", sounding ? juce::String::charToString (stringNames[active]) : juce::String ("-"), fingering },
         { "Position",
-          sounding ? (finger == 0 ? juce::String ("open string")
-                                  : ordinal (std::max (1, position)) + juce::String::fromUTF8 (" · finger ")
-                              + juce::String (finger))
-                   : juce::String ("-") },
+          ! sounding             ? juce::String ("-")
+              : T.sliding.load() ? juce::String ("shifting to ") + ordinal (std::max (1, position))
+              : finger == 0
+              ? juce::String ("open string")
+              : ordinal (std::max (1, position)) + juce::String::fromUTF8 (" · finger ") + juce::String (finger),
+          fingering },
         { "Bow",
           juce::String::fromUTF8 (down ? "down ⊓" : "up V") + juce::String::fromUTF8 (" · ")
-              + juce::String (juce::roundToInt (hair * 100)) + "% of hair" },
-        { "Contact", juce::String (beta, 2) + juce::String::fromUTF8 (" · ") + contactName (beta) },
+              + juce::String (juce::roundToInt (hair * 100)) + "% of hair",
+          Mode::autoMode },
+        { "Contact",
+          juce::String (beta, 2) + juce::String::fromUTF8 (" · ") + contactName (beta),
+          modeOf (T.contactMode.load()) },
+        { "Bow left", juce::String (juce::roundToInt (left)) + " of 62 cm", std::nullopt },
     };
     float rx = x + 18;
     for (const auto& it : items)
     {
         drawLabel (g, it.label, rx, ry);
-        drawBadge (g, { rx + it.label.length() * 7.6f + 14, ry - 4 }, Mode::autoMode);
+        if (it.mode)
+            drawBadge (g, { rx + it.label.length() * 7.6f + 14, ry - 4 }, *it.mode);
         drawText (g, it.value, rx, ry + 17, Fonts::sans (12.5f), colours::text);
-        rx += 158;
+        rx += it.label == "Contact" ? 168 : 146;
     }
 }
 
@@ -491,12 +541,14 @@ void PlayView::paintLookAhead (juce::Graphics& g, juce::Rectangle<float> r)
     const Row rows[] = { { "Plan the bow", "spreads each stroke over the note" },
                          { "Vibrate short notes at once", "and to their end" },
                          { "End vibrato", "relaxes before the note ends" },
-                         { "Start shifts early", "with the player milestone (M4)" },
-                         { "Time the attack", "with the player milestone (M4)" } };
+                         { "Plan strings and start shifts early", "with Planned string choice (Left hand tab)" },
+                         { "Time the attack", "arrives in a later version" } };
+    const bool planned
+        = processor.getParameters().getRawParameterValue (params::id::fingerPlan.getParamID())->load() > 0.5f;
     float ry = y + 92;
     for (int i = 0; i < 5; ++i)
     {
-        const bool now = i < 3;
+        const bool now = i < 3 || (i == 3 && planned);
         g.setColour (now ? colours::amber : colours::dim);
         g.fillEllipse (x + 18.5f, ry - 7.5f, 7, 7);
         drawText (g, rows[i].a, x + 34, ry, Fonts::sans (13), now ? colours::text : colours::muted);

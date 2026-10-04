@@ -364,6 +364,16 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.wolf = opt ("wolf", es.wolf);
     es.hold = opt ("hold", es.hold);
     es.modalBody = opt ("modalBody", es.modalBody) != 0;
+    // M6 views: the plugin's Portamento, String Preference, Vibrato Rate/Delay, Bow Change, Stroke
+    // Shaping, Bite and Contact Point controls (plain scales: 1 = 100 %, offsets 0)
+    es.portamento = opt ("portamento", es.portamento);
+    es.stringPreference = opt ("stringPreference", es.stringPreference);
+    es.vibratoRate = opt ("vibratoRate", es.vibratoRate);
+    es.vibratoDelay = opt ("vibratoDelay", es.vibratoDelay);
+    es.bowChange = opt ("bowChange", es.bowChange);
+    es.strokeShaping = opt ("strokeShaping", es.strokeShaping);
+    es.bite = opt ("bite", es.bite);
+    es.contact = opt ("contact", es.contact);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);

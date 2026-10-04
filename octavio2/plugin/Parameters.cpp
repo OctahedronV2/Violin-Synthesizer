@@ -117,6 +117,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::phrasing, "Phrasing", { 0.0f, 200.0f }, 100.0f, "%", 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::fingerPlan, "Plan Fingering", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::drawnCurves, "Drawn Curves", true));
+    // M6 views: scales on the player's own settings (100 % / 0 = as fitted, the 2.1 sound)
+    // shift slides: 0 % clean shifts .. 300 % slow, audible slides
+    layout.add (floatParam (id::portamento, "Portamento", { 0.0f, 300.0f }, 100.0f, "%", 0));
+    // string choice: -100 % bright (low positions, higher strings) .. +100 % dark (high
+    // positions on lower strings)
+    layout.add (floatParam (id::stringPreference, "String Preference", { -100.0f, 100.0f }, 0.0f, "%", 0));
+    layout.add (floatParam (id::vibratoRate, "Vibrato Rate", { -1.5f, 1.5f }, 0.0f, "Hz", 2));
+    // how long a note waits before its vibrato starts, and how long it takes to bloom
+    layout.add (floatParam (id::vibratoDelay, "Vibrato Delay", { 25.0f, 300.0f }, 100.0f, "%", 0));
+    // the bow's acceleration: how quickly it turns at a bow change and gets up to speed
+    layout.add (floatParam (id::bowChange, "Bow Change", { 50.0f, 200.0f }, 100.0f, "%", 0));
+    // how much each quick separate stroke eases off after it speaks, and the taper into a change
+    layout.add (floatParam (id::strokeShaping, "Stroke Shaping", { 0.0f, 150.0f }, 100.0f, "%", 0));
+    // the extra force that makes a stroke speak
+    layout.add (floatParam (id::bite, "Bite", { 0.0f, 200.0f }, 100.0f, "%", 0));
+    // the contact point: - nearer the bridge (brighter, louder), + nearer the fingerboard
+    layout.add (floatParam (id::contact, "Contact Point", { -50.0f, 50.0f }, 0.0f, "%", 0));
     return layout;
 }
 
@@ -145,7 +162,15 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       bowStyle (s.getRawParameterValue (id::bowStyle.getParamID())),
       phrasing (s.getRawParameterValue (id::phrasing.getParamID())),
       fingerPlan (s.getRawParameterValue (id::fingerPlan.getParamID())),
-      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID()))
+      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID())),
+      portamento (s.getRawParameterValue (id::portamento.getParamID())),
+      stringPreference (s.getRawParameterValue (id::stringPreference.getParamID())),
+      vibratoRate (s.getRawParameterValue (id::vibratoRate.getParamID())),
+      vibratoDelay (s.getRawParameterValue (id::vibratoDelay.getParamID())),
+      bowChange (s.getRawParameterValue (id::bowChange.getParamID())),
+      strokeShaping (s.getRawParameterValue (id::strokeShaping.getParamID())),
+      bite (s.getRawParameterValue (id::bite.getParamID())),
+      contact (s.getRawParameterValue (id::contact.getParamID()))
 {
 }
 
@@ -177,6 +202,15 @@ o2::EngineSettings Reader::read() const
     e.fingerPlan = fingerPlan->load() > 0.5f;
     e.drawnCurves = drawnCurves->load() > 0.5f;
     e.hiss = hissScale[juce::jlimit (0, 2, juce::roundToInt (hiss->load()))];
+    // M6 views
+    e.portamento = portamento->load() / 100.0;
+    e.stringPreference = stringPreference->load() / 100.0;
+    e.vibratoRate = vibratoRate->load();
+    e.vibratoDelay = vibratoDelay->load() / 100.0;
+    e.bowChange = bowChange->load() / 100.0;
+    e.strokeShaping = strokeShaping->load() / 100.0;
+    e.bite = bite->load() / 100.0;
+    e.contact = std::exp2 (contact->load() / 100.0);
     return e;
 }
 

@@ -331,6 +331,14 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     for (size_t k = 0; k < 4; ++k)
         T.stringForce[k].store (static_cast<float> (pl.st[k].force));
     juce::ignoreUnused (vn);
+    T.sliding.store (S.slideT0 >= 0.0);
+    T.slideFrom.store (static_cast<float> (S.slideFrom));
+    T.target.store (static_cast<float> (S.target));
+    T.changing.store (pl.changing);
+    T.dynMode.store (pl.manDyn ? 2 : 0);
+    T.vibMode.store (pl.ccVib >= 0.0 ? 2 : 0);
+    T.rateMode.store (pl.ccRate > 0.0 ? 2 : 0);
+    T.contactMode.store (pl.ccContact > 0.0 ? 2 : 0);
 
     const double now = engine->seconds();
     if (now >= nextHistoryT)
