@@ -181,6 +181,13 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
+        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic) are
+        // fixed keys, whatever the Octave setting
+        if (m.getNoteNumber() >= 24 && m.getNoteNumber() <= 28)
+        {
+            engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
+            return;
+        }
         // notes outside the violin (G3 to E7, after Octave) stay silent, as in Octavio 1
         const int pitch = m.getNoteNumber() + 12 * reader.octaveShift();
         if (pitch < 55 || pitch > 104)

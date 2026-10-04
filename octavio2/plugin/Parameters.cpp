@@ -91,6 +91,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                                                               "Bow Hiss",
                                                               juce::StringArray { "Natural", "3x", "6x" },
                                                               0));
+    // the real bridge (M3): the open strings' ring, a wolf at the main body mode, the chin and hand
+    layout.add (floatParam (id::sympathetic, "Sympathetic", { 0.0f, 100.0f }, 50.0f, "%", 0));
+    layout.add (floatParam (id::wolf, "Wolf", { 0.0f, 100.0f }, 0.0f, "%", 0));
+    layout.add (floatParam (id::hold, "Hold", { 0.0f, 100.0f }, 50.0f, "%", 0));
     return layout;
 }
 
@@ -111,7 +115,10 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       distance (s.getRawParameterValue (id::distance.getParamID())),
       bridge (s.getRawParameterValue (id::bridge.getParamID())),
       mute (s.getRawParameterValue (id::mute.getParamID())),
-      hiss (s.getRawParameterValue (id::hiss.getParamID()))
+      hiss (s.getRawParameterValue (id::hiss.getParamID())),
+      sympathetic (s.getRawParameterValue (id::sympathetic.getParamID())),
+      wolf (s.getRawParameterValue (id::wolf.getParamID())),
+      hold (s.getRawParameterValue (id::hold.getParamID()))
 {
 }
 
@@ -134,6 +141,9 @@ o2::EngineSettings Reader::read() const
     e.bridgeHz = bridge->load();
     e.mute = juce::roundToInt (mute->load());
     static constexpr double hissScale[] { 1.0, 3.0, 6.0 };
+    e.sympathetic = sympathetic->load() / 100.0;
+    e.wolf = wolf->load() / 100.0;
+    e.hold = hold->load() / 100.0;
     e.hiss = hissScale[juce::jlimit (0, 2, juce::roundToInt (hiss->load()))];
     return e;
 }

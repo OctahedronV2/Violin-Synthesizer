@@ -49,9 +49,21 @@ ToneView::ToneView (Processor& p)
               "Bridge",
               Knob::Style::small,
               [] (float v) { return juce::String (v / 1000.0f, 2) + " kHz"; }),
-      sympathetic (nullptr, {}, "Sympathetic", Knob::Style::small),
-      wolf (nullptr, {}, "Wolf", Knob::Style::small),
-      hold (nullptr, {}, "Hold", Knob::Style::small),
+      sympathetic (&p.getParameters(),
+                   params::id::sympathetic.getParamID(),
+                   "Sympathetic",
+                   Knob::Style::small,
+                   [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
+      wolf (&p.getParameters(),
+            params::id::wolf.getParamID(),
+            "Wolf",
+            Knob::Style::small,
+            [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
+      hold (&p.getParameters(),
+            params::id::hold.getParamID(),
+            "Hold",
+            Knob::Style::small,
+            [] (float v) { return v < 0.5f ? juce::String ("free") : juce::String (juce::roundToInt (v)) + " %"; }),
       brilliance (&p.getParameters(), params::id::brightness.getParamID(), "Brilliance", Knob::Style::small, db),
       imperfection (nullptr, {}, "Imperfection", Knob::Style::small),
       reverb (&p.getParameters(), params::id::reverb.getParamID(), "Reverb", Knob::Style::small, db),
@@ -83,9 +95,9 @@ ToneView::ToneView (Processor& p)
     quality.setTooltip ("Eco arrives with the optimisation milestone (M8).");
     rooms.setTooltip ("Measured rooms (impulse responses, credits in the About box). Close mics: the violin alone.");
     bridge.setTooltip ("The bridge's rocking resonance: lower is darker, higher is brighter.");
-    sympathetic.setPreview (0.6f, "60 %", "the bridge milestone (M3)");
-    wolf.setPreview (0.3f, "30 %", "the bridge milestone (M3)");
-    hold.setPreview (0.45f, "chin", "the bridge milestone (M3)");
+    sympathetic.setTooltip ("How freely the open strings you are not playing ring along with the notes.");
+    wolf.setTooltip ("A wolf at the body's strongest resonance (near C5): those notes go rough and unsteady.");
+    hold.setTooltip ("The chin and hand on the violin damp its low resonances. 0: hanging free.");
     imperfection.setPreview (0.1f, "10 %", "the player milestone (M4)");
     width.setTooltip ("0: both speakers hear one direction. 100 %: the two microphones as placed.");
     movement.setTooltip ("The player's slow sway, which turns the violin between directions.");
