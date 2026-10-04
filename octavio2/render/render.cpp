@@ -10,6 +10,8 @@
 // Also: fs=192000 (internal rate, default 96000), slips=1 prints Helmholtz health per note.
 // M5: articulation=0..4 (arco, pizz, Bartok pizz, left-hand pizz, harmonic; keyswitches MIDI 24-28
 // do the same inside the file), pizzModel=0 (the old placeholder pluck), pizz*/bartok*/lh*/harm*.
+// Bridge (M3): bridgeModes=0 (M0 generic set) | 1 (CNSM fit), sympathetic=0..1 (0.5), wolf=0..1,
+// hold=0..1 (0.5), admScale=x, modalBody=0 (measured body over the whole band).
 //
 // sound=out.wav renders through o2::Engine instead, the plugin's own code path (player, strings,
 // body, mics, hall), and writes stereo float at 48 kHz:
@@ -107,6 +109,20 @@ static void stringOpts (Params& p)
     O (torsionQ);
     O (fingerLoss);
     O (admScale);
+    O (sympathetic);
+    O (symLossCut);
+    O (symIdleAfter);
+    O (symDamp);
+    O (symCoupling);
+    O (wolf);
+    O (wolfHz);
+    O (wolfMass);
+    O (wolfQ);
+    O (hold);
+    O (holdMax);
+    O (holdHz);
+    O (holdFade);
+    p.bridgeModes = (int) opt ("bridgeModes", p.bridgeModes);
 #undef O
 }
 
@@ -161,6 +177,7 @@ static void playerOpts (PlayerParams& q)
     O (vibPosition);
     O (vibShort);
     O (vibWander);
+    O (vibAmount);
     O (liftAfter);
     O (liftDamp);
     O (liftDampTime);
@@ -314,11 +331,16 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.distance = opt ("distance", es.distance);
     es.bridgeHz = opt ("bridge", es.bridgeHz);
     es.mute = (int) opt ("mute", es.mute);
+    es.sympathetic = opt ("sympathetic", es.sympathetic);
+    es.wolf = opt ("wolf", es.wolf);
+    es.hold = opt ("hold", es.hold);
+    es.modalBody = opt ("modalBody", es.modalBody) != 0;
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
     stringOpts (engine->getViolin().p); // and any continuous strings Params field
+    engine->reset(); // the strings and bridge re-made with those (same state as prepare's)
     engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;
