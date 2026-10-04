@@ -39,6 +39,11 @@ struct EngineSettings
     double bridgeHz = 2900.0; // bridge rocking resonance, 2400 (dark) .. 3600 (bright)
     int mute = 0; // 0 off, 1 con sordino, 2 practice mute
     double hiss = 1.0; // bow hiss (Params::slipNoise) scale: 1 natural, 3, 6 (M2)
+    // bridge (M3): Params::sympathetic, wolf, hold, each 0..1
+    double sympathetic = 0.5; // idle open strings: 0 quiet, 0.5 natural (half-coupled), 1 full and long
+    double wolf = 0.0; // 0: the body as measured; 1: a strong wolf near the main body mode
+    double hold = 0.5; // 0: free (hanging); 0.5: held; 1: held firmly (low modes damped)
+    bool modalBody = true; // the bridge modes radiate below 1.5 kHz (Radiation::setModalBody)
 };
 
 class Engine
@@ -76,6 +81,8 @@ public:
         player->init (*violin, rate);
         dec = Decim();
         dec2 = Decim();
+        lowDec = Decim();
+        lowDec2 = Decim();
         radiation->reset();
         clock = 0;
         head = tail = 0;
@@ -117,7 +124,7 @@ public:
         while (n > 0)
         {
             const int m = std::min (n, Radiation::maxBlock);
-            double force[Radiation::maxBlock];
+            double force[Radiation::maxBlock], low[Radiation::maxBlock];
             for (int i = 0; i < m; ++i)
             {
                 dispatch();
@@ -130,18 +137,26 @@ public:
                     if (over == 4)
                     {
                         dec2.push (F);
+                        lowDec2.push (violin->radLow);
                         if (k & 1)
+                        {
                             dec.push (dec2.out());
+                            lowDec.push (lowDec2.out());
+                        }
                     }
                     else
+                    {
                         dec.push (F);
+                        lowDec.push (violin->radLow);
+                    }
                 }
                 force[i] = dec.out();
+                low[i] = lowDec.out();
                 scope[(size_t) (scopeWrite++ & (scopeSize - 1))] = (float) force[i];
                 ++clock;
             }
             scopeWritten.store (scopeWrite, std::memory_order_release);
-            radiation->process (force, outL, outR, m);
+            radiation->process (force, violin->hasModalBody() ? low : nullptr, outL, outR, m);
             outL += m;
             outR += m;
             n -= m;
@@ -204,12 +219,21 @@ private:
         radiation->setReverbGain (std::pow (10.0, settings.reverbDb / 20.0));
         radiation->setOutputGain (std::pow (10.0, settings.volumeDb / 20.0));
         radiation->setViolin (settings.violin);
+        violin->setBody (settings.violin);
+        radiation->setModalBody (settings.modalBody, violin->modalDelay());
         radiation->setMic (settings.mic);
         radiation->setWidth (settings.width);
         radiation->setMovement (settings.movement);
         radiation->setDistance (settings.distance);
         radiation->setBridge (settings.bridgeHz, settings.mute);
         violin->p.slipNoise = hissBase * settings.hiss;
+        violin->p.sympathetic = settings.sympathetic;
+        if (violin->p.wolf != settings.wolf || violin->p.hold != settings.hold)
+        {
+            violin->p.wolf = settings.wolf;
+            violin->p.hold = settings.hold;
+            violin->applyBody();
+        }
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;
@@ -321,7 +345,7 @@ private:
     double hissBase = Params {}.slipNoise;
     std::unique_ptr<Player> player;
     std::unique_ptr<Radiation> radiation;
-    Decim dec, dec2;
+    Decim dec, dec2, lowDec, lowDec2;
     EngineSettings settings;
     unsigned seed = 1;
     int64_t clock = 0;

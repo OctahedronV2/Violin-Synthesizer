@@ -2,6 +2,8 @@
 //
 //   force -> 60 Hz high-pass -> brightness shelf (1.5 kHz) -> bridge (rocking resonance, mutes)
 //         -> full-band all-direction body (the chosen violin, at its size)
+//            [modal body, M3: above 1.5 kHz only; below it the strings' bridge modes radiate
+//             (Violin::radLow through the same filters), so bridge and body share their poles]
 //            -> hall tail (convolution), after the distance's pre-delay
 //            -> direction filters of the mic position: left and right, each a sway between
 //               three directions -> stereo width -> air -> direct sound at the hall's own delay
@@ -35,6 +37,20 @@ struct Biquad
         return y;
     }
     void reset() { z1 = z2 = 0; }
+    void copyCoefficients (const Biquad& o)
+    {
+        b0 = o.b0;
+        b1 = o.b1;
+        b2 = o.b2;
+        a1 = o.a1;
+        a2 = o.a2;
+    }
+    // RBJ low-pass
+    void lowPass (double fs, double f, double q)
+    {
+        const double w = 2 * 3.14159265358979323846 * f / fs, c = std::cos (w), al = std::sin (w) / (2 * q);
+        set ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + al, -2 * c, 1 - al);
+    }
     void set (double nb0, double nb1, double nb2, double a0, double na1, double na2)
     {
         b0 = nb0 / a0;
@@ -122,12 +138,24 @@ public:
     // room plays the tuned Haydn Finale (fitnotes.py, 2026-10-02) at -23 dB RMS: finish.py's -20 dB
     // less 3 dB of headroom for the loudest peaks, since the plugin has no normaliser. Measured with
     // render.cpp sound= hall=0..8 length=30 on the fitted Finale.
+    // M3's passive CNSM bridge takes more of the strings' energy than the M0 one did, and the
+    // held violin's low modes ring less: the tuned Haydn Finale came out 1.9 dB quieter
+    // (render.cpp sound= length=30, Arvedi near), so this puts it back at the halls' level.
+    static constexpr double bridgeMakeupDb = 1.9;
+    static inline const double bridgeMakeup = std::pow (10.0, bridgeMakeupDb / 20.0);
     static constexpr double hallGainDb[maxHalls] = { 4.9, 35.7, 38.1, 0.0, -12.8, -4.8, 5.1, -1.8, -2.4 };
 
     void prepare (const RadiationData& data)
     {
         hp1.highPass (fs, 60.0, 0.54119610);
         hp2.highPass (fs, 60.0, 1.30656296);
+        lowHp1 = hp1;
+        lowHp2 = hp2;
+        for (int k = 0; k < 2; ++k) // Linkwitz-Riley, 4th order: the two halves sum flat
+        {
+            lowLp[k].lowPass (fs, crossover, 0.70710678);
+            bodyHp[k].highPass (fs, crossover, 0.70710678);
+        }
         setBrightness (brightDb);
         setBridge (bridgeHz, mute);
         bodies = data.bodies;
@@ -168,6 +196,16 @@ public:
         hp2.reset();
         shelf.reset();
         bridge.reset();
+        lowHp1.reset();
+        lowHp2.reset();
+        lowShelf.reset();
+        lowBridge.reset();
+        for (int k = 0; k < 2; ++k)
+        {
+            lowLp[k].reset();
+            bodyHp[k].reset();
+        }
+        std::fill (std::begin (lowLine), std::end (lowLine), 0.0);
         air[0].reset();
         air[1].reset();
         body.reset();
@@ -196,6 +234,7 @@ public:
             shelf.highShelf (fs, 1500.0, db);
         else
             shelf.set (1, 0, 0, 1, 0, 0);
+        lowShelf.copyCoefficients (shelf);
     }
     double brightness() const { return brightDb; }
 
@@ -214,7 +253,19 @@ public:
         bridge.b0 *= loss;
         bridge.b1 *= loss;
         bridge.b2 *= loss;
+        lowBridge.copyCoefficients (bridge);
     }
+
+    // Modal body (M3): below `crossover` the sound comes from the strings' bridge modes
+    // (process()'s low input) instead of the measured body; delay: that body's bulk delay in
+    // samples (Violin::modalDelay). Off: the measured body over the whole band, as before M3.
+    static constexpr double crossover = 1500.0;
+    void setModalBody (bool on, int delay)
+    {
+        modalBody = on;
+        lowDelay = std::clamp (delay, 0, lowMask);
+    }
+    bool modalBodyOn() const { return modalBody && bodySize == 1.0; }
 
     // Violin: data.bodies[index]; changes crossfade
     void setViolin (int index) { body.selectFilter (std::clamp (index, 0, numViolins - 1)); }
@@ -281,8 +332,10 @@ public:
     void setOutputGain (double g) { outGain = g; }
     int hallCount() const { return numHalls; }
 
-    // n <= maxBlock samples of bridge force -> left, right (overwritten)
-    void process (const double* force, float* outL, float* outR, int n)
+    // n <= maxBlock samples of bridge force -> left, right (overwritten). low: the modal body's
+    // radiated signal (Violin::radLow) for the same samples, or nullptr for the measured body alone.
+    void process (const double* force, float* outL, float* outR, int n) { process (force, nullptr, outL, outR, n); }
+    void process (const double* force, const double* low, float* outL, float* outR, int n)
     {
         if (fadeFrom < 0 && hallWanted != current)
         {
@@ -297,6 +350,16 @@ public:
         for (int i = 0; i < n; ++i)
             diffuse[i] = (float) bridge.tick (shelf.tick (hp2.tick (hp1.tick (force[i]))));
         body.process (diffuse, n);
+        if (low != nullptr && modalBodyOn())
+            for (int i = 0; i < n; ++i)
+            {
+                // the measured body above the crossover, the bridge modes below it
+                const double hi = bodyHp[1].tick (bodyHp[0].tick (diffuse[i]));
+                lowLine[lowPos] = lowBridge.tick (lowShelf.tick (lowHp2.tick (lowHp1.tick (low[i]))));
+                const double lo = lowLp[1].tick (lowLp[0].tick (lowLine[(lowPos - lowDelay) & lowMask]));
+                lowPos = (lowPos + 1) & lowMask;
+                diffuse[i] = (float) (hi + lo);
+            }
         for (int k = 0; k < 6; ++k)
         {
             std::copy (diffuse, diffuse + n, d[k]);
@@ -368,7 +431,7 @@ public:
             if (fadePos >= len)
                 fadeFrom = -1;
         }
-        const float og = (float) outGain;
+        const float og = (float) (outGain * bridgeMakeup);
         for (int i = 0; i < n; ++i)
         {
             outL[i] *= og;
@@ -522,6 +585,12 @@ private:
 
     static constexpr int dmask = 2047, tmask = 2047;
     Biquad hp1, hp2, shelf, bridge, air[2];
+    // modal body: the low path's own copies of the filters before the body, and the crossover
+    Biquad lowHp1, lowHp2, lowShelf, lowBridge, lowLp[2], bodyHp[2];
+    static constexpr int lowMask = 255;
+    double lowLine[lowMask + 1] = {};
+    int lowPos = 0, lowDelay = 52;
+    bool modalBody = true;
     double brightDb = 5.0, bridgeHz = bridgeRef, bodySize = 1.0, movement = 0.0, distance = refDistance;
     int mute = 0;
     std::vector<std::vector<float>> bodies;
