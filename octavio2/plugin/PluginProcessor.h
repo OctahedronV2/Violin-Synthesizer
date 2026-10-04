@@ -1,6 +1,8 @@
 #pragma once
 
+#include "MidiMap.h"
 #include "Parameters.h"
+#include "Presets.h"
 #include "ui/Telemetry.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -55,6 +57,10 @@ public:
     // for tests and the displays (the editor only reads the engine's lock-free logs)
     o2::Engine& getEngine() { return *engine; }
     int editorTab = 0; // the tab the editor shows, kept while the editor is closed
+    // M6: the MIDI map (the MIDI tab edits it) and the sound presets (message thread)
+    MidiMap& getMidiMap() { return midiMap; }
+    Presets& getPresets() { return *presets; }
+    bool isPedalDown() const { return pedalShown.load (std::memory_order_relaxed); }
     double getLatencyMs() const { return getLatencySamples() * 1000.0 / hostRate; }
 
 private:
@@ -82,6 +88,13 @@ private:
 
     int64_t engineTime (int hostOffset) const;
     void handleMidi (const juce::MidiMessage&, int64_t when);
+    // M6: what the engine receives: notes go through the slur pedal, controllers through the map
+    o2::EngineSettings currentSettings() const;
+    void engineNoteOn (int64_t when, int pitch, double vel127);
+    void engineNoteOff (int64_t when, int pitch);
+    void setPedal (bool down, int64_t when);
+    void mappedController (int cc, int value, int64_t when);
+    void notifyMappedParameters();
     void renderEngine (float* left, float* right, int numSamples);
     void updateLatency();
     void updateTelemetry (double blockSeconds, juce::int64 startTicks);
@@ -106,6 +119,19 @@ private:
     Telemetry telemetry;
     int lastVelocity = 0;
     double nextHistoryT = 0.0;
+
+    // M6: MIDI mapping, slur pedal and pitch bend (audio thread state, fixed size)
+    MidiMap midiMap { *this };
+    std::unique_ptr<Presets> presets;
+    static constexpr int maxMappedParameters = 256;
+    std::array<std::atomic<float>, maxMappedParameters> mappedValue {}; // normalised, for the host
+    std::array<std::atomic<bool>, maxMappedParameters> mappedDirty {};
+    std::array<std::atomic<float>*, maxMappedParameters> rawValue {}; // the APVTS values the engine reads
+    bool mappedChanged = false;
+    bool pedal = false;
+    std::atomic<bool> pedalShown { false };
+    std::array<bool, 128> deferredOff {}; // engine pitches released while the pedal was down
+    double hostBpm = 0.0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Processor)
 };

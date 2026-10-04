@@ -270,6 +270,7 @@ struct Player
     bool shaped = false, quick = false;
     double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0, vibScale = 1.0,
            vibEnd = -1.0;
+    double bendCents = 0.0; // M6: channel pitch bend (the plugin's controller 128, in cents)
     // the stroke shape in use (set at each new stroke from the normal or the quick settings)
     double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
@@ -970,6 +971,13 @@ struct Player
     // 10 ms per step (0 = it doesn't), replacing vibTaper.
     void controller (int cc, double v127)
     {
+        // M6: pitch bend arrives as controller 128, its value in cents (the plugin scales it by
+        // the Bend range parameter); CC121 below centres it again
+        if (cc == 128)
+        {
+            bendCents = v127;
+            return;
+        }
         if (cc == 11)
             exprTarget = std::pow (10.0, (v127 - 100.0) * 0.4 / 20.0);
         else if (cc == 21)
@@ -1003,6 +1011,7 @@ struct Player
         {
             manDyn = false;
             ccVib = ccRate = ccContact = -1.0;
+            bendCents = 0.0; // M6
         }
     }
 
@@ -1192,6 +1201,8 @@ struct Player
                 else
                     pitch = S.slideFrom + (S.target - S.slideFrom) * 0.5 * (1.0 - std::cos (pi * u));
             }
+            if (S.bowed)
+                pitch += bendCents / 100.0; // M6: pitch bend moves the bowed notes
             const bool sliding = S.slideT0 >= 0.0;
             if (S.vibWidthTarget > 0.0 && S.bowed)
             {

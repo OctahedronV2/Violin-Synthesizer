@@ -134,6 +134,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::bite, "Bite", { 0.0f, 200.0f }, 100.0f, "%", 0));
     // the contact point: - nearer the bridge (brighter, louder), + nearer the fingerboard
     layout.add (floatParam (id::contact, "Contact Point", { -50.0f, 50.0f }, 0.0f, "%", 0));
+    // MIDI (M6): the pitch wheel's range in semitones (0 = ignored)
+    layout.add (floatParam (id::bendRange, "Bend Range", { 0.0f, 12.0f, 1.0f }, 2.0f, "st", 0));
     return layout;
 }
 
@@ -170,7 +172,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       bowChange (s.getRawParameterValue (id::bowChange.getParamID())),
       strokeShaping (s.getRawParameterValue (id::strokeShaping.getParamID())),
       bite (s.getRawParameterValue (id::bite.getParamID())),
-      contact (s.getRawParameterValue (id::contact.getParamID()))
+      contact (s.getRawParameterValue (id::contact.getParamID())),
+      bendRangeValue (s.getRawParameterValue (id::bendRange.getParamID()))
 {
 }
 

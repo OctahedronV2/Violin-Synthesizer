@@ -66,7 +66,8 @@ Editor::Editor (Processor& p)
     : AudioProcessorEditor (p),
       processor (p),
       mode (&p.getParameters(), params::id::mode.getParamID(), { { "Live" }, { "Studio" } }),
-      keyboard (p)
+      keyboard (p),
+      presets (p)
 {
     setLookAndFeel (&lookAndFeel);
     mode.setLayout (0, 30, 4, 70);
@@ -74,7 +75,6 @@ Editor::Editor (Processor& p)
                      "compensates the delay.");
     instrument.setTooltip ("Viola, cello and bass arrive after the violin (the strings section).");
     player.setTooltip ("Player styles (baroque, romantic, folk) arrive with the styles milestone (M7).");
-    presets.setTooltip ("Presets arrive with the plugin milestone (M6). Your host's presets save every setting now.");
     for (auto* c : std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets })
         canvas.addAndMakeVisible (c);
     mode.setBounds (916, 16, 144, 30);
@@ -189,9 +189,7 @@ void Editor::Canvas::paint (juce::Graphics& g)
     // instrument, player, presets (previews)
     previewBox (g, { 214, 14, 170, 34 }, "Modern violin", true);
     previewBox (g, { 394, 14, 180, 34 }, "Player: Modern soloist", true);
-    previewBox (g, { 592, 14, 34, 34 }, juce::String::fromUTF8 ("‹"), false, juce::Justification::horizontallyCentred);
-    previewBox (g, { 630, 14, 230, 34 }, "Default", false, juce::Justification::horizontallyCentred);
-    previewBox (g, { 864, 14, 34, 34 }, juce::String::fromUTF8 ("›"), false, juce::Justification::horizontallyCentred);
+    // presets: ui::PresetBar (M6)
     drawText (g, editor.latencyText, 1176, 36, Fonts::mono (11), colours::muted, juce::Justification::right);
     // tabs
     for (int i = 0; i < tabCount; ++i)
