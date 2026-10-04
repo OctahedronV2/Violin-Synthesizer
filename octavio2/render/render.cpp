@@ -268,6 +268,35 @@ static void playerOpts (PlayerParams& q)
     O (lhFromNut);
     O (harmTouch);
     O (harmForce);
+    // M4
+    O (phrase);
+    O (phraseArc);
+    O (phraseRise);
+    O (phraseFall);
+    O (phraseGap);
+    O (phraseLong);
+    O (highLoud);
+    O (agogic);
+    O (stress);
+    O (restAccent);
+    O (mdvDepth);
+    O (mdvMin);
+    O (mdvFull);
+    O (phraseVelSpread);
+    O (fingerPlan);
+    O (anticipate);
+    O (costShift);
+    O (costShiftSemi);
+    O (costCross);
+    O (costOpen);
+    O (costHigh);
+    O (vibRateHigh);
+    O (vibStress);
+    O (bowStyle);
+    O (legatoGap);
+    O (autoMartele);
+    O (autoSpiccato);
+    O (drawnCurves);
 #undef O
 }
 
@@ -388,8 +417,10 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     for (int64_t i = 0; i < n; i += block)
     {
         const int m = (int) std::min<int64_t> (block, n - i);
-        // events are handed over a block ahead, as a host does; the engine plays them on time
-        while (e < ev.size() && at (ev[e].t) < i + m)
+        // events are handed over a block ahead, as a host does; the engine plays them on time.
+        // A score (planned) is handed over the look-ahead early, so the player sees the notes coming
+        const int64_t early = mode == "planned" ? Engine::lookAheadSamples : 0;
+        while (e < ev.size() && at (ev[e].t) < i + m + early)
         {
             const int64_t when = at (ev[e].t);
             if (ev[e].type == 2)

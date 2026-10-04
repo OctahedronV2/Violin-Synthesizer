@@ -306,6 +306,7 @@ private:
                             sounding[e.a] = dur <= 0.0;
                     }
                     held[e.a & 127] = true;
+                    lookAhead (e, dur);
                     player->nextDur = dur;
                     player->noteOn (e.a, e.b);
                     log ({ seconds(),
@@ -328,6 +329,32 @@ private:
                     releaseAll();
                     break;
             }
+        }
+    }
+
+    // M4: the notes queued after e (Studio look-ahead, or a score whose lengths are known) for
+    // the player's fingering and phrase plan. Live mode sees none: it never waits.
+    void lookAhead (const Ev& e, double dur)
+    {
+        player->nAhead = 0;
+        player->aheadValid = settings.studio || dur > 0.0;
+        if (! player->aheadValid)
+            return;
+        for (uint64_t k = head; k < tail && player->nAhead < Player::maxAhead; ++k)
+        {
+            const Ev& f = queue[k & qmask];
+            if (f.t - e.t > lookAheadSamples || f.type == Ev::allOff)
+                break;
+            if (f.type != Ev::on)
+                continue;
+            double fd = f.dur;
+            for (uint64_t j = k + 1; fd <= 0.0 && j < tail; ++j)
+            {
+                const Ev& g = queue[j & qmask];
+                if ((g.a == f.a && (g.type == Ev::off || g.type == Ev::on)) || g.type == Ev::allOff)
+                    fd = (double) (g.t - f.t) / rate;
+            }
+            player->ahead[player->nAhead++] = { (double) (f.t - e.t) / rate, f.a, fd, f.b };
         }
     }
 

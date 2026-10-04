@@ -53,8 +53,8 @@ const Lane lanes[] = {
 
 CurvesView::CurvesView (Processor& p)
     : processor (p),
-      guess (juce::String::fromUTF8 ("↻ Guess curves"), "the player milestone (M4)"),
-      drag (juce::String::fromUTF8 ("⠿ Drag curves as MIDI"), "the player milestone (M4)", true)
+      guess (juce::String::fromUTF8 ("↻ Guess curves"), "a later milestone"),
+      drag (*this)
 {
     guess.setBounds (designWidth - 380, juce::roundToInt (112 - top), 150, 32);
     drag.setBounds (designWidth - 220, juce::roundToInt (112 - top), 196, 32);
@@ -72,6 +72,21 @@ void CurvesView::timerCallback()
 void CurvesView::update()
 {
     track.read (processor.getEngine());
+    // copy the new curve points: every sounding one, and the first silent one after (a gap)
+    const auto& T = processor.getTelemetry();
+    const auto count = T.historyCount.load (std::memory_order_acquire);
+    if (count - historyRead > Telemetry::historySize - 64)
+        historyRead = count - (Telemetry::historySize - 64);
+    for (; historyRead < count; ++historyRead)
+    {
+        const auto pt = T.history[(size_t) (historyRead % Telemetry::historySize)];
+        if (! points.empty() && pt.t < points.back().t - 1.0f)
+            points.clear(); // the engine was reset
+        if (pt.sounding || (! points.empty() && points.back().sounding))
+            points.push_back (pt);
+    }
+    if (points.size() > 8000) // keep the last 45 s or so of playing
+        points.erase (points.begin(), points.begin() + (std::ptrdiff_t) (points.size() - 4500));
     // follow the playing; once it stops, hold the last region still
     const double now = processor.getEngine().seconds();
     bool sounding = false;
@@ -89,8 +104,8 @@ void CurvesView::paint (juce::Graphics& g)
 {
     update();
     drawText (g,
-              "The curves the player chose for the last 16 s it played. Drawing your own (Guided and Manual lanes) "
-              "arrives with the player milestone.",
+              "The curves the player chose for the last 16 s it played. Drag them into your DAW as MIDI (CC1, CC26, "
+              "CC19, CC74): a lane you play back into Octavio takes over from the player.",
               24,
               132 - top,
               Fonts::sans (12.5f),
@@ -139,8 +154,6 @@ void CurvesView::paint (juce::Graphics& g)
     }
 
     // lanes
-    const auto& T = processor.getTelemetry();
-    const auto count = T.historyCount.load (std::memory_order_acquire);
     const float lh = 104; // four lanes between the notes and the keyboard
     for (int i = 0; i < 4; ++i)
     {
@@ -164,10 +177,8 @@ void CurvesView::paint (juce::Graphics& g)
         // one point per 10 ms, the gaps (no note) left out
         juce::Path p;
         bool pen = false;
-        const uint64_t first = count > (uint64_t) (span * 100 + 200) ? count - (uint64_t) (span * 100 + 200) : 0;
-        for (uint64_t k = first; k < count; ++k)
+        for (const auto& pt : points)
         {
-            const auto& pt = T.history[(size_t) (k % Telemetry::historySize)];
             if (pt.t < t0 || pt.t > windowEnd)
             {
                 pen = false;
@@ -188,5 +199,119 @@ void CurvesView::paint (juce::Graphics& g)
         g.setColour (lane.colour);
         g.strokePath (p, juce::PathStrokeType (2));
     }
+}
+
+// ---------------------------------------------------------------- export as MIDI
+juce::File CurvesView::writeMidi (const juce::File& file)
+{
+    update();
+    const double t1 = windowEnd, t0 = t1 - span;
+    std::vector<NoteTrack::Note> notes;
+    for (const auto& n : track.notes)
+        if (! n.planned && n.on >= t0 && n.on < t1)
+            notes.push_back (n);
+    if (notes.empty())
+        return {};
+    std::sort (notes.begin(), notes.end(), [] (const auto& a, const auto& b) { return a.on < b.on; });
+    const double start = notes.front().on;
+    const float bpmNow = processor.getTelemetry().bpm.load();
+    const double bpm = bpmNow > 20.0f && bpmNow < 400.0f ? (double) bpmNow : 120.0;
+    constexpr int ppq = 960;
+    auto tick = [&] (double t) { return std::max (0.0, (t - start) * bpm / 60.0 * ppq); };
+
+    juce::MidiMessageSequence seq;
+    seq.addEvent (juce::MidiMessage::tempoMetaEvent (juce::roundToInt (60.0e6 / bpm)), 0.0);
+    for (size_t i = 0; i < notes.size(); ++i)
+    {
+        const auto& n = notes[i];
+        double off = n.off < 0 ? t1 : n.off;
+        // a slurred note overlaps the one before it, so playing the file back slurs it again
+        if (i + 1 < notes.size() && notes[i + 1].slur && std::abs (off - notes[i + 1].on) < 0.005)
+            off = notes[i + 1].on + 0.02;
+        seq.addEvent (juce::MidiMessage::noteOn (1, n.pitch, (juce::uint8) 100), tick (n.on));
+        seq.addEvent (juce::MidiMessage::noteOff (1, n.pitch), tick (std::max (off, n.on + 0.01)));
+    }
+    // one controller event per lane whenever its value moves a step
+    int last[4] = { -1, -1, -1, -1 };
+    const int ccs[4] = { 1, 26, 19, 74 };
+    for (const auto& pt : points)
+    {
+        if (! pt.sounding || pt.t < start - 0.05 || pt.t > t1)
+            continue;
+        const int v[4] = { juce::jlimit (0, 127, juce::roundToInt (pt.dynamics * 127.0f)),
+                           juce::jlimit (0, 127, juce::roundToInt (pt.vibWidth * 2.0f)),
+                           juce::jlimit (0, 127, juce::roundToInt ((pt.vibRate - 4.0f) / 4.0f * 127.0f)),
+                           juce::jlimit (0, 127, juce::roundToInt ((1.0f - (pt.contact - 0.02f) / 0.2f) * 127.0f)) };
+        for (int k = 0; k < 4; ++k)
+            if (v[k] != last[k])
+            {
+                last[k] = v[k];
+                seq.addEvent (juce::MidiMessage::controllerEvent (1, ccs[k], v[k]), tick (pt.t));
+            }
+    }
+    seq.sort();
+    seq.updateMatchedPairs();
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote (ppq);
+    midi.addTrack (seq);
+    file.deleteFile();
+    juce::FileOutputStream out (file);
+    if (! out.openedOk() || ! midi.writeTo (out))
+        return {};
+    out.flush();
+    return file;
+}
+
+CurvesView::DragButton::DragButton (CurvesView& v)
+    : view (v)
+{
+    setTooltip ("Drag the shown curves into your DAW as a MIDI file: the notes, CC1 dynamics, CC26 vibrato width, "
+                "CC19 vibrato rate, CC74 contact point. Click to save it in Documents/Octavio 2.");
+    setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+}
+
+void CurvesView::DragButton::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (colours::amber.withAlpha (isMouseOverOrDragging() ? 0.55f : 0.4f));
+    g.fillRoundedRectangle (r, 7);
+    g.setColour (colours::line);
+    g.drawRoundedRectangle (r, 7, 1);
+    drawText (g,
+              juce::String::fromUTF8 ("⠿ Drag curves as MIDI"),
+              r.getCentreX(),
+              r.getCentreY() + 4.5f,
+              Fonts::sans (12.5f, true),
+              colours::text,
+              juce::Justification::horizontallyCentred);
+}
+
+void CurvesView::DragButton::mouseDown (const juce::MouseEvent&)
+{
+    dragged = false;
+}
+
+void CurvesView::DragButton::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragged || e.getDistanceFromDragStart() < 6)
+        return;
+    dragged = true;
+    const auto f = view.writeMidi (
+        juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("Octavio 2 curves.mid"));
+    if (f.existsAsFile())
+        juce::DragAndDropContainer::performExternalDragDropOfFiles ({ f.getFullPathName() }, false, this);
+}
+
+void CurvesView::DragButton::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragged || ! getLocalBounds().contains (e.getPosition()))
+        return;
+    auto dir = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Octavio 2");
+    dir.createDirectory();
+    const auto f = view.writeMidi (dir.getNonexistentChildFile ("Octavio 2 curves", ".mid"));
+    status
+        = f.existsAsFile() ? "Saved " + f.getFullPathName() : juce::String ("Play something first: nothing to export.");
+    setTooltip (status);
+    repaint();
 }
 } // namespace octavio2::ui

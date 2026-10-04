@@ -251,6 +251,10 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     const auto startTicks = juce::Time::getHighResolutionTicks();
     const int n = buffer.getNumSamples();
     engine->setSettings (reader.read());
+    if (auto* head = getPlayHead())
+        if (const auto pos = head->getPosition())
+            if (const auto bpm = pos->getBpm())
+                telemetry.bpm.store (static_cast<float> (*bpm));
 
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
@@ -314,7 +318,7 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     T.slurNotes.store (pl.slurNotes);
     T.releasing.store (pl.releasing);
     T.pitch.store (static_cast<float> (S.pitch));
-    T.dynamics.store (static_cast<float> (pl.d));
+    T.dynamics.store (static_cast<float> (pl.dEff()));
     T.handPos.store (static_cast<float> (pl.handPos));
     T.bowDir.store (static_cast<float> (pl.dir));
     T.hair.store (static_cast<float> (pl.hair / pl.pp.bowLength));
@@ -335,7 +339,7 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
         const auto i = T.historyCount.load (std::memory_order_relaxed);
         T.history[static_cast<size_t> (i % Telemetry::historySize)]
             = { static_cast<float> (now),
-                static_cast<float> (pl.d),
+                static_cast<float> (pl.dEff()),
                 sounding ? static_cast<float> (S.vibWidth) : 0.0f,
                 static_cast<float> (pl.betaFor (s)),
                 static_cast<float> (S.vibRate),
