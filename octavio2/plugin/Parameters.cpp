@@ -24,7 +24,46 @@ const juce::StringArray& violinNames()
 
 const juce::StringArray& articulationNames()
 {
-    static const juce::StringArray names { "Arco", "Pizzicato", "Bartok pizz", "Left-hand pizz", "Harmonics" };
+    // append only: the index is saved in projects (M7 added 5-8)
+    static const juce::StringArray names { "Arco",
+                                           "Pizzicato",
+                                           "Bartok pizz",
+                                           "Left-hand pizz",
+                                           "Harmonics",
+                                           "Tremolo",
+                                           juce::String::fromUTF8 ("Sautillé"),
+                                           "Portato",
+                                           "Col legno battuto" };
+    return names;
+}
+
+const juce::StringArray& stringsNames()
+{
+    static const juce::StringArray names { "Synthetic", "Gut", "Steel" };
+    return names;
+}
+
+const juce::StringArray& rosinNames()
+{
+    static const juce::StringArray names { "Light", "Standard", "Dark", "Baroque" };
+    return names;
+}
+
+const juce::StringArray& bowNames()
+{
+    static const juce::StringArray names { "Modern", "Baroque" };
+    return names;
+}
+
+const juce::StringArray& contactNames()
+{
+    static const juce::StringArray names { "Ordinario", "Sul ponticello", "Sul tasto" };
+    return names;
+}
+
+const juce::StringArray& tremoloSyncNames()
+{
+    static const juce::StringArray names { "Free", "16ths", "16th triplets", "32nds" };
     return names;
 }
 
@@ -163,6 +202,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::a4, "A4 Reference", { 415.0f, 466.0f, 0.1f }, 440.0f, "Hz", 1));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::mpe, "MPE", false));
     layout.add (std::make_unique<juce::AudioParameterInt> (id::mpeBendRange, "MPE Bend Range", 1, 96, 48));
+    // M7 instrument: the parts (Tone tab; the defaults are the 2.1 violin), the contact point
+    // (keyswitches A1-B1) and the tremolo's speed (free, or synced to the host's tempo)
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::strings, "Strings", stringsNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::rosin, "Rosin", rosinNames(), 1));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::bow, "Bow", bowNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::contactStyle, "Contact", contactNames(), 0));
+    layout.add (floatParam (id::tremoloSpeed, "Tremolo Speed", { 4.0f, 24.0f }, 12.0f, "/s", 1));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::tremoloSync, "Tremolo Sync", tremoloSyncNames(), 0));
     return layout;
 }
 
@@ -206,7 +253,13 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       tuningKey (s.getRawParameterValue (id::tuningKey.getParamID())),
       a4 (s.getRawParameterValue (id::a4.getParamID())),
       mpeOn (s.getRawParameterValue (id::mpe.getParamID())),
-      mpeBend (s.getRawParameterValue (id::mpeBendRange.getParamID()))
+      mpeBend (s.getRawParameterValue (id::mpeBendRange.getParamID())),
+      strings (s.getRawParameterValue (id::strings.getParamID())),
+      rosin (s.getRawParameterValue (id::rosin.getParamID())),
+      bow (s.getRawParameterValue (id::bow.getParamID())),
+      contactStyle (s.getRawParameterValue (id::contactStyle.getParamID())),
+      tremoloSpeed (s.getRawParameterValue (id::tremoloSpeed.getParamID())),
+      tremoloSync (s.getRawParameterValue (id::tremoloSync.getParamID()))
 {
 }
 
@@ -252,6 +305,13 @@ o2::EngineSettings Reader::read() const
     e.intonation = juce::roundToInt (intonationSystem->load());
     e.tuningKey = juce::roundToInt (tuningKey->load());
     e.a4 = std::round (a4->load() * 10.0) / 10.0; // 0.1 Hz steps: 440 is exactly 440
+    // M7 instrument (the host's tempo is added by the processor)
+    e.strings = juce::roundToInt (strings->load());
+    e.rosin = juce::roundToInt (rosin->load());
+    e.bow = juce::roundToInt (bow->load());
+    e.contactStyle = juce::roundToInt (contactStyle->load());
+    e.tremoloRate = tremoloSpeed->load();
+    e.tremoloSync = juce::roundToInt (tremoloSync->load());
     return e;
 }
 

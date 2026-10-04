@@ -1,0 +1,27 @@
+//! g="Octavio" n="Octavio 2 violin"
+//! m="Octavio 2 (2.2): keyswitches C1-B1. Group 1 articulation, group 2 contact point."
+Bank 72 2 Octavio 2 violin
+//! c=long i=note-whole o=note:24
+0 Arco
+//! c=short-light i=pizz o=note:25
+1 Pizzicato
+//! c=short-dark i=pizz-bartok o=note:26
+2 Bartok pizz
+//! c=short-light i=pizz-mute o=note:27
+3 Left-hand pizz
+//! c=fx i=harmonics o=note:28
+4 Harmonics
+//! c=textured i=tremolo o=note:29
+5 Tremolo
+//! c=short i=spiccato o=note:30
+6 Sautille
+//! c=long-light i=portato o=note:31
+7 Portato
+//! c=fx i=col-legno o=note:32
+8 Col legno battuto
+//! c=default i=note-whole g=2 o=note:33
+20 Ordinario
+//! c=textured i=sul-pont g=2 o=note:34
+21 Sul ponticello
+//! c=long-dark i=sul-tasto g=2 o=note:35
+22 Sul tasto

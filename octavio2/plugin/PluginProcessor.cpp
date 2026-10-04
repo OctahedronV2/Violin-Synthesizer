@@ -199,9 +199,10 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
-        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic) are
-        // fixed keys, whatever the Octave setting
-        if (m.getNoteNumber() >= 24 && m.getNoteNumber() <= 28)
+        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7:
+        // 29-32 Tremolo, Sautille, Portato, Col legno, 33-35 the contact point) are fixed keys,
+        // whatever the Octave setting
+        if (m.getNoteNumber() >= params::keyswitchFirst && m.getNoteNumber() <= params::keyswitchLast)
         {
             engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
             return;
@@ -253,7 +254,9 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
 // M6 ------------------------------------------------------------------------------------------
 o2::EngineSettings Processor::currentSettings() const
 {
-    return reader.read();
+    auto e = reader.read();
+    e.tempo = hostBpm; // M7: tempo-synced tremolo (0 = no host tempo: free)
+    return e;
 }
 
 // The slur pedal (Slur everything, CC64 by default): while it is down a released note keeps

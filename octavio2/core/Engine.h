@@ -65,6 +65,14 @@ struct EngineSettings
     int intonation = 0;
     int tuningKey = 0;
     double a4 = 440.0;
+    // M7 instrument: parts and extended articulations
+    int strings = 0; // Violin::setStringSet: 0 synthetic, 1 gut, 2 steel
+    int rosin = 1; // Violin::rosin: 0 light, 1 standard, 2 dark, 3 baroque
+    int bow = 0; // 0 modern, 1 baroque (Engine::applyBow)
+    int contactStyle = 0; // PlayerParams::contact: 0 ordinario, 1 sul ponticello, 2 sul tasto
+    double tremoloRate = 12.0; // strokes per second (free tremolo)
+    int tremoloSync = 0; // 0 free, 1 16ths, 2 16th triplets, 3 32nds (needs tempo)
+    double tempo = 0.0; // the host's tempo, bpm (0 = unknown)
 };
 
 class Engine
@@ -82,6 +90,8 @@ public:
         player = std::make_unique<Player>();
         radiation = std::make_unique<Radiation>();
         radiation->prepare (data);
+        rosinApplied = 1;
+        bowApplied = 0;
         this->seed = seed;
         reset();
     }
@@ -343,6 +353,23 @@ private:
         player->pp.shapeAmount = settings.strokeShaping;
         player->pp.biteScale = settings.bite;
         player->pp.contactScale = settings.contact;
+        // M7 instrument (each part is written only when it changes, so the renderer's experiments
+        // on the same fields survive)
+        violin->setStringSet (settings.strings);
+        if (settings.rosin != rosinApplied)
+        {
+            rosinApplied = settings.rosin;
+            violin->setRosin (settings.rosin);
+        }
+        if (settings.bow != bowApplied)
+        {
+            bowApplied = settings.bow;
+            applyBow (settings.bow);
+        }
+        player->pp.contact = settings.contactStyle;
+        player->pp.tremoloRate = settings.tremoloRate;
+        player->pp.tremoloSync = settings.tremoloSync;
+        player->pp.tempo = settings.tempo;
         applyTuning();
     }
 
@@ -360,6 +387,7 @@ private:
         player->pp.seed = seed;
         styleNow = style;
         tuningDirty = true;
+        bowApplied = -1; // the style reset the bow's player fields: write them again
     }
 
     // M7: the intonation system -> the player's pitch table and the open strings' tuning
@@ -389,6 +417,27 @@ private:
                 player->retuneOpen (i);
             }
         }
+    }
+
+    // M7: the bow. Modern = the defaults. Baroque: shorter (56 cm of hair) and lighter (the player
+    // presses at most 1.4 N), fewer hairs (8 mm ribbon) at a lower tension (softer hair), light at
+    // the tip, and the baroque player's strokes: each separate note breathes out (lift-off stroke)
+    // and short notes lift off the string and ring instead of stopping on it.
+    void applyBow (int b)
+    {
+        const Params P;
+        PlayerParams Q; // the modern bow: as the current player style plays it
+        o2::applyStyle (Q, styleNow);
+        auto& p = violin->p;
+        auto& q = player->pp;
+        const bool baroque = b == 1;
+        p.bowWidth = baroque ? 0.008 : P.bowWidth;
+        p.hairStiffness = baroque ? 80000.0 : P.hairStiffness;
+        q.bowLength = baroque ? 0.56 : Q.bowLength;
+        q.forceCap = baroque ? 1.4 : Q.forceCap;
+        q.tipLight = baroque ? 0.3 : Q.tipLight;
+        q.liftStroke = baroque ? 0.3 : Q.liftStroke;
+        q.stopBelow = baroque ? 0.0 : Q.stopBelow;
     }
 
     void push (Ev e)
@@ -570,6 +619,7 @@ private:
     double tunedA4 = 0.0, tunedAmount = -1.0;
     double table[128] = {};
     double baseF0[4] = {};
+    int rosinApplied = 1, bowApplied = 0; // M7: the parts last written into the strings and player
     int64_t clock = 0;
 
     static constexpr uint64_t qmask = 8191;
