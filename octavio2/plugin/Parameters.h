@@ -60,7 +60,24 @@ inline const juce::ParameterID bow { "bow", 1 };
 inline const juce::ParameterID contactStyle { "contactStyle", 1 };
 inline const juce::ParameterID tremoloSpeed { "tremoloSpeed", 1 };
 inline const juce::ParameterID tremoloSync { "tremoloSync", 1 };
+// 2.3 curves: who is in charge of each dimension (Auto / Guided / Manual), in o2::Dim order
+inline const juce::ParameterID modeDynamics { "modeDynamics", 1 };
+inline const juce::ParameterID modeVibrato { "modeVibrato", 1 };
+inline const juce::ParameterID modeVibratoRate { "modeVibratoRate", 1 };
+inline const juce::ParameterID modeContact { "modeContact", 1 };
+inline const juce::ParameterID modePressure { "modePressure", 1 };
+// 2.3 controls: keyswitch behaviour and start key, the Take (seed), Imperfection, velocity
+inline const juce::ParameterID keyswitchMode { "keyswitchMode", 1 };
+inline const juce::ParameterID keyswitchStart { "keyswitchStart", 1 };
+inline const juce::ParameterID seed { "seed", 1 };
+inline const juce::ParameterID imperfection { "imperfection", 1 };
+inline const juce::ParameterID velocitySensitivity { "velocitySensitivity", 1 };
+inline const juce::ParameterID attackWeight { "attackWeight", 1 };
 } // namespace id
+
+// 2.3: the mode parameter of each o2::Dim, and the choices (o2::DimMode order)
+const juce::ParameterID& dimModeId (int dim);
+const juce::StringArray& dimModeNames();
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
 // loads them (Processor::loadRadiationData).
@@ -81,10 +98,25 @@ const juce::StringArray& rosinNames();
 const juce::StringArray& bowNames();
 const juce::StringArray& contactNames();
 const juce::StringArray& tremoloSyncNames();
+const juce::StringArray& keyswitchModeNames(); // 2.3: Latching, Momentary, Off
 
-// Keyswitches are fixed keys, whatever the Octave: C1 (MIDI 24) .. B1 (35). 24-32 pick the
-// Articulation (in its order), 33-35 the contact point (ordinario, sul ponticello, sul tasto).
-inline constexpr int keyswitchFirst = 24, keyswitchLast = 35;
+// Keyswitches are twelve keys, whatever the Octave, from Keyswitch Start (default C1 = MIDI 24):
+// the first nine pick the Articulation (in its order), the last three the contact point
+// (ordinario, sul ponticello, sul tasto). Keyswitch Behaviour: Latching (until the next one),
+// Momentary (only while the key is held, then back to what played before), Off (the keys are
+// ordinary notes: silent below the violin).
+inline constexpr int keyswitchFirst = 24, keyswitchCount = 12;
+inline constexpr int keyswitchStartMax = 116; // the block's last key is 127
+enum KeyswitchMode
+{
+    keysLatching,
+    keysMomentary,
+    keysOff
+};
+// UACC: CC32's value picks the articulation, bow style and contact point (o2::uaccMap)
+inline constexpr int uaccController = 32;
+// the Take (Seed parameter): 1 = the 2.2 performance
+inline constexpr int seedMax = 9999;
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -106,6 +138,9 @@ public:
     bool mpe() const { return mpeOn->load() >= 0.5f; }
     float mpeBendRange() const { return mpeBend->load(); }
     int intonation() const { return juce::roundToInt (intonationSystem->load()); }
+    // 2.3: KeyswitchMode and the first keyswitch's MIDI note
+    int keyswitchMode() const { return juce::jlimit (0, 2, juce::roundToInt (ksMode->load())); }
+    int keyswitchStart() const { return juce::jlimit (0, keyswitchStartMax, juce::roundToInt (ksStart->load())); }
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
@@ -117,5 +152,7 @@ private:
     std::atomic<float>* bendRangeValue; // M6
     std::atomic<float>*playerStyle, *intonationSystem, *tuningKey, *a4, *mpeOn, *mpeBend; // M7 player
     std::atomic<float>*strings, *rosin, *bow, *contactStyle, *tremoloSpeed, *tremoloSync; // M7 instrument
+    std::array<std::atomic<float>*, o2::dimCount> dimModes {}; // 2.3
+    std::atomic<float>*ksMode, *ksStart, *seed, *imperfection, *velSens, *attackWeight; // 2.3
 };
 } // namespace octavio2::params

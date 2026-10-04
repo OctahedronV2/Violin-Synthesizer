@@ -6,11 +6,16 @@ namespace
 {
 constexpr int lowest = 24, highest = 96; // C1 .. C7
 constexpr int violinLowest = 55; // G3
-bool keyswitch (int note)
-{
-    return note >= 24 && note < 36;
-}
 } // namespace
+
+bool Keyboard::isKeyswitch (int note) const
+{
+    auto& state = processor.getParameters();
+    const int ks = juce::roundToInt (state.getRawParameterValue (params::id::keyswitchStart.getParamID())->load());
+    return juce::roundToInt (state.getRawParameterValue (params::id::keyswitchMode.getParamID())->load())
+        != params::keysOff
+        && note >= ks && note < ks + params::keyswitchCount;
+}
 
 Keyboard::Keyboard (Processor& p)
     : juce::MidiKeyboardComponent (p.getKeyboardState(), horizontalKeyboard),
@@ -56,9 +61,9 @@ void Keyboard::drawWhiteNote (int note,
                               juce::Colour,
                               juce::Colour)
 {
-    auto fill = keyswitch (note) ? juce::Colour (0xffc5d8e3)
-        : note < violinLowest    ? juce::Colour (0xff8c847c)
-                                 : juce::Colour (0xfff3ede4);
+    auto fill = isKeyswitch (note) ? juce::Colour (0xffc5d8e3)
+        : note < violinLowest      ? juce::Colour (0xff8c847c)
+                                   : juce::Colour (0xfff3ede4);
     if (note == sounding || down)
         fill = colours::gold;
     else if (over)
@@ -77,7 +82,7 @@ void Keyboard::drawWhiteNote (int note,
 
 void Keyboard::drawBlackNote (int note, juce::Graphics& g, juce::Rectangle<float> r, bool down, bool over, juce::Colour)
 {
-    auto fill = keyswitch (note) ? juce::Colour (0xff2b3a44) : juce::Colour (0xff1b1714);
+    auto fill = isKeyswitch (note) ? juce::Colour (0xff2b3a44) : juce::Colour (0xff1b1714);
     if (note == sounding || down)
         fill = colours::gold.darker (0.2f);
     else if (over)

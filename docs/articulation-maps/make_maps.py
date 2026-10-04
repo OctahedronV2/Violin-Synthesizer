@@ -32,9 +32,11 @@ for k, n, d, g, _, _ in ARTS:
 table = '\n'.join(rows)
 open(f'{out}/keyswitches.md', 'w').write(
     '# Octavio 2 keyswitches\n\n'
-    'Fixed keys, whatever the Octave setting. Latching: a keyswitch stays in force until another one in its group, '
-    'or until the Articulation / Contact Point parameter is changed. The two groups combine (tremolo sul ponticello: '
-    'F1 then A#1).\n\n' + table + '\n')
+    'Twelve keys from Keyswitch Start (C1 = MIDI 24 by default; the table shows the default), whatever the Octave '
+    'setting. Latching (the default Keyswitch Behaviour): a keyswitch stays in force until another one in its group, '
+    'or until the Articulation / Contact Point parameter is changed. Momentary: only while the key is held. Off: the '
+    'keys play as ordinary notes. The two groups combine (tremolo sul ponticello: F1 then A#1). A moved block keeps '
+    'the order: key n of it is row n. UACC (CC32) is in README.md.\n\n' + table + '\n')
 with open(f'{out}/keyswitches.csv', 'w') as f:
     f.write('note,name_c4_60,name_fl_studio,articulation,group\n')
     for k, n, d, g, _, _ in ARTS:

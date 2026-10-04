@@ -113,6 +113,14 @@ void Processor::KeyQueue::popAll (Fn&& fn)
 
 void Processor::handleNoteOn (juce::MidiKeyboardState*, int, int note, float velocity)
 {
+    // 2.3: the keyswitch keys are drawn where they are played (whatever the Octave)
+    const int ks = reader.keyswitchStart();
+    if (reader.keyswitchMode() != params::keysOff && note >= ks && note < ks + params::keyswitchCount)
+    {
+        clickedKeys[static_cast<size_t> (note)] = static_cast<std::int8_t> (-2 - (note - ks));
+        keysToAudio.push ({ note - ks, 1.0f, true });
+        return;
+    }
     const int sent = note - 12 * reader.octaveShift();
     if (sent < 0 || sent > 127)
         return;
@@ -125,6 +133,8 @@ void Processor::handleNoteOff (juce::MidiKeyboardState*, int, int note, float)
     auto& sent = clickedKeys[static_cast<size_t> (note)];
     if (sent >= 0)
         keysToAudio.push ({ sent, 0.0f });
+    else if (sent <= -2)
+        keysToAudio.push ({ -2 - sent, 0.0f, true });
     sent = -1;
 }
 
@@ -161,6 +171,7 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     pedal = false;
     pedalShown = false;
     deferredOff.fill (false);
+    keyswitchHeld.fill (0);
     const auto chunk = static_cast<size_t> (std::ceil (512.0 * std::max (1.0, ratio))) + 256;
     for (auto& f : fifo)
         f.assign (chunk, 0.0f);
@@ -199,12 +210,14 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
-        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7:
-        // 29-32 Tremolo, Sautille, Portato, Col legno, 33-35 the contact point) are fixed keys,
-        // whatever the Octave setting
-        if (m.getNoteNumber() >= params::keyswitchFirst && m.getNoteNumber() <= params::keyswitchLast)
+        // keyswitches (M5: Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7: Tremolo,
+        // Sautille, Portato, Col legno, then the three contact points) are twelve keys from
+        // Keyswitch Start (C1), whatever the Octave setting; Behaviour Off plays them as notes
+        const int key = m.getNoteNumber(), ks = reader.keyswitchStart();
+        if (reader.keyswitchMode() != params::keysOff && key >= ks && key < ks + params::keyswitchCount)
         {
-            engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
+            engine->keyswitch (when, key - ks, true);
+            keyswitchHeld[(size_t) key] = (std::int8_t) (key - ks + 1);
             return;
         }
         // notes outside the violin (G3 to E7, after Octave) stay silent, as in Octavio 1
@@ -219,6 +232,14 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     }
     else if (m.isNoteOff())
     {
+        // 2.3: a keyswitch let go (Momentary: back to what played before it)
+        if (auto& k = keyswitchHeld[(size_t) m.getNoteNumber()]; k > 0)
+        {
+            if (reader.keyswitchMode() == params::keysMomentary)
+                engine->keyswitch (when, k - 1, false);
+            k = 0;
+            return;
+        }
         // the pitch it started on, even if Octave changed while it was held
         auto& s = sent[static_cast<size_t> (m.getNoteNumber())];
         if (s >= 0)
@@ -240,6 +261,8 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     {
         const int cc = m.getControllerNumber(), value = m.getControllerValue();
         midiMap.noteIncoming (cc, value);
+        if (cc == params::uaccController && value > 0) // 2.3: UACC picks the articulation
+            engine->uacc (when, value);
         if (cc == 121)
         {
             // reset all controllers: the curves go back to the player, the pedal and bend centre
@@ -391,12 +414,20 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
             }
     engine->setSettings (currentSettings());
     updateTuning();
+    updateTimeline(); // 2.3
 
+    if (const int mask = clearLatches.exchange (0)) // 2.3: the Play tab chose the parameter again
+        engine->clearKeyswitches (engineTime (0), mask);
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
         {
             const auto when = engineTime (0);
-            if (e.velocity > 0.0f)
+            if (e.keyswitch)
+            {
+                if (e.velocity > 0.0f || reader.keyswitchMode() == params::keysMomentary)
+                    engine->keyswitch (when, e.note, e.velocity > 0.0f);
+            }
+            else if (e.velocity > 0.0f)
             {
                 engineNoteOn (when, e.note, e.velocity * 127.0f);
                 lastVelocity = juce::roundToInt (e.velocity * 127.0f);
@@ -474,23 +505,49 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     T.slideFrom.store (static_cast<float> (S.slideFrom));
     T.target.store (static_cast<float> (S.target));
     T.changing.store (pl.changing);
-    T.dynMode.store (pl.manDyn ? 2 : 0);
-    T.vibMode.store (pl.ccVib >= 0.0 ? 2 : 0);
-    T.rateMode.store (pl.ccRate > 0.0 ? 2 : 0);
-    T.contactMode.store (pl.ccContact > 0.0 ? 2 : 0);
+    // 2.3: who is in charge (o2::DimMode, = ui::Mode)
+    T.dynMode.store (pl.userMode[o2::dimDynamics]);
+    T.vibMode.store (pl.userMode[o2::dimVibWidth]);
+    T.rateMode.store (pl.userMode[o2::dimVibRate]);
+    T.contactMode.store (pl.userMode[o2::dimContact]);
+    for (size_t k = 0; k < (size_t) o2::dimCount; ++k)
+        T.dimMode[k].store (pl.userMode[k]);
+    T.ccHolds[o2::dimDynamics].store (pl.manDyn);
+    T.ccHolds[o2::dimVibWidth].store (pl.ccVib >= 0.0);
+    T.ccHolds[o2::dimVibRate].store (pl.ccRate > 0.0);
+    T.ccHolds[o2::dimContact].store (pl.ccContact > 0.0);
+    T.ccHolds[o2::dimPressure].store (pl.pressHeld);
+    // 2.3: the stroke, and what keyswitches or UACC latched over the parameters (-1: none)
+    const int style = pl.bowStyleNow();
+    T.stroke.store (pl.art >= 3 ? pl.art : style == 1 || style == 2 ? style : 0);
+    const int art = pl.articulationNow(), contact = pl.contactNow();
+    T.articulation.store (art);
+    T.articulationLatch.store (art != juce::roundToInt (pl.pp.articulation) ? art : -1);
+    T.articulationParam.store (juce::roundToInt (pl.pp.articulation));
+    T.styleLatch.store (style != juce::roundToInt (pl.pp.bowStyle) ? style : -1);
+    T.styleParam.store (juce::roundToInt (pl.pp.bowStyle));
+    T.contactLatch.store (contact != juce::roundToInt (pl.pp.contact) ? contact : -1);
+    T.contactParam.store (juce::roundToInt (pl.pp.contact));
 
     const double now = engine->seconds();
     if (now >= nextHistoryT)
     {
         nextHistoryT = now + 0.01;
         const auto i = T.historyCount.load (std::memory_order_relaxed);
-        T.history[static_cast<size_t> (i % Telemetry::historySize)]
-            = { static_cast<float> (now),
-                static_cast<float> (pl.dEff()),
-                sounding ? static_cast<float> (S.vibWidth) : 0.0f,
-                static_cast<float> (pl.betaFor (s)),
-                static_cast<float> (S.vibRate),
-                sounding };
+        auto& point = T.history[static_cast<size_t> (i % Telemetry::historySize)];
+        point = { static_cast<float> (now),
+                  static_cast<float> (pl.dEff()),
+                  sounding ? static_cast<float> (S.vibWidth) : 0.0f,
+                  static_cast<float> (pl.betaFor (s)),
+                  static_cast<float> (S.vibRate),
+                  sounding };
+        // 2.3: where on the host's timeline, and the player's levels before its shaping
+        double beat = 0.0;
+        point.beat = engine->beatNow (beat) ? beat : -1e9;
+        point.dynBase = static_cast<float> (pl.d);
+        point.vibBase = sounding ? static_cast<float> (pl.baseVibWidth (s)) : 0.0f;
+        point.contactBase = static_cast<float> (pl.baseContact (s));
+        point.rateBase = static_cast<float> (pl.baseVibRate (s));
         T.historyCount.store (i + 1, std::memory_order_release);
     }
 }
@@ -592,6 +649,8 @@ void Processor::getStateInformation (juce::MemoryBlock& destData)
     auto state = parameters.copyState();
     state.removeChild (state.getChildWithName (MidiMap::tag), nullptr);
     state.appendChild (midiMap.toTree(), nullptr);
+    state.removeChild (state.getChildWithName (CurveModel::tag), nullptr); // 2.3
+    state.appendChild (curves.toTree(), nullptr);
     if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -605,6 +664,9 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
         const auto map = state.getChildWithName (MidiMap::tag);
         midiMap.fromTree (map); // none (saved before M6): the Octavio 2 map
         state.removeChild (map, nullptr);
+        const auto drawn = state.getChildWithName (CurveModel::tag); // 2.3: none before 2.3
+        curves.fromTree (drawn);
+        state.removeChild (drawn, nullptr);
         parameters.replaceState (state);
         presets->restoreFromState();
         // M7: the project's Scala tuning
@@ -614,6 +676,53 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
         else
             clearScala();
     }
+}
+// ---------------------------------------------------------------- 2.3 curves
+// Audio thread, each block: the host's timeline and the drawn curves to the engine, and the
+// controller lanes the editor let go of (a badge set back to Auto).
+void Processor::updateTimeline()
+{
+    bool playing = false;
+    double ppq = 0.0;
+    if (auto* head = getPlayHead())
+        if (const auto pos = head->getPosition())
+        {
+            if (const auto p = pos->getPpqPosition())
+            {
+                ppq = *p;
+                playing = pos->getIsPlaying();
+                telemetry.hasTimeline.store (true, std::memory_order_relaxed);
+            }
+            if (const auto sig = pos->getTimeSignature(); sig && sig->denominator > 0)
+                telemetry.barLength.store (4.0f * (float) sig->numerator / (float) sig->denominator);
+        }
+    engine->setTimeline (playing, ppq, engineTime (0), (hostBpm > 0.0 ? hostBpm : 120.0) / 60.0);
+    engine->setCurves (curves.forAudio());
+    if (const int release = releaseRequests.exchange (0))
+        for (int k = 0; k < o2::dimCount; ++k)
+            if (release & (1 << k))
+                engine->getPlayer().releaseUser (k);
+    telemetry.playing.store (playing, std::memory_order_relaxed);
+    double beat = 0.0;
+    if (engine->beatNow (beat))
+        telemetry.beat.store (beat, std::memory_order_relaxed);
+}
+
+int Processor::getDimMode (int dim) const
+{
+    return juce::roundToInt (parameters.getRawParameterValue (params::dimModeId (dim).getParamID())->load());
+}
+
+void Processor::setDimMode (int dim, int mode)
+{
+    if (auto* p = parameters.getParameter (params::dimModeId (dim).getParamID()))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) mode));
+        p->endChangeGesture();
+    }
+    if (mode == o2::modeAuto)
+        releaseRequests.fetch_or (1 << dim);
 }
 } // namespace octavio2
 

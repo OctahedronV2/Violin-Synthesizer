@@ -2,6 +2,7 @@
 
 #include "../PluginProcessor.h"
 #include "Controls.h"
+#include "ModeBadge.h"
 #include "NoteTrack.h"
 #include "TraceTrack.h"
 
@@ -27,5 +28,7 @@ private:
     Knob bowChange, strokeShaping, bite, contact;
     NoteTrack track;
     TraceTrack trace;
+    // 2.3: who sets the contact point and the bow pressure (click to choose)
+    ModeBadge contactBadge { processor, o2::dimContact }, pressureBadge { processor, o2::dimPressure };
 };
 } // namespace octavio2::ui

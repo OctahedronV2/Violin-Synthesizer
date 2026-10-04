@@ -58,4 +58,38 @@ inline juce::String stringPreferenceText (float v)
         return "Balanced";
     return juce::String (v < 0 ? "Bright " : "Dark ") + juce::String (juce::roundToInt (std::abs (v))) + " %";
 }
+
+// 2.3: what the player plays now, for the Play tab's readout: the articulation when it is not
+// arco (Articulation order), else the stroke (Telemetry::stroke: 0 Auto's own, 1 legato, 2
+// detache, 3 staccato, 4 martele, 5 spiccato) and the slur; contact (0 ordinario) when it fits
+inline juce::String strokeText (int stroke, bool slur, int slurNotes, int articulation, int contact)
+{
+    static const char* const articulations[] = { "",
+                                                 "Pizzicato · plucked",
+                                                 "Bartók pizz · snapped",
+                                                 "Left-hand pizz",
+                                                 "Harmonics · light finger",
+                                                 "Tremolo · quick strokes",
+                                                 "Sautillé · bouncing",
+                                                 "Portato · pulses in one bow",
+                                                 "Col legno · the stick strikes" };
+    juce::String s;
+    if (articulation > 0 && articulation < 9)
+        s = juce::String::fromUTF8 (articulations[articulation]);
+    else if (stroke == 3)
+        s = juce::String::fromUTF8 ("Staccato · stopped bow");
+    else if (stroke == 4)
+        s = juce::String::fromUTF8 ("Martelé · bitten, stopped");
+    else if (stroke == 5)
+        s = juce::String::fromUTF8 ("Spiccato · off the string");
+    else if (slur)
+        s = juce::String::fromUTF8 ("Legato · slurred note ") + juce::String (slurNotes + 1);
+    else if (stroke == 1)
+        s = juce::String::fromUTF8 ("Legato · new bow");
+    else
+        s = juce::String::fromUTF8 ("Détaché · new bow");
+    if (contact == 1 || contact == 2)
+        s += juce::String::fromUTF8 (contact == 1 ? " · pont." : " · tasto");
+    return s;
+}
 } // namespace octavio2::ui

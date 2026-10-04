@@ -3,6 +3,7 @@
 #include "ui/ArticulationView.h"
 #include "ui/BowView.h"
 #include "ui/CurvesView.h"
+#include "ui/Instruments.h"
 #include "ui/LeftHandView.h"
 #include "ui/MidiView.h"
 #include "ui/PlayView.h"
@@ -27,39 +28,6 @@ void stopClicksTakingFocus (juce::Component& c)
         stopClicksTakingFocus (*child);
 }
 
-// a dropdown or button of a later feature, drawn as in the mockups
-void previewBox (juce::Graphics& g,
-                 juce::Rectangle<float> r,
-                 const juce::String& text,
-                 bool arrow,
-                 juce::Justification j = juce::Justification::left)
-{
-    g.setColour (colours::panel2);
-    g.fillRoundedRectangle (r, 7);
-    g.setColour (colours::line);
-    g.drawRoundedRectangle (r.reduced (0.5f), 7, 1);
-    const auto font = Fonts::sans (13);
-    if (j == juce::Justification::left)
-        drawText (g, text, r.getX() + 12, r.getCentreY() + 5, font, colours::muted);
-    else
-        drawText (g,
-                  text,
-                  r.getCentreX(),
-                  r.getCentreY() + 5,
-                  font,
-                  colours::muted,
-                  juce::Justification::horizontallyCentred);
-    if (arrow)
-    {
-        juce::Path p;
-        const float cx = r.getRight() - 20, cy = r.getCentreY() - 3;
-        p.startNewSubPath (cx, cy);
-        p.lineTo (cx + 5, cy + 6);
-        p.lineTo (cx + 10, cy);
-        g.setColour (colours::dim);
-        g.strokePath (p, juce::PathStrokeType (1.5f));
-    }
-}
 } // namespace
 
 Editor::Editor (Processor& p)
@@ -73,7 +41,25 @@ Editor::Editor (Processor& p)
     mode.setLayout (0, 30, 4, 70);
     mode.setTooltip ("Live plays at once. Studio looks 1.2 s ahead so the player knows each note's length; the DAW "
                      "compensates the delay.");
-    instrument.setTooltip ("Viola, cello and bass arrive after the violin (the strings section).");
+    // 2.3: the instrument menu sets the parts, as the Tone tab's one-click row
+    for (int k = 0; k < instruments::count; ++k)
+        instrument.addItem (instruments::names[k], k + 1);
+    instrument.onChange = [this]
+    {
+        const int k = instrument.getSelectedId() - 1;
+        if (k >= 0 && k != instruments::active (processor.getParameters()))
+            instruments::choose (processor.getParameters(), k);
+        updateInstrument();
+    };
+    instrument.setTooltip (
+        "Modern violin: synthetic strings, standard rosin, modern bow, A4 = 440. Baroque violin: gut "
+        "strings, baroque rosin and bow, A4 = 415, Pythagorean intonation, the Baroque player. "
+        "The Tone tab changes any part on its own.");
+    updateInstrument();
+    take = std::make_unique<TakeBox> (*p.getParameters().getParameter (params::id::seed.getParamID()));
+    take->setTooltip ("The Take: each number is another performance of the same notes (vibrato, bow noise, the "
+                      "Imperfection), always the same for the same number. Roll the die for a new one; drag to "
+                      "step; double-click for take 1.");
     // M7: the player's style, offsets on the automation (vibrato, slides, bow, swells, intonation)
     for (int i = 0; i < params::playerStyleNames().size(); ++i)
         player.addItem ("Player: " + params::playerStyleNames()[i], i + 1);
@@ -84,12 +70,14 @@ Editor::Editor (Processor& p)
     player.setTooltip ("How the virtual violinist plays: vibrato, slides, bow strokes, swells and expressive "
                        "intonation. Modern soloist is the default player; the others shift its habits and still "
                        "follow your controls.");
-    for (auto* c : std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets })
+    for (auto* c :
+         std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets, take.get() })
         canvas.addAndMakeVisible (c);
     mode.setBounds (916, 16, 144, 30);
     instrument.setBounds (214, 14, 170, 34);
     player.setBounds (394, 14, 180, 34);
     presets.setBounds (592, 14, 306, 34);
+    take->setBounds (856, 66, 116, 28);
     keyboard.setBounds (24, 712, designWidth - 48, 58);
     canvas.views.push_back (std::make_unique<PlayView> (p));
     canvas.views.push_back (std::make_unique<CurvesView> (p));
@@ -127,8 +115,31 @@ void Editor::resized()
         juce::AffineTransform::scale ((float) getWidth() / designWidth, (float) getHeight() / designHeight));
 }
 
+void Editor::updateInstrument()
+{
+    const int k = instruments::active (processor.getParameters());
+    if (k == shownInstrument)
+        return;
+    shownInstrument = k;
+    if (k >= 0)
+        instrument.setSelectedId (k + 1, juce::dontSendNotification);
+    else
+        instrument.setText ("Custom violin", juce::dontSendNotification);
+}
+
 void Editor::timerCallback()
 {
+    updateInstrument();
+    // the keyswitch keys moved or were turned off: the keyboard and its labels
+    auto& state = processor.getParameters();
+    const int ks = juce::roundToInt (state.getRawParameterValue (params::id::keyswitchStart.getParamID())->load())
+        + 1000 * juce::roundToInt (state.getRawParameterValue (params::id::keyswitchMode.getParamID())->load());
+    if (ks != shownKeyswitch)
+    {
+        shownKeyswitch = ks;
+        keyboard.repaint();
+        canvas.repaint (0, 690, designWidth, 16);
+    }
     const auto cpu = juce::String (juce::roundToInt (processor.getTelemetry().cpu.load() * 100)) + "%";
     const auto latency = juce::String (juce::roundToInt (processor.getLatencyMs())) + " ms";
     if (cpu != cpuText || latency != latencyText)
@@ -195,9 +206,7 @@ void Editor::Canvas::paint (juce::Graphics& g)
               40,
               Fonts::mono (11),
               colours::dim);
-    // instrument, player, presets (previews)
-    previewBox (g, { 214, 14, 170, 34 }, "Modern violin", true);
-    // presets: ui::PresetBar (M6); player: the Player Style box (M7)
+    // instrument (2.3), presets: ui::PresetBar (M6); player: the Player Style box (M7)
     drawText (g, editor.latencyText, 1176, 36, Fonts::mono (11), colours::muted, juce::Justification::right);
     // tabs
     for (int i = 0; i < tabCount; ++i)
@@ -231,13 +240,20 @@ void Editor::Canvas::paint (juce::Graphics& g)
     g.fillRoundedRectangle (16, 704, designWidth - 32, 68, 8);
     const float kw = (designWidth - 48) / 43.0f;
     auto name = [] (int note) { return juce::MidiMessage::getMidiNoteName (note, true, true, middleCOctave()); };
-    drawText (g,
-              "KEYSWITCHES  " + name (24) + juce::String::fromUTF8 ("–") + name (35),
-              24 + 3.5f * kw,
-              700,
-              Fonts::sans (9).withExtraKerningFactor (0.1f),
-              colours::steel.withAlpha (0.6f),
-              juce::Justification::horizontallyCentred);
+    // 2.3: the keyswitches start at Keyswitch Start (C1 = MIDI 24, the keyboard's lowest key)
+    auto& state = editor.processor.getParameters();
+    const int ks = juce::roundToInt (state.getRawParameterValue (params::id::keyswitchStart.getParamID())->load());
+    const bool ksOn = juce::roundToInt (state.getRawParameterValue (params::id::keyswitchMode.getParamID())->load())
+        != params::keysOff;
+    const int ksMid = ks + params::keyswitchCount / 2;
+    if (ksOn && ksMid >= 24 && ksMid <= 96)
+        drawText (g,
+                  "KEYSWITCHES  " + name (ks) + juce::String::fromUTF8 ("–") + name (ks + params::keyswitchCount - 1),
+                  24 + editor.keyboard.getKeyStartPosition (ksMid),
+                  700,
+                  Fonts::sans (9).withExtraKerningFactor (0.1f),
+                  colours::steel.withAlpha (0.6f),
+                  juce::Justification::horizontallyCentred);
     drawText (g,
               "below " + name (55) + ": silent",
               24 + 11 * kw,

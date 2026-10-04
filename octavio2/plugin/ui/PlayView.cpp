@@ -14,11 +14,6 @@ juce::String contactName (float beta)
     return beta < 0.06f ? "sul ponticello side" : beta > 0.16f ? "sul tasto side" : "normal";
 }
 
-Mode modeOf (int m)
-{
-    return m == 2 ? Mode::manual : m == 1 ? Mode::guided : Mode::autoMode;
-}
-
 void line (juce::Graphics& g, float x0, float y0, float x1, float y1, juce::Colour c, float w = 1)
 {
     g.setColour (c);
@@ -68,44 +63,75 @@ PlayView::PlayView (Processor& p)
                         "Maida Vale 4", "Maida Vale 5", "WDR control", "WDR studio" };
                 return juce::String (shortNames[juce::jlimit (0, 8, juce::roundToInt (v))]);
             }),
-      articulation (nullptr,
-                    {},
-                    { { "Auto" },
-                      { "Legato" },
-                      { juce::String::fromUTF8 ("Détaché") },
-                      { juce::String::fromUTF8 ("Martelé") },
-                      { "Staccato" },
-                      { "Spiccato" },
-                      { juce::String::fromUTF8 ("Sautillé") },
-                      { "Tremolo" },
+      bowStyle (&p.getParameters(),
+                params::id::bowStyle.getParamID(),
+                { { "Auto" },
+                  { "Legato" },
+                  { juce::String::fromUTF8 ("Détaché") },
+                  { "Staccato" },
+                  { juce::String::fromUTF8 ("Martelé") },
+                  { "Spiccato" } }),
+      contact (&p.getParameters(),
+               params::id::contactStyle.getParamID(),
+               { { "Ordinario" }, { "Sul pont." }, { "Sul tasto" } }),
+      mute (&p.getParameters(), params::id::mute.getParamID(), { { "Open" }, { "Sordino" }, { "Practice" } }),
+      articulation (&p.getParameters(),
+                    params::id::articulation.getParamID(),
+                    { { "Arco" },
                       { "Pizz" },
+                      { juce::String::fromUTF8 ("Bartók") },
+                      { "LH pizz" },
                       { "Harmonics" },
-                      { "Pont." },
-                      { "Tasto" },
-                      { "Sordino" } })
+                      { "Tremolo" },
+                      { juce::String::fromUTF8 ("Sautillé") },
+                      { "Portato" },
+                      { "Col legno" } })
 {
     dynamics.setCaption ("Level, from velocity");
-    dynamics.setBadge (Mode::autoMode);
+    // 2.3: the Dynamics, Vibrato, Portamento and String preference badges are clickable
+    // ModeBadges (children of this view, placed in resized)
     expression.setCaption ("How much the player shapes");
-    expression.setBadge (Mode::autoMode);
     expression.setTooltip ("Phrasing: how much the player shapes the line (phrase arcs, swells, stresses). 0: every "
                            "note at its velocity's level.");
     vibrato.setCaption ("Width scale on context vibrato");
-    vibrato.setBadge (Mode::autoMode);
     portamento.setCaption ("Slides between positions");
-    portamento.setBadge (Mode::autoMode);
     portamento.setTooltip ("How slowly the finger slides when the hand shifts position. 0: clean shifts.");
     stringPreference.setCaption (juce::String::fromUTF8 ("Bright ←  → dark"));
-    stringPreference.setBadge (Mode::autoMode);
     stringPreference.setTooltip (
         "Bright: low positions and higher strings. Dark: high positions on the lower strings.");
     room.setCaption ("Room and distance");
     for (auto* k : { &dynamics, &expression, &vibrato, &portamento, &stringPreference, &room })
         addAndMakeVisible (k);
-    articulation.setLayout (0, 30, 4);
-    articulation.setTooltip ("The player picks the articulation from how you play (Auto). Choosing one arrives with "
-                             "the player milestone (M4).");
-    addAndMakeVisible (articulation);
+    for (auto* b : { &dynamicsBadge,
+                     &vibratoBadge,
+                     &portamentoBadge,
+                     &stringPreferenceBadge,
+                     &contactBadge,
+                     &vibratoNowBadge,
+                     &pressureNowBadge })
+        addAndMakeVisible (b);
+    // 2.3: what plays now: a keyswitch or UACC latch while its parameter still has the value the
+    // latch was made over; a click chooses the parameter's value again and drops that latch
+    const auto& T = p.getTelemetry();
+    bowStyle.setActiveSource (Choices::showLatch (T.styleLatch, T.styleParam));
+    contact.setActiveSource (Choices::showLatch (T.contactLatch, T.contactParam));
+    articulation.setActiveSource (Choices::showLatch (T.articulationLatch, T.articulationParam));
+    bowStyle.setOnClick ([&p] (int) { p.clearKeyswitchLatches (2); });
+    contact.setOnClick ([&p] (int) { p.clearKeyswitchLatches (4); });
+    articulation.setOnClick ([&p] (int) { p.clearKeyswitchLatches (1); });
+    bowStyle.setTooltip (juce::String::fromUTF8 (
+        "How the bow plays each note. Auto: the player decides from each note's length, gap and overlap. Legato "
+        "slurs notes that follow closely; Détaché gives every note its own stroke; Staccato, Martelé and Spiccato "
+        "play short strokes (in Live mode, where a note's length is unknown: about 120, 150 and 90 ms)."));
+    contact.setTooltip ("Where the bow meets the string. Keyswitches (A1, A#1, B1) choose it too.");
+    mute.setTooltip ("A mute on the bridge: sordino veils the tone, the practice mute is for quiet practice.");
+    articulation.setTooltip ("How the notes are played. Keyswitches (C1 to G#1) and UACC (CC32) choose it too; the "
+                             "strip shows what plays now. Click to go back to the chosen one.");
+    for (auto* c : { &bowStyle, &contact, &mute, &articulation })
+    {
+        c->setLayout (0, 24, 4);
+        addAndMakeVisible (c);
+    }
     startTimerHz (30);
 }
 
@@ -127,19 +153,44 @@ void PlayView::resized()
                       180);
         k->setVisible (! s);
     }
-    articulation.setBounds (130, juce::roundToInt (646 - top), 1050, 30);
-    articulation.setVisible (! s);
+    // 2.3: the clickable badges, where the knobs and panels draw them
+    const std::pair<ModeBadge*, Knob*> onKnobs[] = { { &dynamicsBadge, &dynamics },
+                                                     { &vibratoBadge, &vibrato },
+                                                     { &portamentoBadge, &portamento },
+                                                     { &stringPreferenceBadge, &stringPreference } };
+    for (auto [b, k] : onKnobs)
+    {
+        b->placeAt (k->getPosition().toFloat() + k->badgeCentre());
+        b->setVisible (! s);
+    }
+    // the fingerboard's Contact readout and the Now panel's Vibrato and Bow rows (paintFingerboard,
+    // paintNow)
+    contactBadge.placeAt ({ 24 + 18 + 3 * 146 + 7 * 7.6f + 14, 116 - top + 318 - 36 - 4 });
+    auto nowRow = [] (const char* label, int row) -> juce::Point<float>
+    {
+        return { 800 + 16 + juce::GlyphArrangement::getStringWidth (Fonts::sans (12), label) + 14,
+                 116 - top + 118 + 34.0f * row - 2 };
+    };
+    vibratoNowBadge.placeAt (nowRow ("Vibrato", 1));
+    pressureNowBadge.placeAt (nowRow ("Bow speed / force", 2));
+    vibratoNowBadge.setVisible (! s);
+    pressureNowBadge.setVisible (! s);
+    // the articulation strip, Live and Studio (2.3)
+    const int row1 = juce::roundToInt (634 - top), row2 = juce::roundToInt (662 - top);
+    bowStyle.setBounds (124, row1, 440, 24);
+    contact.setBounds (660, row1, 250, 24);
+    mute.setBounds (972, row1, 204, 24);
+    articulation.setBounds (124, row2, 700, 24);
 }
 
 void PlayView::updateBadges()
 {
-    // a drawn curve (CC lane) takes its dimension over; a String preference guides the fingering
-    const auto& T = processor.getTelemetry();
-    dynamics.setBadge (modeOf (T.dynMode.load()));
-    vibrato.setBadge (modeOf (std::max (T.vibMode.load(), T.rateMode.load())));
-    const float pref
-        = processor.getParameters().getRawParameterValue (params::id::stringPreference.getParamID())->load();
-    stringPreference.setBadge (std::abs (pref) >= 0.5f ? Mode::guided : Mode::autoMode);
+    // 2.3: the badges are ModeBadges (they follow the modes themselves); the Dynamics card says
+    // who sets the level
+    const auto dm = ModeBadge::displayed (processor, o2::dimDynamics);
+    dynamics.setCaption (dm == Mode::autoMode     ? "Level, from velocity"
+                             : dm == Mode::guided ? "Your curve, the player's swells"
+                                                  : "Exactly your curve or CC1");
 }
 
 void PlayView::timerCallback()
@@ -159,25 +210,36 @@ void PlayView::paint (juce::Graphics& g)
     if (studio())
     {
         paintLookAhead (g, { 800, 116 - top, 376, 318 });
-        paintPlan (g, { 24, 450 - top, designWidth - 48.0f, 238 });
+        paintPlan (g, { 24, 450 - top, designWidth - 48.0f, 174 }); // 2.3: the strip below it
     }
     else
     {
         paintNow (g, { 800, 116 - top, 376, 318 });
-        drawText (g,
-                  "ARTICULATION",
-                  24,
-                  646 - top + 20,
-                  Fonts::sans (10.5f, true).withExtraKerningFactor (0.12f),
-                  colours::amber);
     }
+    // the articulation strip's labels (2.3)
+    const auto label = Fonts::sans (10.5f, true).withExtraKerningFactor (0.12f);
+    drawText (g, "BOW STYLE", 24, 634 - top + 16, label, colours::amber);
+    drawText (g, "CONTACT", 584, 634 - top + 16, label, colours::amber);
+    drawText (g, "MUTE", 924, 634 - top + 16, label, colours::amber);
+    drawText (g, "ARTICULATION", 24, 662 - top + 16, label, colours::amber);
+    const int ks = juce::roundToInt (
+        processor.getParameters().getRawParameterValue (params::id::keyswitchStart.getParamID())->load());
+    auto name = [] (int note) { return juce::MidiMessage::getMidiNoteName (note, true, true, middleCOctave()); };
+    drawText (g,
+              juce::String::fromUTF8 ("keyswitches ") + name (ks) + juce::String::fromUTF8 ("–")
+                  + name (ks + params::keyswitchCount - 1) + juce::String::fromUTF8 (" · UACC on CC32"),
+              designWidth - 24,
+              662 - top + 16,
+              Fonts::sans (11),
+              colours::dim,
+              juce::Justification::right);
 }
 
 void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
 {
     const auto& T = processor.getTelemetry();
     const float x = r.getX(), y = r.getY(), w = r.getWidth(), h = r.getHeight();
-    drawPanel (g, r, "What the player is doing", "live view");
+    drawPanel (g, r, "What the player is doing", "A / G / M: who is in charge (click a badge to change it)");
     const float nut = x + 70, bridge = x + w - 150, L = bridge - nut;
     const float boardTop = y + 64, spN = 22, spB = 30, cy = boardTop + 70;
     const int active = T.note.load() >= 0 ? T.string.load() : -1;
@@ -368,7 +430,7 @@ void PlayView::paintFingerboard (juce::Graphics& g, juce::Rectangle<float> r)
           Mode::autoMode },
         { "Contact",
           juce::String (beta, 2) + juce::String::fromUTF8 (" · ") + contactName (beta),
-          modeOf (T.contactMode.load()) },
+          std::nullopt }, // 2.3: contactBadge, a clickable ModeBadge
         { "Bow left", juce::String (juce::roundToInt (left)) + " of 62 cm", std::nullopt },
     };
     float rx = x + 18;
@@ -443,8 +505,11 @@ void PlayView::paintNow (juce::Graphics& g, juce::Rectangle<float> r)
     juce::Colour helmColour = colours::dim;
     if (note >= 0)
     {
-        art = T.slur.load() ? juce::String::fromUTF8 ("Legato · slurred note ") + juce::String (T.slurNotes.load() + 1)
-                            : juce::String::fromUTF8 ("Détaché · new bow");
+        art = strokeText (T.stroke.load(),
+                          T.slur.load(),
+                          T.slurNotes.load(),
+                          T.articulation.load(),
+                          T.contactLatch.load() >= 0 ? T.contactLatch.load() : T.contactParam.load());
         vib = vw < 1
             ? juce::String ("none yet")
             : juce::String (vr, 1) + juce::String::fromUTF8 (" Hz · ") + juce::String (juce::roundToInt (vw)) + " ct";
@@ -472,7 +537,11 @@ void PlayView::paintNow (juce::Graphics& g, juce::Rectangle<float> r)
         drawText (g, row.value, x + w - 16, ry + 2, Fonts::sans (12.5f), colours::text, juce::Justification::right);
         const float bx = x + 16 + juce::GlyphArrangement::getStringWidth (Fonts::sans (12), row.label) + 14;
         if (row.badge)
-            drawBadge (g, { bx, ry - 2 }, Mode::autoMode);
+        {
+            // 2.3: Vibrato and Bow speed / force have clickable ModeBadges (vibratoNowBadge, pressureNowBadge)
+            if (juce::String (row.label) != "Vibrato" && juce::String (row.label) != "Bow speed / force")
+                drawBadge (g, { bx, ry - 2 }, Mode::autoMode);
+        }
         else
         {
             g.setColour (helmColour);
@@ -562,21 +631,24 @@ void PlayView::paintPlan (juce::Graphics& g, juce::Rectangle<float> r)
     drawPanel (g,
                r,
                juce::String::fromUTF8 ("Plan · Studio mode only"),
-               "the DAW compensates the " + juce::String (juce::roundToInt (o2::Engine::studioLookAhead * 1000))
-                   + " ms");
-    const float gx0 = 140, gx1 = designWidth - 60, laneTop = r.getY() + 50;
+               juce::String::fromUTF8 ("planned notes on the string a player would most likely use · the DAW "
+                                       "compensates the ")
+                   + juce::String (juce::roundToInt (o2::Engine::studioLookAhead * 1000)) + " ms");
+    // 2.3: lanes 25 apart (34 before the articulation strip joined Studio mode)
+    constexpr float laneH = 25, barH = 18;
+    const float gx0 = 140, gx1 = designWidth - 60, laneTop = r.getY() + 44;
     const char* lanes = "EADG";
     for (int i = 0; i < 4; ++i)
     {
-        const float ly = laneTop + i * 34;
+        const float ly = laneTop + i * laneH;
         drawText (g,
                   juce::String::charToString (lanes[i]),
                   110,
-                  ly + 21,
+                  ly + 18,
                   Fonts::serif (15),
                   colours::muted,
                   juce::Justification::horizontallyCentred);
-        line (g, gx0, ly + 17, gx1, ly + 17, colours::line);
+        line (g, gx0, ly + 13, gx1, ly + 13, colours::line);
     }
     // time: 4 s of past, the look-ahead, and a little beyond, one grid line every 0.5 s
     const double now = processor.getEngine().seconds();
@@ -590,14 +662,14 @@ void PlayView::paintPlan (juce::Graphics& g, juce::Rectangle<float> r)
               xAt (t),
               laneTop - 6,
               xAt (t),
-              laneTop + 4 * 34,
+              laneTop + 4 * laneH,
               strong ? juce::Colour (0xff4d3f35) : colours::line,
               strong ? 1.4f : 0.6f);
     }
     const float nowX = xAt (now), winX = xAt (now + o2::Engine::studioLookAhead);
     g.setColour (colours::steel.withAlpha (0.08f));
-    g.fillRoundedRectangle (nowX, laneTop - 10, winX - nowX, 4 * 34 + 14, 4);
-    line (g, nowX, laneTop - 14, nowX, laneTop + 4 * 34 + 4, colours::gold, 2);
+    g.fillRoundedRectangle (nowX, laneTop - 10, winX - nowX, 4 * laneH + 14, 4);
+    line (g, nowX, laneTop - 14, nowX, laneTop + 4 * laneH + 4, colours::gold, 2);
     drawText (g, "now", nowX, laneTop - 18, Fonts::sans (10), colours::gold, juce::Justification::horizontallyCentred);
     drawText (g,
               "look-ahead window",
@@ -606,9 +678,9 @@ void PlayView::paintPlan (juce::Graphics& g, juce::Rectangle<float> r)
               Fonts::sans (10),
               colours::steel,
               juce::Justification::horizontallyCentred);
-    drawLabel (g, "Bow", 60, laneTop + 4 * 34 + 22);
+    drawLabel (g, "Bow", 60, laneTop + 4 * laneH + 18);
     g.saveState();
-    g.reduceClipRegion (juce::Rectangle<float> (gx0, laneTop - 30, gx1 - gx0, 4 * 34 + 70).toNearestInt());
+    g.reduceClipRegion (juce::Rectangle<float> (gx0, laneTop - 30, gx1 - gx0, 4 * laneH + 60).toNearestInt());
     for (const auto& n : track.notes)
     {
         // planned notes go where a player would most likely take them: the lowest string that
@@ -626,27 +698,20 @@ void PlayView::paintPlan (juce::Graphics& g, juce::Rectangle<float> r)
         }
         const double end = n.off >= 0 ? n.off : (n.planned ? n.on + 0.25 : now);
         const float nx = xAt (n.on), nw = std::max (6.0f, xAt (end) - nx);
-        const float ny = laneTop + (3 - s) * 34 + 5;
+        const float ny = laneTop + (3 - s) * laneH + (laneH - barH) / 2;
         const bool done = n.off >= 0 && n.off <= now;
         const auto col = n.planned ? juce::Colour (0xffb9ab98) : done ? colours::muted.withAlpha (0.5f) : colours::gold;
         g.setColour (col);
-        g.fillRoundedRectangle (nx + 1, ny, nw - 2, 24, 4);
-        drawText (g, noteName (n.pitch), nx + 6, ny + 16, Fonts::sans (11, true), colours::bg);
+        g.fillRoundedRectangle (nx + 1, ny, nw - 2, barH, 4);
+        drawText (g, noteName (n.pitch), nx + 6, ny + 14, Fonts::sans (11, true), colours::bg);
         if (! n.planned && ! n.slur)
             drawText (g,
                       juce::String::fromUTF8 (n.dir > 0 ? "⊓" : "V"),
                       nx + 4,
-                      laneTop + 4 * 34 + 22,
+                      laneTop + 4 * laneH + 18,
                       Fonts::serif (15),
                       done ? colours::dim : colours::amber);
     }
     g.restoreState();
-    drawText (
-        g,
-        "planned notes are drawn on the string a player would most likely use; the bow marks show the strokes played",
-        gx0,
-        r.getBottom() - 14,
-        Fonts::sans (10.5f),
-        colours::dim);
 }
 } // namespace octavio2::ui

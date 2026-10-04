@@ -22,6 +22,10 @@
 // M7: articulation=0..8 (5 tremolo, 6 sautille, 7 portato, 8 col legno), contact=0..2 (ord, sul
 //   ponticello, sul tasto), strings=0..2 (synthetic, gut, steel), rosin=0..3 (light, standard, dark,
 //   baroque), bow=0..1 (modern, baroque), tremoloRate=/s, tremoloSync=0..3 with tempo=bpm
+// 2.3: curves=file.txt (drawn curves in beats, core/Curves.h), curveBpm=n; modeDynamics=,
+//   modeVibrato=, modeRate=, modeContact=, modePressure= 0 Auto, 1 Guided, 2 Manual
+// 2.3: imperfection=0..1, velSens=x, attackWeight=x (1 = as 2.2); bowStyle=0..5 (Live: fixed
+//   short strokes for staccato, martele, spiccato)
 
 #include "../core/Engine.h"
 #include "../core/Scala.h"
@@ -407,6 +411,18 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.tremoloRate = opt ("tremoloRate", es.tremoloRate);
     es.tremoloSync = (int) opt ("tremoloSync", es.tremoloSync);
     es.tempo = opt ("tempo", es.tempo);
+    // 2.3: who is in charge of each dimension, 0 Auto, 1 Guided, 2 Manual (the plugin's mode
+    // parameters): modeDynamics= modeVibrato= modeRate= modeContact= modePressure=
+    {
+        const char* names[dimCount] = { "modeDynamics", "modeVibrato", "modeRate", "modeContact", "modePressure" };
+        for (int k = 0; k < dimCount; ++k)
+            es.dimMode[k] = (int) opt (names[k], es.dimMode[k]);
+    }
+    // 2.3: imperfection=0..1 (also loosens the timing), velSens=x (1), attackWeight=x (1); the Take
+    // is seed= (prepare)
+    es.imperfection = opt ("imperfection", es.imperfection);
+    es.velocitySensitivity = opt ("velSens", es.velocitySensitivity);
+    es.attackWeight = opt ("attackWeight", es.attackWeight);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
@@ -437,6 +453,30 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         engine->setTuningTable (tuning.cents, ! tuning.hasKeyboardMap);
     }
     engine->getPlayer().log = opt ("log", 0) != 0;
+    // 2.3: curves=file.txt, drawn curves in beats (core/Curves.h parseCurves; "bpm n" in the file
+    // or curveBpm=n, default 120), followed from beat 0 at the start of the file as a host plays
+    static auto curveSet = std::make_unique<CurveSet>();
+    if (opts.count ("curves"))
+    {
+        std::string text;
+        if (FILE* f = std::fopen (opts["curves"].c_str(), "rb"))
+        {
+            char buf[4096];
+            size_t k;
+            while ((k = std::fread (buf, 1, sizeof buf, f)) > 0)
+                text.append (buf, k);
+            std::fclose (f);
+        }
+        double bpm = opt ("curveBpm", 120.0);
+        std::string error;
+        if (text.empty() || ! parseCurves (text, *curveSet, bpm, &error))
+        {
+            std::fprintf (stderr, "curves: cannot read %s %s\n", opts["curves"].c_str(), error.c_str());
+            return 1;
+        }
+        engine->setCurves (curveSet.get());
+        engine->setTimeline (true, 0.0, 0, bpm / 60.0);
+    }
 
     const double sr = Engine::rate;
     auto at = [&] (double t)

@@ -67,6 +67,12 @@ const juce::StringArray& tremoloSyncNames()
     return names;
 }
 
+const juce::StringArray& keyswitchModeNames()
+{
+    static const juce::StringArray names { "Latching", "Momentary", "Off" };
+    return names;
+}
+
 const juce::StringArray& bowStyleNames()
 {
     static const juce::StringArray names {
@@ -97,6 +103,20 @@ const juce::StringArray& keyNames()
 const juce::StringArray& micNames()
 {
     static const juce::StringArray names { "Front", "Above", "Player's ear", "Side" };
+    return names;
+}
+
+// 2.3
+const juce::ParameterID& dimModeId (int dim)
+{
+    static const juce::ParameterID* ids[o2::dimCount]
+        = { &id::modeDynamics, &id::modeVibrato, &id::modeVibratoRate, &id::modeContact, &id::modePressure };
+    return *ids[juce::jlimit (0, o2::dimCount - 1, dim)];
+}
+
+const juce::StringArray& dimModeNames()
+{
+    static const juce::StringArray names { "Auto", "Guided", "Manual" };
     return names;
 }
 
@@ -210,6 +230,31 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::contactStyle, "Contact", contactNames(), 0));
     layout.add (floatParam (id::tremoloSpeed, "Tremolo Speed", { 4.0f, 24.0f }, 12.0f, "/s", 1));
     layout.add (std::make_unique<juce::AudioParameterChoice> (id::tremoloSync, "Tremolo Sync", tremoloSyncNames(), 0));
+    // ---- 2.3 curves (append only): Auto = the player decides (the 2.2 sound), Guided = your
+    // curve or controller with the player's shaping on top, Manual = exactly your curve
+    static const char* modeNames[o2::dimCount]
+        = { "Dynamics Mode", "Vibrato Width Mode", "Vibrato Rate Mode", "Contact Point Mode", "Bow Pressure Mode" };
+    for (int k = 0; k < o2::dimCount; ++k)
+        layout.add (std::make_unique<juce::AudioParameterChoice> (dimModeId (k), modeNames[k], dimModeNames(), 0));
+    // ---- 2.3 (append only; every default plays exactly as 2.2): keyswitch behaviour and the
+    // first keyswitch's key, the Take (the performance's random seed), Imperfection, and how far
+    // velocity moves the dynamics and the attack
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::keyswitchMode,
+                                                              "Keyswitch Behaviour",
+                                                              keyswitchModeNames(),
+                                                              0));
+    layout.add (std::make_unique<juce::AudioParameterInt> (
+        id::keyswitchStart,
+        "Keyswitch Start",
+        0,
+        keyswitchStartMax,
+        keyswitchFirst,
+        juce::AudioParameterIntAttributes().withStringFromValueFunction (
+            [] (int v, int) { return juce::MidiMessage::getMidiNoteName (v, true, true, 4); })));
+    layout.add (std::make_unique<juce::AudioParameterInt> (id::seed, "Take", 1, seedMax, 1));
+    layout.add (floatParam (id::imperfection, "Imperfection", { 0.0f, 100.0f }, 0.0f, "%", 0));
+    layout.add (floatParam (id::velocitySensitivity, "Velocity Sensitivity", { 0.0f, 150.0f }, 100.0f, "%", 0));
+    layout.add (floatParam (id::attackWeight, "Attack Weight", { 0.0f, 200.0f }, 100.0f, "%", 0));
     return layout;
 }
 
@@ -259,8 +304,16 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       bow (s.getRawParameterValue (id::bow.getParamID())),
       contactStyle (s.getRawParameterValue (id::contactStyle.getParamID())),
       tremoloSpeed (s.getRawParameterValue (id::tremoloSpeed.getParamID())),
-      tremoloSync (s.getRawParameterValue (id::tremoloSync.getParamID()))
+      tremoloSync (s.getRawParameterValue (id::tremoloSync.getParamID())),
+      ksMode (s.getRawParameterValue (id::keyswitchMode.getParamID())),
+      ksStart (s.getRawParameterValue (id::keyswitchStart.getParamID())),
+      seed (s.getRawParameterValue (id::seed.getParamID())),
+      imperfection (s.getRawParameterValue (id::imperfection.getParamID())),
+      velSens (s.getRawParameterValue (id::velocitySensitivity.getParamID())),
+      attackWeight (s.getRawParameterValue (id::attackWeight.getParamID()))
 {
+    for (int k = 0; k < o2::dimCount; ++k) // 2.3
+        dimModes[(size_t) k] = s.getRawParameterValue (dimModeId (k).getParamID());
 }
 
 o2::EngineSettings Reader::read() const
@@ -312,6 +365,13 @@ o2::EngineSettings Reader::read() const
     e.contactStyle = juce::roundToInt (contactStyle->load());
     e.tremoloRate = tremoloSpeed->load();
     e.tremoloSync = juce::roundToInt (tremoloSync->load());
+    for (int k = 0; k < o2::dimCount; ++k) // 2.3
+        e.dimMode[k] = juce::roundToInt (dimModes[(size_t) k]->load());
+    // 2.3 (each exactly 1, 0, 1, 1 at its default: the 2.2 performance)
+    e.seed = (unsigned) juce::jlimit (1, seedMax, juce::roundToInt (seed->load()));
+    e.imperfection = imperfection->load() / 100.0;
+    e.velocitySensitivity = velSens->load() / 100.0;
+    e.attackWeight = attackWeight->load() / 100.0;
     return e;
 }
 

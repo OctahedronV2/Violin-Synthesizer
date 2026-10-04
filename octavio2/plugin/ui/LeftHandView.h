@@ -2,6 +2,7 @@
 
 #include "../PluginProcessor.h"
 #include "Controls.h"
+#include "ModeBadge.h"
 #include "TraceTrack.h"
 
 namespace octavio2::ui
@@ -25,5 +26,7 @@ private:
     Choices fingerPlan;
     Knob stringPreference, portamento, width, rate, delay;
     TraceTrack trace;
+    // 2.3: who sets the vibrato's width and rate (click to choose)
+    ModeBadge widthBadge { processor, o2::dimVibWidth }, rateBadge { processor, o2::dimVibRate };
 };
 } // namespace octavio2::ui

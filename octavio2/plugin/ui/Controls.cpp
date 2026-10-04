@@ -153,6 +153,13 @@ juce::Rectangle<float> Knob::dialArea() const
     return juce::Rectangle<float> (b.getCentreX() - 26, 44 - 26, 52, 52);
 }
 
+juce::Point<float> Knob::badgeCentre() const
+{
+    const auto b = getLocalBounds().toFloat();
+    return style == Style::card ? juce::Point<float> (b.getRight() - 20, 20)
+                                : juce::Point<float> (b.getCentreX() + 28, 6);
+}
+
 void Knob::resized()
 {
     dial.getProperties().set ("colour", (juce::int64) colour.getARGB());
@@ -182,7 +189,7 @@ void Knob::paint (juce::Graphics& g)
                   Fonts::sans (10, true).withExtraKerningFactor (0.08f),
                   preview ? colours::dim : colours::amber);
         if (badge)
-            drawBadge (g, { b.getRight() - 20, 20 }, *badge);
+            drawBadge (g, badgeCentre(), *badge);
         drawText (g,
                   value,
                   b.getCentreX(),
@@ -215,7 +222,7 @@ void Knob::paint (juce::Graphics& g)
                   preview ? colours::muted : colours::text,
                   juce::Justification::horizontallyCentred);
         if (badge)
-            drawBadge (g, { b.getCentreX() + 28, 6 }, *badge);
+            drawBadge (g, badgeCentre(), *badge);
     }
     if (preview)
     {
@@ -254,7 +261,18 @@ void Choices::setLayout (int c, float h, float g, float w)
 
 int Choices::active() const
 {
-    return param != nullptr ? current : previewActive;
+    if (param == nullptr)
+        return previewActive;
+    return activeSource ? activeSource (current) : current;
+}
+
+void Choices::setNote (int index, const juce::String& note)
+{
+    if (index >= 0 && index < (int) items.size() && items[(size_t) index].note != note)
+    {
+        items[(size_t) index].note = note;
+        repaint();
+    }
 }
 
 juce::Rectangle<float> Choices::itemBounds (int i) const
@@ -346,7 +364,128 @@ void Choices::mouseUp (const juce::MouseEvent& e)
     }
     for (size_t i = 0; i < items.size(); ++i)
         if (items[i].enabled && itemBounds ((int) i).contains (e.position))
+        {
             attachment->setValueAsCompleteGesture ((float) items[i].value);
+            if (onClick)
+                onClick (items[i].value);
+            repaint();
+        }
+}
+
+//==============================================================================
+TakeBox::TakeBox (juce::RangedAudioParameter& p)
+    : param (p),
+      attachment (p,
+                  [this] (float v)
+                  {
+                      value = juce::roundToInt (v);
+                      repaint();
+                  })
+{
+    attachment.sendInitialUpdate();
+    random.setSeedRandomly();
+}
+
+juce::Rectangle<float> TakeBox::dieArea() const
+{
+    const auto b = getLocalBounds().toFloat();
+    return { b.getRight() - b.getHeight(), 0.0f, b.getHeight(), b.getHeight() };
+}
+
+void TakeBox::paint (juce::Graphics& g)
+{
+    const auto b = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (colours::panel2);
+    g.fillRoundedRectangle (b, 7);
+    g.setColour (colours::line);
+    g.drawRoundedRectangle (b, 7, 1);
+    const auto die = dieArea();
+    g.drawLine (die.getX(), 4, die.getX(), b.getBottom() - 4);
+    drawText (g, "Take", 10, b.getCentreY() + 4.5f, Fonts::sans (12), colours::muted);
+    drawText (g,
+              juce::String (value),
+              die.getX() - 8,
+              b.getCentreY() + 4.5f,
+              Fonts::mono (12.5f),
+              value == 1 ? colours::text : colours::amber,
+              juce::Justification::right);
+    // the die: a rounded square with five pips
+    const auto d = die.reduced (die.getHeight() * 0.24f);
+    const auto c = onDie ? colours::gold : colours::muted;
+    g.setColour (c);
+    g.drawRoundedRectangle (d, 3, 1.4f);
+    const float r = d.getWidth() * 0.09f;
+    for (auto [u, v] : { std::pair { 0.27f, 0.27f },
+                         std::pair { 0.73f, 0.27f },
+                         std::pair { 0.5f, 0.5f },
+                         std::pair { 0.27f, 0.73f },
+                         std::pair { 0.73f, 0.73f } })
+        g.fillEllipse (d.getX() + u * d.getWidth() - r, d.getY() + v * d.getHeight() - r, 2 * r, 2 * r);
+}
+
+void TakeBox::set (int take)
+{
+    attachment.setValueAsPartOfGesture (
+        (float) juce::jlimit (1, juce::roundToInt (param.getNormalisableRange().end), take));
+}
+
+void TakeBox::roll()
+{
+    const int top = juce::roundToInt (param.getNormalisableRange().end);
+    int take = value;
+    while (take == value)
+        take = 1 + random.nextInt (top);
+    attachment.setValueAsCompleteGesture ((float) take);
+}
+
+void TakeBox::mouseMove (const juce::MouseEvent& e)
+{
+    const bool d = dieArea().contains (e.position);
+    if (d != onDie)
+    {
+        onDie = d;
+        repaint();
+    }
+    setMouseCursor (d ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::UpDownResizeCursor);
+}
+
+void TakeBox::mouseDown (const juce::MouseEvent& e)
+{
+    dragging = false;
+    dragStart = value;
+    if (e.mods.isPopupMenu())
+        showParameterMenu (*this, param);
+}
+
+void TakeBox::mouseDrag (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu() || dieArea().contains (e.mouseDownPosition))
+        return;
+    if (! dragging)
+    {
+        dragging = true;
+        attachment.beginGesture();
+    }
+    const float per = e.mods.isShiftDown() ? 12.0f : 4.0f; // pixels per take
+    set (dragStart + juce::roundToInt (-(float) e.getDistanceFromDragStartY() / per));
+}
+
+void TakeBox::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragging)
+    {
+        attachment.endGesture();
+        dragging = false;
+        return;
+    }
+    if (! e.mods.isPopupMenu() && e.mouseWasClicked() && dieArea().contains (e.position))
+        roll();
+}
+
+void TakeBox::mouseDoubleClick (const juce::MouseEvent& e)
+{
+    if (! dieArea().contains (e.position))
+        attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
 }
 
 //==============================================================================
