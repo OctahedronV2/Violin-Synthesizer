@@ -8,6 +8,10 @@
 // Options: any Params field (strings) or PlayerParams field (player), by name, e.g.
 //   bowPoints=3 friction=hyperbolic admittance=0 vibWidthHi=40 speedRange=0.3 seed=2
 // Also: fs=192000 (internal rate, default 96000), slips=1 prints Helmholtz health per note.
+// M5: articulation=0..4 (arco, pizz, Bartok pizz, left-hand pizz, harmonic; keyswitches MIDI 24-28
+// do the same inside the file), pizzModel=0 (the old placeholder pluck), pizz*/bartok*/lh*/harm*.
+// Bridge (M3): bridgeModes=0 (M0 generic set) | 1 (CNSM fit), sympathetic=0..1 (0.5), wolf=0..1,
+// hold=0..1 (0.5), admScale=x, modalBody=0 (measured body over the whole band).
 //
 // sound=out.wav renders through o2::Engine instead, the plugin's own code path (player, strings,
 // body, mics, hall), and writes stereo float at 48 kHz:
@@ -105,6 +109,20 @@ static void stringOpts (Params& p)
     O (torsionQ);
     O (fingerLoss);
     O (admScale);
+    O (sympathetic);
+    O (symLossCut);
+    O (symIdleAfter);
+    O (symDamp);
+    O (symCoupling);
+    O (wolf);
+    O (wolfHz);
+    O (wolfMass);
+    O (wolfQ);
+    O (hold);
+    O (holdMax);
+    O (holdHz);
+    O (holdFade);
+    p.bridgeModes = (int) opt ("bridgeModes", p.bridgeModes);
 #undef O
 }
 
@@ -159,6 +177,7 @@ static void playerOpts (PlayerParams& q)
     O (vibPosition);
     O (vibShort);
     O (vibWander);
+    O (vibAmount);
     O (liftAfter);
     O (liftDamp);
     O (liftDampTime);
@@ -223,6 +242,61 @@ static void playerOpts (PlayerParams& q)
     O (earWindow);
     O (earWait);
     O (earPeriods);
+    // M5 articulations
+    O (articulation);
+    O (keyswitchBase);
+    O (pizzModel);
+    O (pizzImpulse);
+    O (pizzPointMM);
+    O (pizzAmpPP);
+    O (pizzAmpFF);
+    O (pizzTau);
+    O (pizzBright);
+    O (pizzTouch);
+    O (pizzPull);
+    O (pizzStopLoss);
+    O (pizzTouchDamp);
+    O (pizzOffDamp);
+    O (bartokAmp);
+    O (bartokTau);
+    O (bartokPointMM);
+    O (bartokClick);
+    O (bartokClickTime);
+    O (bartokKick);
+    O (lhAmp);
+    O (lhTau);
+    O (lhFromNut);
+    O (harmTouch);
+    O (harmForce);
+    // M4
+    O (phrase);
+    O (phraseArc);
+    O (phraseRise);
+    O (phraseFall);
+    O (phraseGap);
+    O (phraseLong);
+    O (highLoud);
+    O (agogic);
+    O (stress);
+    O (restAccent);
+    O (mdvDepth);
+    O (mdvMin);
+    O (mdvFull);
+    O (phraseVelSpread);
+    O (fingerPlan);
+    O (anticipate);
+    O (costShift);
+    O (costShiftSemi);
+    O (costCross);
+    O (costOpen);
+    O (costHigh);
+    O (vibRateHigh);
+    O (vibStress);
+    O (bowStyle);
+    O (legatoGap);
+    O (autoMartele);
+    O (autoSpiccato);
+    O (drawnCurves);
 #undef O
 }
 
@@ -286,11 +360,16 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.distance = opt ("distance", es.distance);
     es.bridgeHz = opt ("bridge", es.bridgeHz);
     es.mute = (int) opt ("mute", es.mute);
+    es.sympathetic = opt ("sympathetic", es.sympathetic);
+    es.wolf = opt ("wolf", es.wolf);
+    es.hold = opt ("hold", es.hold);
+    es.modalBody = opt ("modalBody", es.modalBody) != 0;
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
     stringOpts (engine->getViolin().p); // and any continuous strings Params field
+    engine->reset(); // the strings and bridge re-made with those (same state as prepare's)
     engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;
@@ -338,8 +417,10 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     for (int64_t i = 0; i < n; i += block)
     {
         const int m = (int) std::min<int64_t> (block, n - i);
-        // events are handed over a block ahead, as a host does; the engine plays them on time
-        while (e < ev.size() && at (ev[e].t) < i + m)
+        // events are handed over a block ahead, as a host does; the engine plays them on time.
+        // A score (planned) is handed over the look-ahead early, so the player sees the notes coming
+        const int64_t early = mode == "planned" ? Engine::lookAheadSamples : 0;
+        while (e < ev.size() && at (ev[e].t) < i + m + early)
         {
             const int64_t when = at (ev[e].t);
             if (ev[e].type == 2)

@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include "BridgeData.h"
+
 namespace o2
 {
 constexpr double pi = 3.14159265358979323846;
@@ -70,26 +72,47 @@ struct StringData
 // Bridge velocity per unit string force, as a sum of resonant modes
 //   Y(s) = sum_k (1/m_k) s / (s^2 + (w_k/Q_k) s + w_k^2),
 // discretised with the bilinear transform. The delay-free part Yd is solved
-// together with the strings (all strings push on the same bridge point).
+// together with the strings (all strings push on the same bridge point). Every mode has a
+// positive residue (m_k > 0) and Q_k > 0, so Re Y >= 0 at every frequency: the bridge can only
+// take energy from the strings, never give more back than it took (passive, unconditionally
+// stable however the modes are retuned).
 struct Bridge
 {
     struct Mode
     {
         double b0, b2, a1, a2, z1 = 0, z2 = 0;
+        double f = 0, Q = 1, mass = 1; // as last set
+        double ra = 0, rb = 0; // how it radiates (modal body): ra v, and rb w v (see BridgeData.h)
     };
     std::vector<Mode> modes;
     double Yd = 0.0;
-    void add (double fs, double f, double Q, double mass)
+    double radA = 0.0, radB = 0.0; // sum_k ra_k v_k and sum_k rb_k w_k v_k after the last update
+    static void design (Mode& m, double fs, double f, double Q, double mass)
     {
         const double w = 2 * pi * f, K = w / std::tan (w / (2 * fs)), a = w / Q;
         const double d0 = K * K + a * K + w * w;
-        Mode m;
         m.b0 = K / (mass * d0);
         m.b2 = -m.b0;
         m.a1 = (2 * w * w - 2 * K * K) / d0;
         m.a2 = (K * K - a * K + w * w) / d0;
+        m.f = f;
+        m.Q = Q;
+        m.mass = mass;
+    }
+    void add (double fs, double f, double Q, double mass)
+    {
+        Mode m;
+        design (m, fs, f, Q, mass);
         modes.push_back (m);
         Yd += m.b0;
+    }
+    // retune mode k in place (keeps its state; no allocation)
+    void set (int k, double fs, double f, double Q, double mass)
+    {
+        design (modes[(size_t) k], fs, f, Q, mass);
+        Yd = 0.0;
+        for (auto& m : modes)
+            Yd += m.b0;
     }
     double past() const // velocity from the modes' memory
     {
@@ -100,17 +123,23 @@ struct Bridge
     }
     void update (double F)
     {
+        double ra = 0.0, rb = 0.0;
         for (auto& m : modes)
         {
             const double y = m.b0 * F + m.z1;
             m.z1 = -m.a1 * y + m.z2;
             m.z2 = m.b2 * F - m.a2 * y;
+            ra += m.ra * y;
+            rb += m.rb * y;
         }
+        radA = ra;
+        radB = rb;
     }
     void clear()
     {
         for (auto& m : modes)
             m.z1 = m.z2 = 0;
+        radA = radB = 0.0;
     }
 };
 
@@ -166,8 +195,24 @@ struct Params
     double fingerLoss = 0.0; // extra loss per reflection at a stopping finger (fraction)
     // bridge
     bool admittance = true;
-    double admScale = 0.5;
-    bool sympathetic = true; // open strings not bowed are free to ring
+    int bridgeModes = 1; // 0: the M0 generic set (kGenericModes), 1: the passive fit to CNSM (kCnsmModes, M3)
+    double admScale = -1.0; // admittance scale; < 0: the mode set's own calibration (generic 0.5, CNSM 1)
+    // Sympathetic: how freely the open strings nobody is playing join in, 0..1. An idle open
+    // string meets the bridge through an ideal transformer (coupling c, lossless, passive). At the
+    // default 0.5, c = symCoupling: a string at its own notch feels the bridge less than the
+    // bowed point does (the cross-admittance is smaller than the driving point's), and at c = 1
+    // an open string a unison or octave under the note absorbs it (dynamic absorber, up to -7 dB
+    // on E5 stopped on the A string with the CNSM bridge). Below 0.5 the player's spare fingers
+    // quiet them (c down to 0, damping up to symDamp per round trip); above, c rises to 1 and
+    // they lose up to symLossCut of their own low-frequency loss (in dB; still passive).
+    double sympathetic = 0.5, symCoupling = 0.5, symLossCut = 0.6, symIdleAfter = 2.0, symDamp = 0.2;
+    // Wolf: makes the strongest body mode below 700 Hz lighter and sharper, 0..1 (0 = as
+    // measured). wolfHz > 0 picks the mode nearest that frequency instead.
+    double wolf = 0.0, wolfHz = 0.0, wolfMass = 12.0, wolfQ = 2.5;
+    // Hold: the chin and the hand damp the low modes, 0 (free, as the violin was measured hanging)
+    // .. 1 (held firmly): Q of the modes below holdHz falls to 1 / (1 + holdMax) of the free value,
+    // fading out over the next holdFade Hz.
+    double hold = 0.5, holdMax = 1.5, holdHz = 500.0, holdFade = 300.0;
 };
 
 // ------------------------------------------------------------------ one string
@@ -191,6 +236,7 @@ struct String
     double fingerG = 1.0;
     double slipLp[4] = {}, slipNoiseA = 0.0;
     double hiss = 0.0; // rough-friction force sent straight to the bridge this sample
+    double direct = 0.0; // M5: sound radiated straight from the string/fingerboard (Bartok slap), not via the bridge
     double noiseGain = 1.0; // set by the player: how settled the stroke is (less hiss while the note starts)
     double damp = 0.0; // extra loss per round trip from a finger touching or lifting (0..1), set by the player
     double dBr = 2, dN = 2; // one-way bow->bridge, nut round trip
@@ -216,6 +262,13 @@ struct String
     // dispersion fit made once per string at the open pitch, reused by setPitch
     int dispM = 0;
     double dispA = 0.0;
+    // M5: shaped pluck (see pluck()) and the light finger (setTouch)
+    bool plOn = false;
+    double plU0 = 0.0, plPull = 0.0, plTau = 1.0, plT = 0.0, plClickAt = -1.0, plClickAmp = 0.0, clickHp = 0.0,
+           clickLp = 0.0, plClickTau = 1.0, plKick = 0.5;
+    bool touchOn = false;
+    double touchX = 0.0, touchR = 0.0, touchA = 1.0;
+    Delay hTo, hBack;
 
     void init (const StringData& sd, const Params& p)
     {
@@ -312,6 +365,8 @@ struct String
         // the nut side loses the extra delay of the bow-width gaps
         dN = std::max (1.0,
                        N - 2.0 * dBr - 2.0 * (K - 1) * gap - period * (1.0 - std::pow (2.0, -fingerCents / 1200.0)));
+        if (touchOn) // bow point to the touching finger, one way (at least 2 samples left beyond it)
+            touchA = std::clamp (touchX * period / 2.0 - dBr - (K - 1) * gap, 1.0, std::max (1.0, 0.5 * dN - 1.0));
     }
 
     int bowPointsNow() const { return std::clamp (P->bowPoints, 1, 4); }
@@ -535,7 +590,7 @@ struct String
         const double vinB = fromBr.read (dBr);
         fromBr.push (bBr);
         // nut loop: loss, dispersion, inverting reflection at the nut / finger
-        double x = nutLoop.read (dN);
+        double x = nutLoop.read (touchOn ? std::max (2.0, dN - 2.0 * touchA) : dN);
         lp = (1 - dark) * x + dark * lp;
         x = g * fingerG * (1.0 - damp) * lp;
         for (int i = 0; i < M; ++i)
@@ -545,13 +600,23 @@ struct String
             apY[i] = y;
             x = y;
         }
-        const double vinN = -x;
+        const double Zs = P->perString ? d.Z : 0.2;
+        double vinN = -x;
+        if (touchOn) // the light finger: a dashpot junction between the bow and the nut
+        {
+            const double a = hTo.read (touchA), b = vinN;
+            const double vH = 2.0 * Zs * (a + b) / (2.0 * Zs + touchR);
+            nutLoop.push (vH - b);
+            vinN = hBack.read (touchA);
+            hBack.push (vH - a);
+        }
 
         const int K = bowPointsNow();
         const double gap = gapSamples();
-        const double Zs = P->perString ? d.Z : 0.2;
         slipped = false;
         hiss = 0.0;
+        direct = 0.0;
+        const double plW = pluckWave();
         const bool wasStick = stickAll;
         // Torsion: the bow drags the string's surface, so it also twists the string. Twist
         // waves travel torsionSpeed times faster with impedance torsionImpedance * Z (as seen
@@ -601,14 +666,14 @@ struct String
                 const double a = 1.0 / Ys;
                 f = a * (contact (k, vBow, vh, fk, a) - vh);
             }
-            const double dv = f / (2.0 * Zs);
+            const double dv = f / (2.0 * Zs) + (k == 0 ? plW : 0.0);
             const double v = vh + f * Ys;
             if (k == 0)
                 toBr.push (fromN[k] + dv);
             else
                 gapL[k - 1].push (fromN[k] + dv);
             if (k == K - 1)
-                nutLoop.push (fromB[k] + dv);
+                (touchOn ? hTo : nutLoop).push (fromB[k] + dv);
             else
                 gapR[k].push (fromB[k] + dv);
             if (tors)
@@ -656,19 +721,117 @@ struct String
         ++samples;
     }
 
-    // Pluck: set an initial triangular displacement at fraction p from the bridge
-    // (as velocity waves: a step in each direction), amplitude in m/s-equivalent.
-    void pluck (double p, double amp)
+    // ---------------------------------------------------------------- M5: plucks and the light finger
+    // The old placeholder (kept for before/after comparisons, PlayerParams::pizzModel 0): one
+    // velocity impulse pushed towards the bridge and the nut at the bow point.
+    void pluckImpulse (double amp)
     {
-        // simplest: an impulse of velocity at the pluck point, both directions
-        // (a 'plucked' spectrum ~ sin(n pi p)/n after integration through the body is close enough)
-        const double d1 = std::max (1.0, p * N / 2.0);
-        (void) d1;
-        for (int i = 0; i < 1; ++i)
+        toBr.push (amp);
+        nutLoop.push (amp);
+    }
+
+    // A shaped pluck at the junction (bow point 0, so the caller sets beta to the plucking point
+    // first). The finger pulls the string aside by h metres with a force applied at the point
+    // (velocity wave u = F / 2Z into both directions), then lets go:
+    //  - the pull is a raised-cosine ramp lasting a whole number of periods (at least two, about
+    //    `pull` seconds), whose spectrum then has zeros at every
+    //    partial, so the string follows it quasi-statically and nothing rings before the release
+    //    (an instant initial shape would hit the bridge and body with a step of the static force);
+    //  - the release is the force falling as (1 + t/tau) exp(-t/tau): a soft fingertip rolling off
+    //    the string (tau ~ 0.5 ms) is a 12 dB/octave low-pass on the pluck above 1/(2 pi tau), a
+    //    nail (tau ~ 0.05 ms) lets the whole spectrum through. The plucking point (beta) carves
+    //    the sin(n pi beta) comb, the bridge and body do the rest.
+    // clickAt > 0 (s after the release): a Bartok snap, the string slaps the fingerboard: a bright
+    // knock (clickAmp, decaying over clickTime) heard straight from the fingerboard (String::direct,
+    // added by the Engine after the body) and a little through the bridge, and the board stopping
+    // the swing for an instant on each of the next four periods (kick x the pluck's wave, halving).
+    // The pull adds latency: the release comes about pull seconds after the call.
+    void pluck (double h,
+                double tau,
+                double clickAt = 0.0,
+                double clickAmp = 0.0,
+                double pull = 0.0,
+                double clickTime = 0.0015,
+                double kick = 0.5)
+    {
+        const double L = f1 > 0.0 ? 0.325 * d.f0 / f1 : 0.325; // vibrating length, m
+        const double c = 2.0 * 0.325 * d.f0; // wave speed, m/s
+        const double b = std::clamp (beta, 0.02, 0.98);
+        plU0 = c * h / (2.0 * b * (1.0 - b) * L);
+        plPull = std::max (2.0, std::ceil (pull * fs / period)) * period; // whole periods: zeros on every partial
+        plTau = std::max (0.5, tau * fs);
+        plT = 0.0;
+        plOn = true;
+        plClickAt = clickAt > 0.0 ? plPull + clickAt * fs : -1.0;
+        plClickAmp = clickAmp;
+        plClickTau = std::max (1.0, clickTime * fs);
+        plKick = kick;
+    }
+    bool plucking() const { return plOn; }
+    // samples until the release starts (for timing), and the time the pull takes
+    double pluckLatency() const { return plOn ? std::max (0.0, plPull - plT) : 0.0; }
+
+    // The pluck's velocity wave for this sample (called once per tick)
+    double pluckWave()
+    {
+        if (! plOn)
+            return 0.0;
+        double u;
+        if (plT < plPull)
+            u = plU0 * 0.5 * (1.0 - std::cos (pi * plT / plPull));
+        else
         {
-            toBr.push (amp);
-            nutLoop.push (amp);
+            const double x = (plT - plPull) / plTau;
+            u = plU0 * (1.0 + x) * std::exp (-x);
+            if (x > 30.0)
+            {
+                u = 0.0;
+                if (plClickAt < 0.0 || plT > plClickAt + std::max (8.0 * plClickTau, 4.0 * period))
+                    plOn = false;
+            }
         }
+        if (plClickAt > 0.0)
+        {
+            // the board stops the swing (0.12 ms contact), and the string comes back to slap it
+            // again on each of the next few periods, each time softer: a rattle that clips the
+            // string's swing and makes the slapped string itself bright
+            const double k = plT - plClickAt, w = 0.00012 * fs;
+            const int cyc = k >= 0.0 ? (int) (k / period) : -1;
+            const double kk = k - cyc * period;
+            if (cyc >= 0 && cyc < 4 && kk < w)
+                u -= plKick * plU0 * std::pow (0.5, cyc) * std::sin (pi * kk / w);
+            if (k >= 0.0 && k < 8.0 * plClickTau) // the knock and rattle: a decaying bright burst
+            {
+                const double s = std::exp (-k / plClickTau);
+                const double wn = rng.uni();
+                clickHp = 0.94 * clickHp + 0.06 * wn; // high-passed near 1 kHz
+                clickLp = 0.82 * clickLp + 0.18 * (wn - clickHp); // ... and low-passed near 3 kHz
+                const double knock = plClickAmp * s * clickLp * 4.0;
+                hiss += 0.01 * knock; // a little through the bridge and body
+                direct = knock; // and straight from the fingerboard into the air (Engine adds it)
+            }
+        }
+        plT += 1.0;
+        return u;
+    }
+
+    // Light finger touching the string at fraction x from the bridge (harmonics): a dashpot of
+    // resistance R (kg/s) at that point, v = 2Z (a + b) / (2Z + R). Partials with a node there
+    // pass untouched, all others lose energy at every pass. The nut-side loop is split there
+    // into point->finger, finger->nut->finger and finger->point. x = 0 takes the finger away.
+    // R is a pressure: 0 = not touching (transparent), ~Z = harmonic, very large = a stop.
+    void setTouch (double x, double R)
+    {
+        const bool on = x > 0.0;
+        if (on && ! touchOn)
+        {
+            hTo.clear();
+            hBack.clear();
+        }
+        touchOn = on;
+        touchX = x;
+        touchR = std::max (0.0, R);
+        setBeta (beta);
     }
 
     void clear()
@@ -676,6 +839,8 @@ struct String
         toBr.clear();
         fromBr.clear();
         nutLoop.clear();
+        hTo.clear();
+        hBack.clear();
         for (auto& x : gapR)
             x.clear();
         for (auto& x : gapL)
@@ -697,10 +862,6 @@ struct String
 // Generic modal bridge set (string-physics modes_generic.txt): signature modes A0, CBR, B1-, B1+
 // plus modes fitted from the Iowa body IR. f (Hz), Q, modal mass (kg). To be replaced by the
 // passive fit to the CNSM admittance (plan M3).
-struct ModeData
-{
-    double f, Q, m;
-};
 static const ModeData kGenericModes[] = {
     { 275.0, 20.0, 0.385830 },  { 405.0, 30.0, 0.589463 },  { 470.0, 40.0, 0.169314 },   { 540.0, 40.0, 0.147366 },
     { 630.0, 30.0, 0.252627 },  { 741.5, 20.2, 0.665660 },  { 789.2, 15.0, 0.131346 },   { 813.6, 21.9, 0.203290 },
@@ -714,6 +875,11 @@ static const ModeData kGenericModes[] = {
     { 4642.4, 47.0, 0.256360 }, { 5504.6, 15.0, 0.016383 }, { 6099.4, 109.5, 2.963900 }, { 6497.7, 22.5, 0.770950 }
 };
 
+// The passive bridge (M3): kCnsmModes (BridgeData.h), fitted to the CNSM Stoppani violin's
+// measured bridge admittance. kCnsmScale is the admittance level the Iowa pizzicato decays ask
+// for (bridgefit: 0.35 fits best, 0.5 within 5 %, 1.0 is 25 % worse).
+static constexpr double kCnsmScale = 0.5;
+
 // ------------------------------------------------------------------ violin: four strings, one bridge
 struct Violin
 {
@@ -726,17 +892,25 @@ struct Violin
     // Per-string data. Impedances from typical synthetic-core tensions (G 44 N, D 43 N,
     // A 53 N, E 77 N; length 0.325 m): Z = T / c, c = 2 L f0. B from Iowa pizzicato.
     // Intrinsic decay from Iowa pizzicato fits (see findings); overwritten by fits.
-    static StringData defaults (int i)
+    static StringData defaults (int i, int bridgeModes = 1)
     {
         static const StringData sd[4] = {
             // Pickering impedances and bending stiffness; intrinsic loss fitted to the Iowa
-            // pizzicato decays with the bridge at admScale 0.5 (string-physics strings_bridge0.5.txt)
+            // pizzicato partial decays with the CNSM bridge at admScale 0.5, Hold 0.5 (M3,
+            // string-physics tools/bridgefit.py run on this violin: octavio2/data/bridge/)
+            { "G", 196.00, 0.350, 1.6e-5, 6.035, 0.310, 2000.0 },
+            { "D", 293.66, 0.303, 1.4e-5, 1.962, 0.281, 2000.0 },
+            { "A", 440.00, 0.203, 1.3e-5, 1.853, 0.679, 3000.0 },
+            { "E", 659.26, 0.173, 4.7e-5, 6.247, 1.191, 4000.0 },
+        };
+        static const StringData generic[4] = {
+            // the same fit with the M0 generic bridge at admScale 0.5 (string-physics strings_bridge0.5.txt)
             { "G", 196.00, 0.350, 1.6e-5, 5.904, 0.274, 2000.0 },
             { "D", 293.66, 0.303, 1.4e-5, 2.099, 0.273, 2000.0 },
             { "A", 440.00, 0.203, 1.3e-5, 1.689, 0.599, 3000.0 },
             { "E", 659.26, 0.173, 4.7e-5, 3.567, 1.209, 4000.0 },
         };
-        return sd[i];
+        return bridgeModes == 1 ? sd[i] : generic[i];
     }
 
     void init()
@@ -744,30 +918,157 @@ struct Violin
         fs = p.fs;
         for (int i = 0; i < 4; ++i)
         {
-            s[i].init (defaults (i), p);
+            s[i].init (defaults (i, p.bridgeModes), p);
             s[i].clear();
+            coupling[i] = 1.0;
+            reflect[i] = 1.0;
+            unbowed[i] = 0.0;
+            energy[i] = 0.0;
         }
         bridge.clear();
         bridge.modes.clear();
         bridge.Yd = 0.0;
+        base.clear();
+        source.clear();
+        radPrev = radLow = 0.0;
         if (p.admittance)
-            for (const auto& m : kGenericModes)
-                if (m.f < 0.45 * fs)
-                    bridge.add (fs, m.f, m.Q, m.m / p.admScale);
+        {
+            const bool cnsm = p.bridgeModes == 1;
+            const double scale = p.admScale > 0.0 ? p.admScale : (cnsm ? kCnsmScale : 0.5);
+            auto addSet = [&] (const ModeData* m, size_t n)
+            {
+                for (size_t k = 0; k < n; ++k)
+                    if (m[k].f < 0.45 * fs)
+                    {
+                        base.push_back ({ m[k].f, m[k].Q, m[k].m / scale });
+                        source.push_back ((int) k);
+                    }
+            };
+            if (cnsm)
+                addSet (kCnsmModes, (size_t) kCnsmModeCount);
+            else
+                addSet (kGenericModes, sizeof (kGenericModes) / sizeof (kGenericModes[0]));
+            bridge.modes.reserve (base.size());
+            for (const auto& m : base)
+                bridge.add (fs, m.f, m.Q, m.m);
+            // the wolf's mode: the strongest (peak |Y| = Q / (m w)) below 700 Hz, or the one nearest wolfHz
+            wolfMode = -1;
+            double best = -1.0;
+            for (size_t k = 0; k < base.size(); ++k)
+            {
+                const double score = p.wolfHz > 0.0 ? -std::abs (std::log (base[k].f / p.wolfHz))
+                    : base[k].f < 700.0             ? base[k].Q / (base[k].m * 2 * pi * base[k].f)
+                                                    : -1.0;
+                if (score > best)
+                {
+                    best = score;
+                    wolfMode = (int) k;
+                }
+            }
+            applyBody();
+        }
     }
     void setString (int i, const StringData& d) { s[i].init (d, p); }
 
+    // Hold and Wolf retune the bridge modes (keeps their state, no allocation): call after
+    // changing p.hold or p.wolf. Sympathetic is read every sample.
+    void applyBody()
+    {
+        for (size_t k = 0; k < base.size() && k < bridge.modes.size(); ++k)
+        {
+            double Q = base[k].Q, m = base[k].m;
+            const double f = base[k].f;
+            const double x = std::clamp ((f - p.holdHz) / std::max (1.0, p.holdFade), 0.0, 1.0);
+            const double reach = 0.5 + 0.5 * std::cos (pi * x); // 1 below holdHz, 0 above holdHz + holdFade
+            Q /= 1.0 + std::clamp (p.hold, 0.0, 1.0) * p.holdMax * reach;
+            double radScale = 1.0;
+            if ((int) k == wolfMode && p.wolf > 0.0)
+            {
+                const double w = std::clamp (p.wolf, 0.0, 1.0);
+                m /= 1.0 + w * p.wolfMass;
+                Q *= 1.0 + w * p.wolfQ;
+                // the wolf is the string fighting the light, sharp mode; its radiated peak stays
+                // where it was (only narrower), so Wolf doesn't also turn the body's volume up
+                radScale = 1.0 / ((1.0 + w * p.wolfMass) * (1.0 + w * p.wolfQ));
+            }
+            bridge.set ((int) k, fs, f, std::max (0.5, Q), m);
+            // the modal body: how this mode radiates for the chosen violin (fitted at Hold 0, Wolf 0)
+            auto& md = bridge.modes[k];
+            md.ra = md.rb = 0.0;
+            if (hasModalBody())
+            {
+                const ModalBody& mb = kModalBody[std::clamp (bodyIndex, 0, 3)];
+                md.ra = mb.a[source[k]] * radScale;
+                md.rb = mb.b[source[k]] * 2 * pi * f * radScale;
+            }
+        }
+    }
+
+    // The modal body (M3): the bridge modes also radiate the sound below the crossover, so bridge
+    // and body share their poles (Maestre, Scavone & Smith 2017) and Hold and Wolf are heard
+    // in the sound, not only in the strings. Each Violin choice has its own weights over the same
+    // modes. radLow is the radiated signal (in the body IR's units per newton) after each tick.
+    bool hasModalBody() const { return p.admittance && p.bridgeModes == 1 && ! base.empty(); }
+    void setBody (int violinChoice)
+    {
+        if (bodyIndex == violinChoice)
+            return;
+        bodyIndex = violinChoice;
+        applyBody();
+    }
+    int modalDelay() const { return kModalBody[std::clamp (bodyIndex, 0, 3)].delay; }
+
     // One sample. bowString < 0: no bow. Returns the total force on the bridge.
+    //
+    // Each string meets the bridge through an ideal transformer of ratio c (coupling: the string
+    // sees c times the bridge's velocity and pushes it with c times its force, so no energy is
+    // made or lost in it, whatever c does over time) after a reflection loss r <= 1 (a damping
+    // finger). c = r = 1 is the plain junction. Sympathetic sets them for the idle open strings.
     double Fs[4] = { 0, 0, 0, 0 }; // each string's force on the bridge this sample (debug stems)
     double tick (const double* vBow, const double* force)
     {
-        double sumZA = 0, sumZ = 0;
+        // idle open strings: not fingered, not bowed for symIdleAfter seconds, and well under the
+        // loudest string (so a plucked or just-released string rings on as it is: it is the one
+        // making the sound, not one answering it)
+        const double sym = std::clamp (p.sympathetic, 0.0, 1.0);
+        const double glide = 1.0 - std::exp (-1.0 / (0.3 * fs)); // a released string fades into idleness
+        const double envA = 1.0 - std::exp (-1.0 / (0.05 * fs));
+        double loudest = 0.0;
+        for (int i = 0; i < 4; ++i)
+        {
+            energy[i] += (s[i].d.Z * s[i].aBr * s[i].aBr - energy[i]) * envA;
+            loudest = std::max (loudest, energy[i]);
+        }
+        for (int i = 0; i < 4; ++i)
+        {
+            unbowed[i] = force[i] > 0.0 ? 0.0 : unbowed[i] + 1.0 / fs;
+            const bool idle = ! s[i].fingered && unbowed[i] > p.symIdleAfter && energy[i] < 0.25 * loudest;
+            double c = 1.0, r = 1.0;
+            if (idle && sym <= 0.5)
+            {
+                const double x = sym / 0.5;
+                c = x * p.symCoupling;
+                r = 1.0 - (1.0 - x) * p.symDamp;
+            }
+            else if (idle)
+            {
+                // up to full coupling, and the idle strings lose less of their own: r g stays
+                // below 1, so seen from the bridge the string is still a passive termination
+                const double x = (sym - 0.5) / 0.5;
+                c = p.symCoupling + x * (1.0 - p.symCoupling);
+                r = std::pow (std::max (1e-6, s[i].g), -p.symLossCut * x);
+            }
+            coupling[i] += (c - coupling[i]) * glide;
+            reflect[i] += (r - reflect[i]) * glide;
+        }
+        double sumZA = 0, sumZ = 0, a[4];
         for (int i = 0; i < 4; ++i)
         {
             s[i].readBridge();
-            const double Z = p.perString ? s[i].d.Z : 0.2;
-            sumZA += Z * s[i].aBr;
-            sumZ += Z;
+            a[i] = reflect[i] * s[i].aBr;
+            const double Z = p.perString ? s[i].d.Z : 0.2, c = coupling[i];
+            sumZA += c * Z * a[i];
+            sumZ += c * c * Z;
         }
         double F = 0, hiss = 0;
         if (p.admittance && ! bridge.modes.empty())
@@ -776,14 +1077,16 @@ struct Violin
             const double v = (2 * Yd * sumZA + bridge.past()) / (1 + Yd * sumZ);
             for (int i = 0; i < 4; ++i)
             {
-                const double Z = p.perString ? s[i].d.Z : 0.2;
-                const double Fi = Z * (2 * s[i].aBr - v);
+                const double Z = p.perString ? s[i].d.Z : 0.2, c = coupling[i];
+                const double Fi = c * Z * (2 * a[i] - c * v);
                 Fs[i] = Fi;
                 F += Fi;
-                s[i].tick (v - s[i].aBr, vBow[i], force[i]);
+                s[i].tick (c * v - a[i], vBow[i], force[i]);
                 hiss += s[i].hiss;
             }
             bridge.update (F);
+            radLow = (bridge.radA - radPrev) * fs + bridge.radB;
+            radPrev = bridge.radA;
         }
         else
         {
@@ -800,6 +1103,13 @@ struct Violin
         fBridge = F;
         return F;
     }
+
+    // the bridge modes before Hold and Wolf (f, Q, mass after the set's scale)
+    std::vector<ModeData> base;
+    std::vector<int> source; // each mode's index in its table
+    int wolfMode = -1, bodyIndex = 0;
+    double radLow = 0.0, radPrev = 0.0;
+    double coupling[4] = { 1, 1, 1, 1 }, reflect[4] = { 1, 1, 1, 1 }, unbowed[4] = {}, energy[4] = {};
 };
 
 // ------------------------------------------------------------------ helpers

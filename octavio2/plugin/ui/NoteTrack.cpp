@@ -40,10 +40,17 @@ void NoteTrack::read (const o2::Engine& engine)
             notes.push_back ({ e.t, -1, e.pitch, e.string, e.dir, e.kind == o2::Engine::NoteLog::slur, false });
         }
     }
-    const double now = engine.seconds();
+    // the last phrase stays after the playing stops (the Curves tab exports it)
+    double latest = -1e9;
+    for (const auto& n : notes)
+        if (! n.planned)
+            latest = std::max (latest, n.on);
+    const double now = engine.seconds(), endBefore = std::min (now - 10, latest - 30),
+                 startBefore = std::min (now - 30, latest - 40);
     notes.erase (std::remove_if (notes.begin(),
                                  notes.end(),
-                                 [now] (const Note& n) { return (n.off >= 0 && n.off < now - 10) || n.on < now - 30; }),
+                                 [=] (const Note& n)
+                                 { return (n.off >= 0 && n.off < endBefore) || n.on < startBefore; }),
                  notes.end());
 }
 } // namespace octavio2::ui

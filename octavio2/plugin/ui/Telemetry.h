@@ -29,6 +29,7 @@ struct Telemetry
     std::atomic<float> vibRate { 0 }; // Hz
     std::atomic<float> slips { 1 }; // slips per period, sounding string (1 = clean Helmholtz)
     std::atomic<float> cpu { 0 }; // share of real time
+    std::atomic<float> bpm { 0 }; // host tempo, 0 = unknown (the Curves tab's MIDI export)
     std::array<std::atomic<float>, 4> stringForce {};
 
     // the auto curves: one point every 10 ms of engine time

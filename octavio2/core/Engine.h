@@ -39,6 +39,17 @@ struct EngineSettings
     double bridgeHz = 2900.0; // bridge rocking resonance, 2400 (dark) .. 3600 (bright)
     int mute = 0; // 0 off, 1 con sordino, 2 practice mute
     double hiss = 1.0; // bow hiss (Params::slipNoise) scale: 1 natural, 3, 6 (M2)
+    // bridge (M3): Params::sympathetic, wolf, hold, each 0..1
+    double sympathetic = 0.5; // idle open strings: 0 quiet, 0.5 natural (half-coupled), 1 full and long
+    double wolf = 0.0; // 0: the body as measured; 1: a strong wolf near the main body mode
+    double hold = 0.5; // 0: free (hanging); 0.5: held; 1: held firmly (low modes damped)
+    // player (M4, M5)
+    int articulation = 0; // PlayerParams::articulation: arco, pizz, Bartok pizz, left-hand pizz, harmonic
+    int bowStyle = 0; // PlayerParams::bowStyle: auto, legato, detache, staccato, martele, spiccato
+    double phrasing = 1.0; // PlayerParams::phrase
+    bool fingerPlan = false; // Viterbi fingering and anticipated shifts (Studio look-ahead)
+    bool drawnCurves = true; // CC lanes take over the player's dimension
+    bool modalBody = true; // the bridge modes radiate below 1.5 kHz (Radiation::setModalBody)
 };
 
 class Engine
@@ -76,6 +87,8 @@ public:
         player->init (*violin, rate);
         dec = Decim();
         dec2 = Decim();
+        lowDec = Decim();
+        lowDec2 = Decim();
         radiation->reset();
         clock = 0;
         head = tail = 0;
@@ -117,31 +130,48 @@ public:
         while (n > 0)
         {
             const int m = std::min (n, Radiation::maxBlock);
-            double force[Radiation::maxBlock];
+            double force[Radiation::maxBlock], direct[Radiation::maxBlock], low[Radiation::maxBlock];
             for (int i = 0; i < m; ++i)
             {
                 dispatch();
                 double vb[4], fb[4];
                 player->tick (vb, fb);
                 const int over = (int) std::lround (violin->p.fs / rate);
+                direct[i] = 0.0;
                 for (int k = 0; k < over; ++k)
                 {
                     const double F = violin->tick (vb, fb);
+                    for (int s = 0; s < 4; ++s) // M5: the Bartok slap heard from the fingerboard
+                        direct[i] += violin->s[s].direct / over;
                     if (over == 4)
                     {
                         dec2.push (F);
+                        lowDec2.push (violin->radLow);
                         if (k & 1)
+                        {
                             dec.push (dec2.out());
+                            lowDec.push (lowDec2.out());
+                        }
                     }
                     else
+                    {
                         dec.push (F);
+                        lowDec.push (violin->radLow);
+                    }
                 }
                 force[i] = dec.out();
+                low[i] = lowDec.out();
                 scope[(size_t) (scopeWrite++ & (scopeSize - 1))] = (float) force[i];
                 ++clock;
             }
             scopeWritten.store (scopeWrite, std::memory_order_release);
-            radiation->process (force, outL, outR, m);
+            radiation->process (force, violin->hasModalBody() ? low : nullptr, outL, outR, m);
+            const double dg = directGain * std::pow (10.0, settings.volumeDb / 20.0);
+            for (int i = 0; i < m; ++i) // M5: sound that does not come through the bridge (0 unless a Bartok slap)
+            {
+                outL[i] += (float) (dg * direct[i]);
+                outR[i] += (float) (dg * direct[i]);
+            }
             outL += m;
             outR += m;
             n -= m;
@@ -204,12 +234,26 @@ private:
         radiation->setReverbGain (std::pow (10.0, settings.reverbDb / 20.0));
         radiation->setOutputGain (std::pow (10.0, settings.volumeDb / 20.0));
         radiation->setViolin (settings.violin);
+        violin->setBody (settings.violin);
+        radiation->setModalBody (settings.modalBody, violin->modalDelay());
         radiation->setMic (settings.mic);
         radiation->setWidth (settings.width);
         radiation->setMovement (settings.movement);
         radiation->setDistance (settings.distance);
         radiation->setBridge (settings.bridgeHz, settings.mute);
         violin->p.slipNoise = hissBase * settings.hiss;
+        violin->p.sympathetic = settings.sympathetic;
+        if (violin->p.wolf != settings.wolf || violin->p.hold != settings.hold)
+        {
+            violin->p.wolf = settings.wolf;
+            violin->p.hold = settings.hold;
+            violin->applyBody();
+        }
+        player->pp.articulation = settings.articulation;
+        player->pp.bowStyle = settings.bowStyle;
+        player->pp.phrase = settings.phrasing;
+        player->pp.fingerPlan = player->pp.anticipate = settings.fingerPlan ? 1.0 : 0.0;
+        player->pp.drawnCurves = settings.drawnCurves ? 1.0 : 0.0;
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;
@@ -273,6 +317,7 @@ private:
                             sounding[e.a] = dur <= 0.0;
                     }
                     held[e.a & 127] = true;
+                    lookAhead (e, dur);
                     player->nextDur = dur;
                     player->noteOn (e.a, e.b);
                     log ({ seconds(),
@@ -298,6 +343,32 @@ private:
         }
     }
 
+    // M4: the notes queued after e (Studio look-ahead, or a score whose lengths are known) for
+    // the player's fingering and phrase plan. Live mode sees none: it never waits.
+    void lookAhead (const Ev& e, double dur)
+    {
+        player->nAhead = 0;
+        player->aheadValid = settings.studio || dur > 0.0;
+        if (! player->aheadValid)
+            return;
+        for (uint64_t k = head; k < tail && player->nAhead < Player::maxAhead; ++k)
+        {
+            const Ev& f = queue[k & qmask];
+            if (f.t - e.t > lookAheadSamples || f.type == Ev::allOff)
+                break;
+            if (f.type != Ev::on)
+                continue;
+            double fd = f.dur;
+            for (uint64_t j = k + 1; fd <= 0.0 && j < tail; ++j)
+            {
+                const Ev& g = queue[j & qmask];
+                if ((g.a == f.a && (g.type == Ev::off || g.type == Ev::on)) || g.type == Ev::allOff)
+                    fd = (double) (g.t - f.t) / rate;
+            }
+            player->ahead[player->nAhead++] = { (double) (f.t - e.t) / rate, f.a, fd, f.b };
+        }
+    }
+
     void log (const NoteLog& n)
     {
         const uint64_t w = logWritten.load (std::memory_order_relaxed);
@@ -317,11 +388,12 @@ private:
             h = 0;
     }
 
+    double directGain = 0.1; // M5: N of slap -> output units (fitted to the Philharmonia snap pizz)
     std::unique_ptr<Violin> violin;
     double hissBase = Params {}.slipNoise;
     std::unique_ptr<Player> player;
     std::unique_ptr<Radiation> radiation;
-    Decim dec, dec2;
+    Decim dec, dec2, lowDec, lowDec2;
     EngineSettings settings;
     unsigned seed = 1;
     int64_t clock = 0;

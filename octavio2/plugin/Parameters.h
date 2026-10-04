@@ -15,6 +15,14 @@ inline const juce::ParameterID velocityCurve { "velocityCurve", 1 };
 inline const juce::ParameterID vibrato { "vibrato", 1 };
 inline const juce::ParameterID brightness { "brightness", 1 };
 inline const juce::ParameterID hiss { "hiss", 1 };
+inline const juce::ParameterID sympathetic { "sympathetic", 1 };
+inline const juce::ParameterID wolf { "wolf", 1 };
+inline const juce::ParameterID hold { "hold", 1 };
+inline const juce::ParameterID articulation { "articulation", 1 };
+inline const juce::ParameterID bowStyle { "bowStyle", 1 };
+inline const juce::ParameterID phrasing { "phrasing", 1 };
+inline const juce::ParameterID fingerPlan { "fingerPlan", 1 };
+inline const juce::ParameterID drawnCurves { "drawnCurves", 1 };
 inline const juce::ParameterID room { "room", 1 };
 inline const juce::ParameterID reverb { "reverb", 1 };
 inline const juce::ParameterID volume { "volume", 1 };
@@ -36,6 +44,8 @@ const juce::StringArray& roomNames();
 // The Violin and Mic position choices, in the order the engine loads them
 const juce::StringArray& violinNames();
 const juce::StringArray& micNames();
+const juce::StringArray& articulationNames();
+const juce::StringArray& bowStyleNames();
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -55,6 +65,7 @@ public:
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
-    std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss;
+    std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
+        *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
 };
 } // namespace octavio2::params

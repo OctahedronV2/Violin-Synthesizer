@@ -22,6 +22,20 @@ const juce::StringArray& violinNames()
     return names;
 }
 
+const juce::StringArray& articulationNames()
+{
+    static const juce::StringArray names { "Arco", "Pizzicato", "Bartok pizz", "Left-hand pizz", "Harmonics" };
+    return names;
+}
+
+const juce::StringArray& bowStyleNames()
+{
+    static const juce::StringArray names {
+        "Auto", "Legato", juce::String::fromUTF8 ("Détaché"), "Staccato", juce::String::fromUTF8 ("Martelé"), "Spiccato"
+    };
+    return names;
+}
+
 const juce::StringArray& micNames()
 {
     static const juce::StringArray names { "Front", "Above", "Player's ear", "Side" };
@@ -91,6 +105,18 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
                                                               "Bow Hiss",
                                                               juce::StringArray { "Natural", "3x", "6x" },
                                                               0));
+    // the real bridge (M3): the open strings' ring, a wolf at the main body mode, the chin and hand
+    layout.add (floatParam (id::sympathetic, "Sympathetic", { 0.0f, 100.0f }, 50.0f, "%", 0));
+    layout.add (floatParam (id::wolf, "Wolf", { 0.0f, 100.0f }, 0.0f, "%", 0));
+    layout.add (floatParam (id::hold, "Hold", { 0.0f, 100.0f }, 50.0f, "%", 0));
+    // the player (M4, M5): how notes are played. Keyswitches C1..E1 (MIDI 24-28) pick the
+    // articulation too; changing this parameter wins over the last keyswitch.
+    layout.add (
+        std::make_unique<juce::AudioParameterChoice> (id::articulation, "Articulation", articulationNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::bowStyle, "Bow Style", bowStyleNames(), 0));
+    layout.add (floatParam (id::phrasing, "Phrasing", { 0.0f, 200.0f }, 100.0f, "%", 0));
+    layout.add (std::make_unique<juce::AudioParameterBool> (id::fingerPlan, "Plan Fingering", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (id::drawnCurves, "Drawn Curves", true));
     return layout;
 }
 
@@ -111,7 +137,15 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       distance (s.getRawParameterValue (id::distance.getParamID())),
       bridge (s.getRawParameterValue (id::bridge.getParamID())),
       mute (s.getRawParameterValue (id::mute.getParamID())),
-      hiss (s.getRawParameterValue (id::hiss.getParamID()))
+      hiss (s.getRawParameterValue (id::hiss.getParamID())),
+      sympathetic (s.getRawParameterValue (id::sympathetic.getParamID())),
+      wolf (s.getRawParameterValue (id::wolf.getParamID())),
+      hold (s.getRawParameterValue (id::hold.getParamID())),
+      articulation (s.getRawParameterValue (id::articulation.getParamID())),
+      bowStyle (s.getRawParameterValue (id::bowStyle.getParamID())),
+      phrasing (s.getRawParameterValue (id::phrasing.getParamID())),
+      fingerPlan (s.getRawParameterValue (id::fingerPlan.getParamID())),
+      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID()))
 {
 }
 
@@ -134,6 +168,14 @@ o2::EngineSettings Reader::read() const
     e.bridgeHz = bridge->load();
     e.mute = juce::roundToInt (mute->load());
     static constexpr double hissScale[] { 1.0, 3.0, 6.0 };
+    e.sympathetic = sympathetic->load() / 100.0;
+    e.wolf = wolf->load() / 100.0;
+    e.hold = hold->load() / 100.0;
+    e.articulation = juce::roundToInt (articulation->load());
+    e.bowStyle = juce::roundToInt (bowStyle->load());
+    e.phrasing = phrasing->load() / 100.0;
+    e.fingerPlan = fingerPlan->load() > 0.5f;
+    e.drawnCurves = drawnCurves->load() > 0.5f;
     e.hiss = hissScale[juce::jlimit (0, 2, juce::roundToInt (hiss->load()))];
     return e;
 }

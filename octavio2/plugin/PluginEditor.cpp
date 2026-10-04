@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 
+#include "ui/ArticulationView.h"
 #include "ui/CurvesView.h"
 #include "ui/MidiView.h"
 #include "ui/PlaceholderView.h"
@@ -91,11 +92,7 @@ Editor::Editor (Processor& p)
         "Left hand",
         "Fingering, positions and shifts, string choice, vibrato shape, and intonation (expressive, equal or just).",
         "Arrives with the player milestone (M4)."));
-    canvas.views.push_back (std::make_unique<PlaceholderView> (
-        "Articulation",
-        juce::String::fromUTF8 ("Legato, détaché, martelé, staccato, spiccato, sautillé, tremolo, pizzicato and "
-                                "harmonics, each with its own settings and keyswitch."),
-        "Arrives with the player and pizzicato milestones (M4, M5)."));
+    canvas.views.push_back (std::make_unique<ArticulationView> (p));
     canvas.views.push_back (std::make_unique<ToneView> (p));
     canvas.views.push_back (std::make_unique<MidiView> (p));
     for (auto& v : canvas.views)

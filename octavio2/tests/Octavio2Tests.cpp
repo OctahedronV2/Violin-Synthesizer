@@ -124,6 +124,105 @@ TEST_CASE ("Octavio 2 plays through every violin, microphone, mute and distance"
     }
 }
 
+TEST_CASE ("Octavio 2 plays every articulation, bow style and bridge setting", "[octavio2]")
+{
+    struct Setting
+    {
+        const char* id;
+        float value;
+        double minDb;
+    };
+    // plucked notes die away and harmonics are quieter, so they get a lower floor
+    const Setting settings[] = { { "articulation", 1, -65 }, { "articulation", 2, -65 },  { "articulation", 3, -75 },
+                                 { "articulation", 4, -60 }, { "bowStyle", 1, -45 },      { "bowStyle", 2, -45 },
+                                 { "bowStyle", 3, -60 },     { "bowStyle", 4, -60 },      { "bowStyle", 5, -65 },
+                                 { "sympathetic", 0, -45 },  { "sympathetic", 100, -45 }, { "wolf", 100, -45 },
+                                 { "hold", 0, -45 },         { "hold", 100, -45 },        { "phrasing", 0, -45 },
+                                 { "phrasing", 200, -45 },   { "fingerPlan", 1, -45 },    { "mode", 1, -45 } };
+    for (const auto& s : settings)
+    {
+        octavio2::Processor p;
+        setParam (p, "octave", 2.0f);
+        setParam (p, s.id, s.value);
+        const auto out = play (p, 48000.0, 69, 1.0, 2.5);
+        const auto sounding = measure (out, 0, (int) (2.5 * 48000));
+        INFO (s.id << " = " << s.value << ": " << dB (sounding.rms) << " dB RMS, peak " << dB (sounding.peak) << " dB");
+        CHECK (sounding.finite);
+        CHECK (dB (sounding.rms) > s.minDb);
+        CHECK (sounding.peak < 1.0);
+    }
+}
+
+TEST_CASE ("Octavio 2 keyswitches pick the articulation whatever the Octave", "[octavio2]")
+{
+    // C#1 (MIDI 25) = pizzicato: the plucked note has died well before a bowed one would
+    auto lateLevel = [] (bool keyswitch)
+    {
+        octavio2::Processor p;
+        setParam (p, "room", 0.0f);
+        const int block = 480;
+        p.prepareToPlay (48000.0, block);
+        juce::AudioBuffer<float> buf (2, block);
+        double late = 0;
+        for (int pos = 0, k = 0; pos < 3 * 48000; pos += block, ++k)
+        {
+            juce::MidiBuffer midi;
+            if (k == 0 && keyswitch)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 25, (juce::uint8) 100), 0);
+            if (k == 10)
+                midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 100), 0); // A4 at Octave +1
+            p.processBlock (buf, midi);
+            if (pos > 2 * 48000)
+                late = std::max (late, (double) buf.getMagnitude (0, block));
+        }
+        return late;
+    };
+    const double bowed = lateLevel (false), plucked = lateLevel (true);
+    INFO ("bowed " << dB (bowed) << " dB, plucked " << dB (plucked) << " dB");
+    CHECK (dB (plucked) < dB (bowed) - 10.0);
+}
+
+TEST_CASE ("Octavio 2's bridge stays stable at every Sympathetic, Wolf and Hold extreme", "[octavio2]")
+{
+    // M3 soak, short: the strings and the passive bridge alone, random bowing on all strings
+    for (const double wolf : { 0.0, 1.0 })
+        for (const double hold : { 0.0, 1.0 })
+        {
+            o2::Violin v;
+            v.p.sympathetic = 1.0;
+            v.p.wolf = wolf;
+            v.p.hold = hold;
+            v.init();
+            o2::Rng rng;
+            auto uniform = [&rng] { return 0.5 * (rng.uni() + 1.0); };
+            double vb[4] = {}, fb[4] = {}, peak = 0, after = 0, tail = 0;
+            bool finite = true;
+            const int n = (int) (12 * v.fs);
+            for (int i = 0; i < n; ++i)
+            {
+                if (i % 9600 == 0)
+                    for (int s = 0; s < 4; ++s)
+                    {
+                        const bool bowing = i < n - (int) (4 * v.fs) && uniform() < 0.6;
+                        vb[s] = bowing ? 0.05 + 0.4 * uniform() : 0.0;
+                        fb[s] = bowing ? 0.2 + 1.8 * uniform() : 0.0;
+                    }
+                const double F = v.tick (vb, fb);
+                finite = finite && std::isfinite (F);
+                peak = std::max (peak, std::abs (F));
+                if (i > n - (int) (4 * v.fs) + 4800 && i < n - (int) (3 * v.fs))
+                    after = std::max (after, std::abs (F)); // just after the bows lift
+                if (i > n - (int) v.fs)
+                    tail = std::max (tail, std::abs (F));
+            }
+            INFO ("wolf " << wolf << ", hold " << hold << ": peak " << peak << " N, after the bows lift " << after
+                          << " N, 3 s later " << tail << " N");
+            CHECK (finite);
+            CHECK (peak < 50.0);
+            CHECK (tail < 0.3 * after); // the open strings ring on, but die away
+        }
+}
+
 TEST_CASE ("Octavio 2 Studio mode plays its look-ahead later and reports it as latency", "[octavio2]")
 {
     octavio2::Processor p;

@@ -17,6 +17,12 @@
 //    none on open strings
 //  - release = bow lifts off while moving, the string rings; idle fingers lift with a damped touch
 //  - double stops on two strings when notes start together
+//
+// M4 adds: phrasing (phrase arch, high-loud, agogic and beat stress, messa di voce on long
+// notes, fading when the velocities already carry dynamics), Studio look-ahead notes (ahead[]),
+// a Viterbi string plan and anticipated shifts (Studio, opt-in), faster vibrato up the string
+// and wider on stressed notes, bow styles (Auto, Legato, Detache, Staccato, Martele, Spiccato),
+// and drawn curves (CC1/26/19/74) that take over from the player.
 
 #pragma once
 #include "Strings.h"
@@ -76,7 +82,7 @@ struct PlayerParams
     double accelFF = 40.0;
     double landTime = 0.006; // bow lands on the string (force rise), s
     double biteFF = 0.35, biteTime = 0.03; // extra force at the start of loud strokes
-    double changeDip = 0.25; // force reduction at a bow change
+    double changeDip = 0.5; // force reduction at a bow change (M4: 0.25 -> 0.5, fitted on the Haydn note-change dip)
     double releaseTime = 0.07368; // lift-off force time constant, s
     // a short separate note (held less than stopBelow s) ends with the bow stopping on the string
     // (decelerating at stopAccel m/s^2, force x stopForce) for stopTime s before it lifts: the
@@ -120,7 +126,7 @@ struct PlayerParams
     // relaxing squeezed in proportion: a quick note is vibrated at once and to its end
     double vibShort = 1.2;
     double vibWidthLo = 8.0, vibWidthHi = 30.0; // cents peak-to-peak at d = 0 / 1
-    double vibRate = 5.6, vibRateDyn = 0.6; // Hz, plus per unit d
+    double vibRate = 5.3, vibRateDyn = 0.6; // Hz, plus per unit d (M4: 5.6 -> 5.3 with vibRateHigh, fitted on Haydn)
     double vibWander = 0.15; // relative random wander of rate and width
     double vibAmount = 1.0; // the plugin's Vibrato control: scales every note's width
     double dynBias = 0.0; // the plugin's Dynamics control: added to every note's dynamics (0..1 scale)
@@ -140,7 +146,70 @@ struct PlayerParams
     // -> more force; a string that sticks silent -> less force. Imperfection will scale this.
     double earUp = 0.25, earDown = 0.15, earMax = 2.106, earMin = 0.4, earRelax = 0.3, earWindow = 0.005,
            earWait = 0.05, earPeriods = 6.0;
+
+    // ---- M4 phrasing: the player shapes the line so a constant velocity still sounds musical.
+    // Every term is in dynamics units (d, 0..1; 0.1 is about 2 dB) and scaled by phrase (the
+    // plugin's Phrasing control, 0 = every note at its velocity's dynamics).
+    double phrase = 1.0;
+    // a phrase starts after phraseGap s of rest or after a long note (over 0.8 s and phraseLong
+    // times the recent inter-onset time); its dynamics rise from -phraseArc/2 to +phraseArc/2 with
+    // time constant phraseRise s, and fall by phraseArc over the last phraseFall s when the end
+    // is in view (Studio look-ahead)
+    double phraseArc = 0.18, phraseRise = 1.5, phraseFall = 1.0, phraseGap = 0.3, phraseLong = 2.5;
+    double highLoud = 0.08; // per octave above the recent mean pitch (melodic charge, high = loud)
+    double agogic = 0.04; // a note twice as long as the recent notes (length known)
+    double stress = 0.04; // the beat-like notes of a run (every 2nd, or 4th when quick) and phrase starts
+    double restAccent = 0.25; // extra attack bite on the first note of a phrase
+    // messa di voce: a note known to last mdvMin s or more swells to its middle and relaxes,
+    // by up to mdvDepth (full from mdvFull s); a long note in Live swells by half and holds
+    double mdvDepth = 0.12, mdvMin = 0.6, mdvFull = 1.5;
+    // > 0: phrasing fades (to 30%) as the played velocities vary by this many steps on average:
+    // a performance with its own dynamics needs less help (0 = off)
+    double phraseVelSpread = 10.0;
+    // ---- M4 left hand: in Studio (look-ahead) the strings are planned over the coming notes with
+    // a Viterbi search (costs: hand position, shifts, string crossings, open strings on long notes);
+    // Live stays greedy. anticipate: a shift on one string leaves late in the old note and lands
+    // on the new note's start instead of after it. Both off by default: on the Haydn phrase suite
+    // they raised unreal notes 1.4% -> 2.2-2.4% and off-pitch time 9.8% -> 10.5% (M4); 1 = on
+    double fingerPlan = 0.0, anticipate = 0.0;
+    double costShift = 1.0, costShiftSemi = 0.08, costCross = 0.9, costOpen = 0.8, costHigh = 0.6;
+    double vibRateHigh = 0.4; // Hz faster an octave up the string
+    double vibStress = 0.25; // vibrato width x (1 + this) on stressed and long notes
+    // ---- M4 bow strokes: 0 Auto (inferred), 1 Legato, 2 Detache, 3 Staccato, 4 Martele, 5 Spiccato
+    double bowStyle = 0;
+    double legatoGap = 0.15; // Legato: notes this close are slurred too, s
+    // Auto: a short separate note (under 0.45 s, with a gap after it) at this velocity or more is
+    // played martele (0 = off); separate notes faster than autoSpiccato s apart and detached are
+    // played spiccato (0 = off)
+    double autoMartele = 0.0, autoSpiccato = 0.0;
+    // drawn curves: CC1/26/19/74 lanes take over dynamics, vibrato width, rate, contact (0 = ignored)
+    double drawnCurves = 1.0;
     unsigned seed = 1;
+
+    // ---------------------------------------------------------------- M5 articulations
+    // articulation: 0 Arco, 1 Pizzicato, 2 Bartok (snap) pizz, 3 Left-hand pizz, 4 Harmonic. The
+    // keyswitches keyswitchBase .. keyswitchBase + 4 (MIDI 24..28 = C1..E1 with C4 = 60, "C0..E0"
+    // in the C3 = 60 naming) select the same five and win over this until it changes.
+    double articulation = 0, keyswitchBase = 24;
+    double pizzModel = 1; // 0: the 2.0 placeholder impulse (comparisons only), 1: the shaped pluck
+    double pizzImpulse = 0.3; // placeholder amplitude at velocity 127
+    // right-hand pizz: plucked pizzPointMM from the bridge (over the end of the fingerboard),
+    // displacement pizzAmpPP .. pizzAmpFF (m, exponential in the dynamics), release time
+    // pizzTau (s), shortened by pizzBright at ff (a harder pluck leaves the finger faster)
+    double pizzPointMM = 70.0, pizzAmpPP = 0.4e-3, pizzAmpFF = 1.5e-3, pizzTau = 0.1e-3, pizzBright = 0.5;
+    // the plucking finger touches a ringing string first (pizzTouch s, loss pizzTouchDamp per round
+    // trip); after the note-off a stopped note's finger eases off (loss pizzOffDamp per round trip)
+    double pizzTouch = 0.004, pizzTouchDamp = 0.3, pizzOffDamp = 0.015;
+    double pizzPull = 0.015; // s the finger takes to pull the string aside (whole periods, at least two)
+    double pizzStopLoss = 0.02; // loss per round trip at the stopping fingertip while a plucked stopped note rings
+    // Bartok: pulled up and let go so it slaps the fingerboard: bartokAmp x the displacement, a
+    // nail-like release, the slap's knock (N at ff) a little after the release
+    double bartokAmp = 0.7, bartokTau = 0.06e-3, bartokPointMM = 90.0, bartokClick = 10.0, bartokClickTime = 0.004;
+    double bartokKick = 1.5; // how hard the board stops the string (x the pluck's wave), each rattle half the last
+    // left-hand pizz: a left finger plucks lhFromNut of the string from the nut, softer and duller
+    double lhAmp = 0.6, lhTau = 0.25e-3, lhFromNut = 0.2;
+    // harmonics: the light finger's resistance in units of the string's impedance
+    double harmTouch = 1.0, harmForce = 0.3; // ... and the bow force on a harmonic, x the normal
 };
 
 struct Player
@@ -192,6 +261,38 @@ struct Player
     double lastVel = 64.0;
     double contactMM = 22.0;
 
+    // M4: the notes coming up, set by the host before noteOn (Studio look-ahead or a score):
+    // start dt seconds from now, length (0 = unknown), velocity. aheadValid: the host can see
+    // ahead, so "no note within the window" means a rest is coming.
+    struct Ahead
+    {
+        double dt;
+        int pitch;
+        double dur, vel;
+    };
+    static constexpr int maxAhead = 24;
+    Ahead ahead[maxAhead];
+    int nAhead = 0;
+    bool aheadValid = false;
+    // phrasing state
+    double phraseStart = -10.0, lastOffT = -10.0, ioiMean = 0.3, pMean = -1.0, velMean = -1.0, velDev = 0.0;
+    double dEnv = 0.0; // the note's own swell (messa di voce), added to d
+    double phraseOff = 0.0, noteWeight = 0.0, phraseBite = 0.0;
+    int runIdx = 0;
+    // planned shift: the next note, on the same string, slid to before it starts (Studio)
+    double preT = -1.0, preDur = 0.0;
+    int prePitch = -1, preString = -1, planNextString = -1;
+    bool preDone = false;
+    // stroke articulation in use
+    int art = 0; // 0 normal, 3 staccato, 4 martele, 5 spiccato
+    double cutAt = -1.0, relTime = 0.07368, strokeBite = 0.0;
+    double pendingOff = -1.0; // Legato: the bow keeps going this long after the last note-off
+    bool cutDone = false;
+    double dEff() const { return std::clamp (d + dEnv, 0.0, 1.0); }
+    // drawn curves (CC lanes) that have taken over a dimension; -1 / false = the player's own
+    bool manDyn = false;
+    double ccDyn = 0.6, ccVib = -1.0, ccRate = -1.0, ccContact = -1.0;
+
     struct Str
     {
         bool bowed = false; // the bow is (or should be) on this string
@@ -204,6 +305,7 @@ struct Player
         double planEnd = -1.0; // when this note is due to end, if the host said (else -1)
         double vibSqueeze = 1.0; // vibrato timing scale for a known short note
         double wanderR = 0.0, wanderW = 0.0;
+        double rateAdd = 0.0; // M4: faster vibrato up the string
         double lastBowed = -10.0;
         double setPitchAt = -1e9;
         bool lifted = true;
@@ -246,6 +348,8 @@ struct Player
     // ---------------------------------------------------------------- string choice
     int chooseString (int pitch, int avoid1 = -1, int avoid2 = -1) const
     {
+        if (m5String >= 0) // M5: a harmonic's string, picked by m5Harmonic
+            return m5String;
         int best = -1;
         double bestCost = 1e30;
         for (int s = 0; s < 4; ++s)
@@ -275,9 +379,230 @@ struct Player
         return best;
     }
 
+    // ---------------------------------------------------------------- M4: planned fingering
+    // Hand position (first finger, semitones above the open string) after playing semis with the
+    // hand at hp: unchanged when in reach, else the note under the third finger going up, under
+    // the first going down (as fingerNote moves it). Open strings leave the hand where it is.
+    static double handAfter (double hp, double semis)
+    {
+        if (semis <= 0.0 || (semis >= hp - 1.0 && semis <= hp + 5.0))
+            return hp;
+        return semis > hp ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
+    }
+    // what playing pitch on string s costs on its own: high positions, open strings on long notes
+    double placeCost (int s, int pitch, double dur) const
+    {
+        const double semis = pitch - openPitch[s];
+        double c = 0.12 * semis + pp.costHigh * std::max (0.0, semis - 7.0);
+        if (semis == 0 && pitch != 55) // an open string can't vibrate: avoided on expressive notes
+            c += dur <= 0.0 || dur > 0.25 ? pp.costOpen : 0.15 * pp.costOpen;
+        return c;
+    }
+    // moving from string s0 (hand at hp0) to pitch on s after gap seconds of rest
+    double moveCost (int s0, double hp0, int s, int pitch, double gap, double ioi) const
+    {
+        const double semis = pitch - openPitch[s];
+        const int x = std::abs (s - s0);
+        // crossing two strings at once in quick notes is awkward
+        double c = pp.costCross * (x <= 1 || ioi > 0.25 ? x : 1.5 * x);
+        const double hp = handAfter (hp0, semis);
+        if (hp != hp0)
+            c += (pp.costShift + pp.costShiftSemi * std::abs (hp - hp0)) * (gap > 0.15 ? 0.4 : 1.0);
+        return c;
+    }
+    static bool playable (int s, int pitch)
+    {
+        const double semis = pitch - openPitch[s];
+        return semis >= 0 && semis <= (s == 3 ? 28 : 16);
+    }
+
+    // Viterbi over this note (pitch, dur, starting after gap s of rest) and the coming notes:
+    // returns the string for this note and sets planNextString for the one after it.
+    int planString (int pitch, double dur, double gap)
+    {
+        constexpr int N = maxAhead + 1;
+        int P[N];
+        double D[N], G[N], I[N];
+        int n = 0;
+        P[n] = pitch;
+        D[n] = dur;
+        G[n] = gap;
+        I[n] = nAhead > 0 ? ahead[0].dt : 1.0;
+        ++n;
+        double lastT = 0.0, lastDur = dur;
+        for (int i = 0; i < nAhead && n < N; ++i)
+        {
+            if (ahead[i].dt - lastT < pp.chordWindow) // a chord's other notes: planned with the top one
+                continue;
+            P[n] = ahead[i].pitch;
+            D[n] = ahead[i].dur;
+            G[n] = lastDur > 0.0 ? std::max (0.0, ahead[i].dt - lastT - lastDur) : 0.0;
+            I[n] = ahead[i].dt - lastT;
+            lastT = ahead[i].dt;
+            lastDur = ahead[i].dur;
+            ++n;
+        }
+        double cost[N][4], hp[N][4];
+        int from[N][4];
+        for (int s = 0; s < 4; ++s)
+        {
+            cost[0][s] = 1e30;
+            if (! playable (s, P[0]))
+                continue;
+            cost[0][s] = placeCost (s, P[0], D[0]) + moveCost (lastString, handPos, s, P[0], G[0], I[0]);
+            hp[0][s] = handAfter (handPos, P[0] - openPitch[s]);
+            from[0][s] = -1;
+        }
+        for (int i = 1; i < n; ++i)
+            for (int s = 0; s < 4; ++s)
+            {
+                cost[i][s] = 1e30;
+                from[i][s] = -1;
+                if (! playable (s, P[i]))
+                    continue;
+                for (int r = 0; r < 4; ++r)
+                {
+                    if (cost[i - 1][r] >= 1e29)
+                        continue;
+                    const double c = cost[i - 1][r] + moveCost (r, hp[i - 1][r], s, P[i], G[i], I[i]);
+                    if (c < cost[i][s])
+                    {
+                        cost[i][s] = c;
+                        from[i][s] = r;
+                    }
+                }
+                if (from[i][s] < 0)
+                    continue;
+                cost[i][s] += placeCost (s, P[i], D[i]);
+                hp[i][s] = handAfter (hp[i - 1][from[i][s]], P[i] - openPitch[s]);
+            }
+        int best = -1;
+        for (int s = 0; s < 4; ++s)
+            if (cost[n - 1][s] < 1e29 && (best < 0 || cost[n - 1][s] < cost[n - 1][best]))
+                best = s;
+        if (best < 0)
+            return chooseString (pitch);
+        int path[N];
+        for (int i = n - 1; i >= 0; --i)
+        {
+            path[i] = best;
+            best = i > 0 ? from[i][best] : best;
+        }
+        planNextString = n > 1 ? path[1] : -1;
+        return path[0];
+    }
+
+    // ---------------------------------------------------------------- M4: phrasing
+    // At a note start (not a chord's second note): the note's place in its phrase -> phraseOff
+    // (added to its dynamics), noteWeight (0..1, stress for vibrato) and phraseBite.
+    void phraseNote (int pitch, double vel127, bool anyHeld)
+    {
+        const double gap = anyHeld ? 0.0 : t - lastOffT;
+        const double ioi = t - lastOn;
+        const double prevLen = anyHeld ? ioi : lastOffT - lastOn;
+        const double dur = nextDur;
+        const bool first = lastOn < -5.0;
+        const bool newPhrase = first || gap > pp.phraseGap || (prevLen > 0.8 && prevLen > pp.phraseLong * ioiMean);
+        if (! first && ioi < 3.0)
+        {
+            const double r = std::abs (std::log (std::max (0.03, ioi) / ioiMean));
+            runIdx = newPhrase || r > 0.4 ? 0 : runIdx + 1;
+            ioiMean = std::clamp (ioiMean + 0.3 * (std::clamp (ioi, 0.05, 2.0) - ioiMean), 0.05, 2.0);
+        }
+        else
+            runIdx = 0;
+        if (newPhrase)
+        {
+            phraseStart = t;
+            runIdx = 0;
+        }
+        pMean = pMean < 0.0 ? pitch : pMean + 0.15 * (pitch - pMean);
+        if (velMean < 0.0)
+            velMean = vel127;
+        velDev += 0.2 * (std::abs (vel127 - velMean) - velDev);
+        velMean += 0.2 * (vel127 - velMean);
+        double amount = pp.phrase;
+        if (pp.phraseVelSpread > 0.0)
+            amount *= std::clamp (1.0 - velDev / pp.phraseVelSpread, 0.3, 1.0);
+
+        // the phrase's end, if the look-ahead shows it: a rest or a long note
+        double tEnd = -1.0;
+        if (aheadValid && dur > 0.0)
+        {
+            double end = dur, curDur = dur;
+            int i = 0;
+            for (;; ++i)
+            {
+                const double next = i < nAhead ? ahead[i].dt : 1e9;
+                if (curDur > 0.0 && (next - end > pp.phraseGap || (curDur > 0.8 && curDur > pp.phraseLong * ioiMean)))
+                {
+                    if (next < 1e8 || end < 1.5) // a rest beyond the window counts only when near
+                        tEnd = end;
+                    break;
+                }
+                if (i >= nAhead || ahead[i].dur <= 0.0)
+                    break;
+                curDur = ahead[i].dur;
+                end = std::max (end, ahead[i].dt + curDur);
+            }
+        }
+        const double age = t - phraseStart;
+        double off = pp.phraseArc * ((1.0 - std::exp (-age / pp.phraseRise)) - 0.5);
+        if (tEnd > 0.0)
+        {
+            const double k = std::clamp (1.0 - tEnd / pp.phraseFall, 0.0, 1.0);
+            off -= pp.phraseArc * k * k * (3 - 2 * k);
+        }
+        off += pp.highLoud * std::clamp ((pitch - pMean) / 12.0, -1.0, 1.0);
+        double w = 0.0;
+        if (dur > 0.0)
+        {
+            const double a = std::clamp (std::log2 (dur / std::max (0.05, ioiMean)), -1.0, 1.0);
+            off += pp.agogic * a;
+            w = std::max (w, a);
+        }
+        const int group = ioiMean < 0.2 ? 4 : 2;
+        const bool strong = runIdx % group == 0;
+        off += pp.stress * ((strong ? 1.0 : 0.0) - 0.5);
+        if (strong)
+            w = std::max (w, 0.5);
+        phraseOff = amount * off;
+        noteWeight = std::clamp (w, 0.0, 1.0) * std::min (1.0, amount);
+        phraseBite = newPhrase && ! first ? amount * pp.restAccent : (first ? amount * pp.restAccent : 0.0);
+    }
+
+    // the note's own swell, per sample (sounding string s)
+    void updateEnvelope (int s)
+    {
+        double e = 0.0;
+        if (! manDyn && pp.phrase > 0.0 && pp.mdvDepth > 0.0 && nHeld > 0 && ! releasing && s >= 0)
+            e = swell (st[s]);
+        dEnv += (e - dEnv) * std::min (1.0, 1.0 / (fs * 0.05));
+    }
+    double swell (const Str& S) const
+    {
+        double dEnv = 0.0;
+        const double age = t - S.noteOn;
+        const double len = S.planEnd > 0.0 ? S.planEnd - S.noteOn : 0.0;
+        if (len >= pp.mdvMin)
+        {
+            const double depth = pp.mdvDepth * pp.phrase
+                * std::clamp ((len - pp.mdvMin) / std::max (0.05, pp.mdvFull - pp.mdvMin), 0.0, 1.0);
+            dEnv = depth * (std::sin (pi * std::clamp (age / len, 0.0, 1.0)) - 0.4);
+        }
+        else if (len <= 0.0 && age > 0.3)
+        {
+            const double k = std::clamp ((age - 0.3) / 1.0, 0.0, 1.0);
+            dEnv = 0.5 * pp.mdvDepth * pp.phrase * k * k * (3 - 2 * k);
+        }
+        return dEnv;
+    }
+
     // ---------------------------------------------------------------- bow targets from dynamics
     double betaFor (int s) const
     {
+        if (ccContact > 0.0)
+            return ccContact;
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
         // on a shorter (stopped) string the player moves the bow towards the bridge too
         const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow);
@@ -290,7 +615,8 @@ struct Player
         const double z = vn->s[s].d.Z / 0.303; // the measured window is for a D string
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
-        const double p = std::clamp (pp.posLo + pp.posRange * d + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
+        const double p
+            = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
         return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
     }
 
@@ -312,7 +638,7 @@ struct Player
     // jump: a new stroke takes the dynamics at once; a slur glides there (dynGlide)
     void setStroke (double vel127, bool jump = true)
     {
-        dTarget = dynFromVel (vel127);
+        dTarget = manDyn ? ccDyn : std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
         if (jump)
             d = dTarget;
         applyDyn();
@@ -320,8 +646,8 @@ struct Player
     }
     void applyDyn()
     {
-        V = speedFor (d) * regTrim (noteNow);
-        contactMM = pp.contactPP + (pp.contactFF - pp.contactPP) * d;
+        V = speedFor (dEff()) * regTrim (noteNow);
+        contactMM = pp.contactPP + (pp.contactFF - pp.contactPP) * dEff();
     }
 
     // ---------------------------------------------------------------- left hand
@@ -334,7 +660,8 @@ struct Player
         // a shift: same string, finger already down, the hand moves more than a tone
         // a shift: the note is out of the hand's reach (the finger slides on this string if one is down)
         const bool outOfReach = semis > 0 && ! inReach (semis);
-        const bool shift = ! S.lifted && outOfReach && jump > 1.0;
+        const bool pre = preDone && s == preString && pitch == prePitch; // slid there already (Studio)
+        const bool shift = ! pre && ! S.lifted && outOfReach && jump > 1.0;
         S.target = pitch;
         if (shift)
         {
@@ -342,6 +669,8 @@ struct Player
             S.slideT0 = t;
             S.slideDur = pp.shiftBase + pp.shiftPerSemi * jump;
         }
+        else if (pre) // a planned shift's slide carries on to the note; the ear starts afresh
+            vn->s[s].fingerCents = 0.0;
         else
         {
             S.slideT0 = -1.0;
@@ -357,23 +686,114 @@ struct Player
         S.vibSqueeze = nextDur > 0.0 && pp.vibShort > 0.0 ? std::min (1.0, nextDur / pp.vibShort) : 1.0;
         S.captured = false;
         // vibrato restarts on a new bow, continues (phase kept) over a slur in one position
-        if (! slurred || shift)
+        if (! slurred || shift || pre)
             S.vibWidth = 0.0;
         S.vibWidthTarget = semis > 0
             ? (pp.vibWidthLo + (pp.vibWidthHi - pp.vibWidthLo) * d) * std::pow (2.0, semis / 12.0 * pp.vibPosition)
             : 0.0;
         S.wanderR = pp.vibWander * rng.gauss() * 0.5;
         S.wanderW = pp.vibWander * rng.gauss() * 0.5;
-        S.vibRate = (pp.vibRate + pp.vibRateDyn * d) * (1.0 + S.wanderR);
+        S.rateAdd = pp.vibRateHigh * std::clamp (semis / 12.0, 0.0, 1.5);
+        S.vibWidthTarget *= 1.0 + pp.vibStress * noteWeight;
+        S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR);
+    }
+
+    // ---------------------------------------------------------------- M4: note decisions
+    // the string for a note: the planned shift's string, the Studio plan (Viterbi), or greedy
+    int pickString (int pitch, double gap)
+    {
+        // (M5: a forced string from its hooks goes through chooseString and wins there)
+        if (preDone && pitch == prePitch && preString >= 0)
+            return preString;
+        if (pp.fingerPlan > 0.0 && aheadValid)
+            return planString (pitch, nextDur, gap);
+        return chooseString (pitch);
+    }
+
+    // a planned shift to the next note when it is on this string and follows on (Studio)
+    void planShift (int s, int pitch)
+    {
+        preDone = false;
+        preT = -1.0;
+        if (pp.anticipate <= 0.0 || ! aheadValid || nAhead == 0 || nextDur <= 0.0 || planNextString != s)
+            return;
+        const Ahead& a = ahead[0];
+        const double semis = a.pitch - openPitch[s];
+        if (a.dt - nextDur > 0.05 || a.dt < 0.08 || semis <= 0 || ! playable (s, a.pitch) || inReach (semis)
+            || std::abs (a.pitch - pitch) <= 1)
+            return;
+        preT = t + a.dt;
+        prePitch = a.pitch;
+        preString = s;
+        preDur = std::min (0.6 * a.dt, pp.shiftBase + pp.shiftPerSemi * std::abs (a.pitch - pitch));
+    }
+
+    // the stroke's articulation: the Bow style override, or inferred from length and gap (Auto)
+    void chooseArt (int style, double vel127)
+    {
+        art = style >= 3 ? style : 0;
+        const double dur = nextDur;
+        if (style == 0 && dur > 0.0 && aheadValid)
+        {
+            const double ioiN = nAhead > 0 ? ahead[0].dt : 1e9;
+            const bool detached = ioiN - dur > 0.04;
+            if (pp.autoSpiccato > 0.0 && ioiN < pp.autoSpiccato && detached && dur < 0.2)
+                art = 5;
+            else if (pp.autoMartele > 0.0 && vel127 >= pp.autoMartele && dur < 0.45 && detached)
+                art = 4;
+        }
+        cutAt = -1.0;
+        cutDone = false;
+        relTime = pp.releaseTime;
+        strokeBite = phraseBite;
+        if (art == 3) // staccato: a short stopped stroke, half the written length
+        {
+            shaped = true;
+            if (dur > 0.12)
+                cutAt = t + std::max (0.06, 0.5 * dur);
+        }
+        else if (art == 4 || art == 5) // martele: bite, force released, stopped; spiccato: off the string
+        {
+            shaped = quick = true;
+            fSus = pp.qForceSus;
+            fTau = pp.qForceTau;
+            fHold = pp.qForceHold;
+            sSus = pp.qStrokeSus;
+            sTau = pp.qStrokeTau;
+            stF = pp.qStopForce;
+            stT = pp.qStopTime;
+            stA = pp.qStopAccel;
+            stD = pp.qStopDamp;
+            strokeBite += art == 4 ? 0.5 : 0.2;
+            if (art == 5)
+            {
+                fSus = 0.15;
+                fTau = 0.03;
+                relTime = 0.015;
+                if (dur > 0.0)
+                    cutAt = t + std::min (0.6 * dur, 0.12);
+            }
+            else if (dur > 0.15)
+                cutAt = t + std::max (0.08, 0.7 * dur);
+        }
     }
 
     // ---------------------------------------------------------------- events
     void noteOn (int pitch, double vel127)
     {
+        if (m5NoteOn (pitch, vel127)) // M5: keyswitches, plucked and harmonic notes
+            return;
         const bool anyHeld = nHeld > 0;
         const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
+        const int style = (int) pp.bowStyle;
         if (! chord)
+        {
+            phraseNote (pitch, vel127, anyHeld);
             shortRun = t - lastOn < pp.quickIOI ? shortRun + 1 : 0;
+        }
+        // Legato: a note that follows closely is slurred onto the same bow
+        const bool join = ! anyHeld && pendingOff > 0.0;
+        pendingOff = -1.0;
         int s;
         if (chord)
         {
@@ -394,18 +814,19 @@ struct Player
                 st[s].landAt = t;
         }
         const bool rebow = anyHeld && ! chord
-            && ((pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
+            && (style == 2 || style >= 3 || cutDone || (pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
                 || (pp.slurMaxTime > 0 && t - strokeStart > pp.slurMaxTime)
                 || (pp.slurAccent > 0 && vel127 - lastVel >= pp.slurAccent));
         if (rebow)
             nHeld = 0; // the held note ends with this bow
         if (chord)
             ;
-        else if (anyHeld && ! rebow)
+        else if ((anyHeld && ! rebow) || join)
         {
             ++slurNotes;
+            releasing = stopping = false;
             // legato: same bow. The new note replaces what was sounding.
-            s = chooseString (pitch);
+            s = pickString (pitch, 0.0);
             for (int k = 0; k < 4; ++k)
                 if (k != s)
                     st[k].bowed = false;
@@ -416,8 +837,8 @@ struct Player
                 st[s].landAt = t;
             // a slur keeps the bow going; each note's velocity sets where the dynamics go
             noteNow = pitch;
-            const double dNew = dynFromVel (vel127);
-            dTarget = (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
+            const double dNew = std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
+            dTarget = manDyn ? ccDyn : (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
             nHeld = 0; // slurred-over notes no longer sound
         }
         else
@@ -435,11 +856,12 @@ struct Player
             stT = quick ? pp.qStopTime : pp.stopTime;
             stA = quick ? pp.qStopAccel : pp.stopAccel;
             stD = quick ? pp.qStopDamp : pp.stopDamp;
-            s = chooseString (pitch);
+            s = pickString (pitch, anyHeld ? 0.0 : t - lastOffT);
             for (int k = 0; k < 4; ++k)
                 st[k].bowed = false;
             noteNow = pitch;
             setStroke (vel127);
+            chooseArt (style, vel127);
             const bool bowMoving = std::abs (v) > 0.01;
             if (bowMoving && strokeStart >= 0.0)
             {
@@ -482,6 +904,8 @@ struct Player
             fingerNote (s, pitch, false);
             st[s].bowed = true;
         }
+        if (! chord)
+            planShift (s, pitch);
         // leaving a ringing open string for another: a free finger or the hand mutes it
         if (! chord && lastString >= 0 && lastString != s && st[lastString].lifted && ! st[lastString].bowed)
             st[lastString].muteEnv = 1.0;
@@ -489,7 +913,7 @@ struct Player
         lastVel = vel127;
         if (log)
             std::fprintf (stderr,
-                          "on %.3f p%d s%d %s%s%s hair %.3f dir %+.0f\n",
+                          "on %.3f p%d s%d %s%s%s hair %.3f dir %+.0f phrase %+.3f art %d\n",
                           t,
                           pitch,
                           s,
@@ -497,7 +921,9 @@ struct Player
                           shaped ? " shaped" : "",
                           quick ? " quick" : "",
                           hair,
-                          dir);
+                          dir,
+                          phraseOff,
+                          art);
         lastOn = t;
         if (nHeld < 16)
             held[nHeld++] = { pitch, vel127, t, s };
@@ -525,6 +951,28 @@ struct Player
             vibScale = std::pow (v127 / 64.0, 3.0);
         else if (cc == 25)
             vibEnd = v127 / 100.0;
+        // M4 drawn curves (the Curves tab exports the player's own curves on these): once a lane
+        // sends, it takes over that dimension. CC1 dynamics (0..127 = d 0..1, replaces velocity
+        // and phrasing), CC26 vibrato width (0.5 cents p-p per step), CC19 vibrato rate
+        // (4 + 4 * v/127 Hz), CC74 contact point (127 = 2% of the string from the bridge,
+        // 0 = 22%). CC121 (reset all controllers) gives every dimension back to the player.
+        else if (pp.drawnCurves > 0.0 && cc == 1)
+        {
+            manDyn = true;
+            ccDyn = v127 / 127.0;
+            dTarget = ccDyn;
+        }
+        else if (pp.drawnCurves > 0.0 && cc == 26)
+            ccVib = v127 * 0.5;
+        else if (pp.drawnCurves > 0.0 && cc == 19)
+            ccRate = 4.0 + 4.0 * v127 / 127.0;
+        else if (pp.drawnCurves > 0.0 && cc == 74)
+            ccContact = 0.02 + 0.2 * (1.0 - v127 / 127.0);
+        else if (cc == 121)
+        {
+            manDyn = false;
+            ccVib = ccRate = ccContact = -1.0;
+        }
     }
 
     // Studio look-ahead: a sounding note's end came into view (tEnd in the player's seconds), so
@@ -538,6 +986,9 @@ struct Player
 
     void noteOff (int pitch)
     {
+        pitch = m5NoteOff (pitch); // M5: plucked notes end here, harmonics map to their finger
+        if (pitch < 0)
+            return;
         int k = 0;
         bool found = false;
         int str = -1;
@@ -556,13 +1007,23 @@ struct Player
             return;
         if (nHeld == 0)
         {
+            lastOffT = t;
+            if (cutDone) // the stroke already ended (staccato, martele, spiccato)
+                return;
+            if ((int) pp.bowStyle == 1 && pp.legatoGap > 0.0)
+            {
+                pendingOff = t + pp.legatoGap; // a note coming within legatoGap is slurred on
+                return;
+            }
             if (log)
                 std::fprintf (stderr,
                               "off %.3f p%d %s\n",
                               t,
                               pitch,
                               pp.stopBelow > 0 && t - strokeStart < pp.stopBelow ? "stop" : "release");
-            if (pp.stopBelow > 0 && t - strokeStart < pp.stopBelow)
+            if (art == 5)
+                releasing = true;
+            else if (art == 3 || art == 4 || (pp.stopBelow > 0 && t - strokeStart < pp.stopBelow))
             {
                 stopping = true;
                 stopT = t;
@@ -580,6 +1041,44 @@ struct Player
     void tick (double* vBow, double* force)
     {
         const double dt = 1.0 / fs;
+        // M4: a stroke cut short by its articulation; a planned shift leaving late in the old note
+        if (cutAt > 0.0 && t >= cutAt)
+        {
+            cutAt = -1.0;
+            if (nHeld > 0 && ! releasing && ! stopping)
+            {
+                if (art == 5)
+                    releasing = true;
+                else
+                {
+                    stopping = true;
+                    stopT = t;
+                }
+                lastStop = t;
+                cutDone = true;
+            }
+        }
+        if (pendingOff > 0.0 && t >= pendingOff)
+        {
+            pendingOff = -1.0;
+            releasing = true;
+            lastStop = t;
+        }
+        if (preT > 0.0 && ! preDone && t >= preT - preDur)
+        {
+            Str& S = st[preString];
+            if (nHeld > 0 && lastString == preString && S.bowed && ! releasing && ! stopping && t < preT + 0.02)
+            {
+                S.slideFrom = S.pitch;
+                S.slideT0 = t;
+                S.slideDur = preDur;
+                S.target = prePitch;
+                preDone = true;
+            }
+            else
+                preT = -1.0;
+        }
+        updateEnvelope (lastString);
         // bow budget: change bow before the hair runs out
         if (! releasing && nHeld > 0)
         {
@@ -594,7 +1093,7 @@ struct Player
             }
         }
         // bow velocity: accelerate towards the target with limited acceleration
-        if (std::abs (dTarget - d) > 1e-6 || std::abs (V - speedFor (d) * regTrim (noteNow)) > 1e-9)
+        if (std::abs (dTarget - d) > 1e-6 || std::abs (V - speedFor (dEff()) * regTrim (noteNow)) > 1e-9)
         {
             d += (dTarget - d) * std::min (1.0, dt / std::max (1e-4, pp.dynGlide));
             applyDyn();
@@ -673,13 +1172,17 @@ struct Player
                     const double k = std::clamp ((S.planEnd - t) / taper * 1.5 - 0.5, 0.0, 1.0);
                     w *= k * k * (3 - 2 * k);
                 }
+                if (ccVib >= 0.0)
+                    w = ccVib;
                 S.vibWidth += (w - S.vibWidth) * std::min (1.0, dt / 0.05);
                 S.vibPhase += 2 * pi * S.vibRate * dt;
                 if (S.vibPhase > 2 * pi)
                 {
                     S.vibPhase -= 2 * pi;
                     // per-cycle wander: no two cycles alike
-                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d) * (1.0 + S.wanderR + 0.04 * rng.gauss());
+                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR + 0.04 * rng.gauss());
+                    if (ccRate > 0.0)
+                        S.vibRate = ccRate;
                 }
             }
             else
@@ -706,6 +1209,7 @@ struct Player
             double dmp = std::max (pp.liftDamp * S.dampEnv, pp.openMute * S.muteEnv);
             if (stopping && S.bowed && std::abs (v) < 0.02)
                 dmp = std::max (dmp, stD);
+            dmp = std::max (dmp, m5Damp (s)); // M5: plucking finger, pizz note-off
             vn->s[s].damp = dmp;
             {
                 const double age = t - std::max (S.noteOn, S.landAt);
@@ -719,7 +1223,7 @@ struct Player
                 ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
-                ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim) * std::exp (-age / pp.biteTime);
+                ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim + strokeBite) * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
                 if (sliding)
@@ -767,19 +1271,245 @@ struct Player
                 S.earT = 0.0;
                 S.ear += (1.0 - S.ear) * std::min (1.0, dt / pp.earRelax);
             }
+            ft *= m5Force (s); // M5: light bow on a harmonic
             S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
-            const double tau
-                = releasing ? pp.releaseTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
+            const double tau = releasing ? relTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
             S.force += (ft - S.force) * std::min (1.0, dt / tau);
             if (S.force < 1e-5 && ft == 0.0)
                 S.force = 0.0;
             force[s] = S.force;
             vBow[s] = S.force > 0.0 ? v : 0.0;
-            vn->s[s].setBeta (betaFor (s));
+            vn->s[s].setBeta (m5Beta (s) > 0.0 ? m5Beta (s) : betaFor (s)); // M5: a plucked string keeps its point
             vn->s[s].hairFrac = hair / pp.bowLength;
             vn->s[s].widthScale = pp.tiltPP + (1.0 - pp.tiltPP) * d;
         }
         t += dt;
+    }
+
+    // ================================================================ M5 articulations
+    // Pizzicato (right hand, Bartok snap, left hand) and harmonics (natural, artificial). Plucked
+    // notes bypass the bow: the left hand stops the note, the plucking finger touches the string
+    // (damping what rings), pulls and lets go (String::pluck). Harmonic notes are bowed: the player
+    // picks a string and node that sound the pitch (natural: 1/2, 1/3, 1/4 of the string from the
+    // nut), else an artificial harmonic (the note two octaves down stopped, a light finger a fourth
+    // above it), and puts the light finger on (String::setTouch).
+    enum M5Art : int
+    {
+        artArco,
+        artPizz,
+        artBartok,
+        artLeftPizz,
+        artHarmonic
+    };
+    int m5Key = -1; // articulation picked by keyswitch (-1: none yet)
+    double m5Param = 0.0; // the last PlayerParams::articulation seen (a change wins over the keyswitch)
+    int m5String = -1; // forces chooseString while a harmonic is fingered
+    bool m5Busy = false;
+    int m5Pluck[128] = {}; // pitch -> string + 1 of a plucked note still held
+    int m5Harm[128] = {}; // pitch -> finger pitch + 1 of a held harmonic
+    struct M5Str
+    {
+        double pluckAt = -1.0, h = 0.0, tau = 0.0, clickAt = 0.0, clickAmp = 0.0, impulse = 0.0;
+        double beta = 0.0; // the plucking point, held while the string rings unbowed
+        double offAt = -1.0;
+    } m5[4];
+
+    int m5Articulation()
+    {
+        if (pp.articulation != m5Param)
+        {
+            m5Param = pp.articulation;
+            m5Key = -1;
+        }
+        return std::clamp (m5Key >= 0 ? m5Key : (int) std::lround (pp.articulation), 0, 4);
+    }
+
+    bool m5NoteOn (int pitch, double vel127)
+    {
+        if (m5Busy)
+            return false;
+        const int ks = (int) pp.keyswitchBase;
+        if (ks > 0 && pitch >= ks && pitch <= ks + 4)
+        {
+            m5Articulation();
+            m5Key = pitch - ks;
+            return true;
+        }
+        const int art = m5Articulation();
+        if (art == artPizz || art == artBartok || art == artLeftPizz)
+        {
+            m5PluckNote (pitch, vel127, art);
+            return true;
+        }
+        if (art == artHarmonic && m5Harmonic (pitch, vel127))
+            return true;
+        for (int k = 0; k < 4; ++k) // an ordinary note: the light finger is lifted
+            if (vn->s[k].touchOn)
+                vn->s[k].setTouch (0.0, 0.0);
+        return false;
+    }
+
+    int m5NoteOff (int pitch)
+    {
+        if (pitch < 0 || pitch > 127)
+            return pitch;
+        if (m5Pluck[pitch] > 0)
+        {
+            m5[m5Pluck[pitch] - 1].offAt = t;
+            m5Pluck[pitch] = 0;
+            return -1;
+        }
+        if (m5Harm[pitch] > 0)
+        {
+            const int fp = m5Harm[pitch] - 1;
+            m5Harm[pitch] = 0;
+            return fp;
+        }
+        return pitch;
+    }
+
+    void m5PluckNote (int pitch, double vel127, int art)
+    {
+        int s = -1;
+        if (art == artLeftPizz) // the left hand plucks open strings
+            for (int k = 0; k < 4; ++k)
+                if (pitch == (int) openPitch[k])
+                    s = k;
+        if (s < 0)
+            s = chooseString (pitch);
+        Str& S = st[s];
+        const double semis = std::max (0.0, pitch - openPitch[s]);
+        if (semis > 0 && ! inReach (semis))
+            handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
+        S.slideT0 = -1.0;
+        S.target = S.pitch = pitch;
+        S.vibWidthTarget = 0.0;
+        S.lifted = semis == 0;
+        S.noteOn = t;
+        S.bowed = false;
+        vn->s[s].setNote (pitch);
+        if (vn->s[s].touchOn)
+            vn->s[s].setTouch (0.0, 0.0);
+        const double dd = dynFromVel (vel127);
+        const double L = stringLength * std::pow (2.0, -semis / 12.0);
+        M5Str& M = m5[s];
+        M.h = pp.pizzAmpPP * std::pow (pp.pizzAmpFF / pp.pizzAmpPP, dd);
+        M.tau = pp.pizzTau * (1.0 - pp.pizzBright * dd);
+        M.clickAt = M.clickAmp = 0.0;
+        double pointM = pp.pizzPointMM * 1e-3;
+        if (art == artBartok)
+        {
+            M.h *= pp.bartokAmp;
+            M.tau = pp.bartokTau;
+            pointM = pp.bartokPointMM * 1e-3;
+            M.clickAt = 0.3 / vn->s[s].f1; // it swings past the middle and hits the board
+            M.clickAmp = pp.bartokClick * (0.3 + 0.7 * dd);
+        }
+        M.beta = std::clamp (pointM / L, 0.04, 0.5);
+        if (art == artLeftPizz)
+        {
+            M.h *= pp.lhAmp;
+            M.tau = pp.lhTau;
+            M.beta = std::clamp (pp.lhFromNut, 0.04, 0.5); // near the nut: the same comb as near the bridge
+        }
+        M.impulse = pp.pizzImpulse * vel127 / 127.0;
+        M.pluckAt = t + pp.pizzTouch;
+        M.offAt = -1.0;
+        lastString = s;
+        lastOn = t;
+        m5Pluck[pitch & 127] = s + 1;
+    }
+
+    // per string per sample: runs a due pluck and returns the plucking/lifting finger's loss
+    double m5Damp (int s)
+    {
+        M5Str& M = m5[s];
+        double dmp = 0.0;
+        if (M.pluckAt >= 0.0)
+        {
+            if (t < M.pluckAt)
+                dmp = pp.pizzTouchDamp;
+            else
+            {
+                M.pluckAt = -1.0;
+                vn->s[s].setBeta (M.beta);
+                if (pp.pizzModel < 0.5)
+                    vn->s[s].pluckImpulse (M.impulse);
+                else
+                    vn->s[s].pluck (M.h, M.tau, M.clickAt, M.clickAmp, pp.pizzPull, pp.bartokClickTime, pp.bartokKick);
+            }
+        }
+        if (M.beta > 0.0 && ! st[s].lifted) // a stopped plucked note: the fingertip is a lossy stop
+            dmp = std::max (dmp, pp.pizzStopLoss);
+        if (M.offAt >= 0.0 && ! st[s].lifted)
+            dmp = std::max (dmp, pp.pizzOffDamp);
+        return dmp;
+    }
+
+    // a bowed harmonic takes a light bow: the bow sees only the segment up to the light finger, so the
+    // playable force window is lower (Fmax ~ 1/beta). The ear listens for the harmonic, not the
+    // string's fundamental, so its multiple-slip correction is held off on a touched string.
+    double m5Force (int s)
+    {
+        if (! vn->s[s].touchOn)
+            return 1.0;
+        st[s].ear = 1.0;
+        st[s].earHigh = 0;
+        return pp.harmForce;
+    }
+
+    double m5Beta (int s)
+    {
+        if (st[s].bowed)
+            m5[s].beta = 0.0;
+        return m5[s].beta;
+    }
+
+    // Harmonic: the string and node, then the ordinary bowed note on the finger pitch
+    bool m5Harmonic (int pitch, double vel127)
+    {
+        int s = -1, n = 0;
+        for (int k : { 2, 3, 4 })
+        {
+            for (int q = 0; q < 4 && s < 0; ++q)
+            {
+                const int c = (q + lastString) % 4; // from the string in use
+                if (std::abs (pitch - (openPitch[c] + 12.0 * std::log2 ((double) k))) < 0.5)
+                    s = c;
+            }
+            if (s >= 0)
+            {
+                n = k;
+                break;
+            }
+        }
+        double finger, x;
+        if (s >= 0)
+        {
+            finger = openPitch[s];
+            x = 1.0 - 1.0 / n;
+        }
+        else
+        {
+            finger = pitch - 24; // artificial: the stopped note, the light finger a fourth above
+            if (finger < openPitch[0] + 1)
+                return false;
+            s = chooseString ((int) finger);
+            if (finger - openPitch[s] < 1 || finger - openPitch[s] > 12)
+                return false;
+            x = 0.75;
+        }
+        for (int k = 0; k < 4; ++k)
+            if (k != s && vn->s[k].touchOn)
+                vn->s[k].setTouch (0.0, 0.0);
+        m5Busy = true;
+        m5String = s;
+        noteOn ((int) finger, vel127);
+        m5String = -1;
+        m5Busy = false;
+        vn->s[s].setTouch (x, pp.harmTouch * vn->s[s].d.Z);
+        m5Harm[pitch & 127] = (int) finger + 1;
+        return true;
     }
 };
 } // namespace o2
