@@ -17,6 +17,12 @@
 //    none on open strings
 //  - release = bow lifts off while moving, the string rings; idle fingers lift with a damped touch
 //  - double stops on two strings when notes start together
+//
+// M4 adds: phrasing (phrase arch, high-loud, agogic and beat stress, messa di voce on long
+// notes, fading when the velocities already carry dynamics), Studio look-ahead notes (ahead[]),
+// a Viterbi string plan and anticipated shifts (Studio, opt-in), faster vibrato up the string
+// and wider on stressed notes, bow styles (Auto, Legato, Detache, Staccato, Martele, Spiccato),
+// and drawn curves (CC1/26/19/74) that take over from the player.
 
 #pragma once
 #include "Strings.h"
@@ -163,8 +169,9 @@ struct PlayerParams
     // ---- M4 left hand: in Studio (look-ahead) the strings are planned over the coming notes with
     // a Viterbi search (costs: hand position, shifts, string crossings, open strings on long notes);
     // Live stays greedy. anticipate: a shift on one string leaves late in the old note and lands
-    // on the new note's start instead of after it
-    double fingerPlan = 1.0, anticipate = 1.0;
+    // on the new note's start instead of after it. Both off by default: on the Haydn phrase suite
+    // they raised unreal notes 1.4% -> 2.2-2.4% and off-pitch time 9.8% -> 10.5% (M4); 1 = on
+    double fingerPlan = 0.0, anticipate = 0.0;
     double costShift = 1.0, costShiftSemi = 0.08, costCross = 0.9, costOpen = 0.8, costHigh = 0.6;
     double vibRateHigh = 0.4; // Hz faster an octave up the string
     double vibStress = 0.25; // vibrato width x (1 + this) on stressed and long notes
