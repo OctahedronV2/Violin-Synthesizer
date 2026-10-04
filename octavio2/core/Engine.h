@@ -43,6 +43,12 @@ struct EngineSettings
     double sympathetic = 0.5; // idle open strings: 0 quiet, 0.5 natural (half-coupled), 1 full and long
     double wolf = 0.0; // 0: the body as measured; 1: a strong wolf near the main body mode
     double hold = 0.5; // 0: free (hanging); 0.5: held; 1: held firmly (low modes damped)
+    // player (M4, M5)
+    int articulation = 0; // PlayerParams::articulation: arco, pizz, Bartok pizz, left-hand pizz, harmonic
+    int bowStyle = 0; // PlayerParams::bowStyle: auto, legato, detache, staccato, martele, spiccato
+    double phrasing = 1.0; // PlayerParams::phrase
+    bool fingerPlan = false; // Viterbi fingering and anticipated shifts (Studio look-ahead)
+    bool drawnCurves = true; // CC lanes take over the player's dimension
     bool modalBody = true; // the bridge modes radiate below 1.5 kHz (Radiation::setModalBody)
 };
 
@@ -243,6 +249,11 @@ private:
             violin->p.hold = settings.hold;
             violin->applyBody();
         }
+        player->pp.articulation = settings.articulation;
+        player->pp.bowStyle = settings.bowStyle;
+        player->pp.phrase = settings.phrasing;
+        player->pp.fingerPlan = player->pp.anticipate = settings.fingerPlan ? 1.0 : 0.0;
+        player->pp.drawnCurves = settings.drawnCurves ? 1.0 : 0.0;
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;

@@ -13,7 +13,7 @@ endif()
 
 juce_add_plugin(Octavio2
     PRODUCT_NAME "Octavio 2"
-    VERSION 2.0.0
+    VERSION 2.1.0
     COMPANY_NAME "OctahedronV2"
     BUNDLE_ID "com.octahedronv2.octavio2"
     # Permanent once released: hosts save projects against these.
@@ -67,6 +67,7 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/Keyboard.cpp
     plugin/ui/MidiView.cpp
     plugin/ui/NoteTrack.cpp
+    plugin/ui/ArticulationView.cpp
     plugin/ui/PlaceholderView.cpp
     plugin/ui/PlayView.cpp
     plugin/ui/Theme.cpp

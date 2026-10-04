@@ -100,37 +100,41 @@ void MidiView::paint (juce::Graphics& g)
     };
     static const Row rows[] = {
         { "Vel", "Note on", "Dynamics", "pp – ff", true },
+        { "CC1", "Mod wheel", "Dynamics (drawn)", "takes over", true },
+        { "CC19", "", "Vibrato rate (drawn)", "takes over", true },
+        { "CC26", "", "Vibrato width (drawn)", "takes over", true },
+        { "CC74", "", "Contact point (drawn)", "takes over", true },
         { "CC11", "Expression", "Level trim", "100 = as played", false },
         { "CC21", "", "Intonation", "64 = none, 1 ct/step", false },
         { "CC22", "", "Bow pressure", "64 = as played", false },
         { "CC23", "", "Attack bite", "64 = none", false },
         { "CC24", "", "Vibrato width", "0 – 8×, 64 = as played", false },
         { "CC25", "", "Vibrato relax", "10 ms / step", false },
-        { "CC120", "CC123", "All notes off", "", false },
+        { "CC121", "Reset", "Curves back to player", "", false },
     };
     const float hy = y + 120;
     const float cols[] = { 0, 70, 200, 350, 540 };
     const char* heads[] = { "CC", "Source", "Controls", "Range", "Player" };
     for (int j = 0; j < 5; ++j)
         drawLabel (g, heads[j], x + 16 + cols[j], hy);
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < (int) std::size (rows); ++i)
     {
         const auto& r = rows[i];
-        const float ry = hy + 14 + i * 44;
+        const float ry = hy + 10 + i * 31;
         g.setColour (i % 2 == 0 ? colours::panel2 : colours::panel);
-        g.fillRoundedRectangle (x + 12, ry, 616, 38, 6);
-        drawText (g, r.cc, x + 16, ry + 24, Fonts::mono (13), colours::gold);
-        drawText (g, r.source, x + 86, ry + 24, Fonts::sans (12), colours::muted);
-        drawText (g, r.target, x + 216, ry + 24, Fonts::sans (13), colours::text);
-        drawText (g, juce::String::fromUTF8 (r.range), x + 366, ry + 24, Fonts::mono (11), colours::muted);
+        g.fillRoundedRectangle (x + 12, ry, 616, 28, 6);
+        drawText (g, r.cc, x + 16, ry + 19, Fonts::mono (13), colours::gold);
+        drawText (g, r.source, x + 86, ry + 19, Fonts::sans (12), colours::muted);
+        drawText (g, r.target, x + 216, ry + 19, Fonts::sans (13), colours::text);
+        drawText (g, juce::String::fromUTF8 (r.range), x + 366, ry + 19, Fonts::mono (11), colours::muted);
         if (r.player)
         {
-            drawBadge (g, { x + 566, ry + 19 }, Mode::autoMode);
-            drawText (g, "shapes it", x + 582, ry + 23, Fonts::sans (11), colours::muted);
+            drawBadge (g, { x + 566, ry + 14 }, Mode::autoMode);
+            drawText (g, "shapes it", x + 582, ry + 18, Fonts::sans (11), colours::muted);
         }
     }
     drawText (g,
-              "CC1 dynamics, sustain, pitch bend, any CC to any parameter and Learn arrive with MIDI",
+              "Sustain, pitch bend, any CC to any parameter and Learn arrive with MIDI",
               x + 16,
               y + 530,
               Fonts::sans (11.5f),
