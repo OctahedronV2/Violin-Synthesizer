@@ -38,12 +38,25 @@ struct Telemetry
     std::atomic<float> target { 0 }; // MIDI pitch the finger is going to
     std::atomic<bool> changing { false }; // the bow is turning round
     std::atomic<int> dynMode { 0 }, vibMode { 0 }, rateMode { 0 }, contactMode { 0 };
+    // 2.3: who is in charge now per o2::Dim (o2::DimMode: Auto, Guided, Manual), and whether a
+    // controller lane holds it (an incoming CC made it Guided)
+    std::array<std::atomic<int>, 5> dimMode {};
+    std::array<std::atomic<bool>, 5> ccHolds {};
+    // 2.3: the host's timeline: it has given a position at all, it plays, the beat heard now,
+    // beats per bar
+    std::atomic<bool> hasTimeline { false }, playing { false };
+    std::atomic<double> beat { 0.0 };
+    std::atomic<float> barLength { 4.0f }; // quarter notes per bar
 
     // the auto curves: one point every 10 ms of engine time
     struct Point
     {
         float t = 0, dynamics = 0, vibWidth = 0, contact = 0, vibRate = 0;
         bool sounding = false;
+        // 2.3: the beat heard (-1e9: the timeline was not playing) and the player's levels before
+        // its micro-shaping, in the lanes' units (Player::baseVibWidth ...): "Guess curves"
+        double beat = -1e9;
+        float dynBase = 0, vibBase = 0, contactBase = 0, rateBase = 0;
     };
     static constexpr uint64_t historySize = 4096; // 41 s
     std::array<Point, historySize> history {};

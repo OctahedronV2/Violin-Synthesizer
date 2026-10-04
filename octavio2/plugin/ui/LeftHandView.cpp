@@ -58,6 +58,8 @@ LeftHandView::LeftHandView (Processor& p)
     addAndMakeVisible (fingerPlan);
     for (auto* k : { &stringPreference, &portamento, &width, &rate, &delay })
         addAndMakeVisible (k);
+    addAndMakeVisible (widthBadge); // 2.3
+    addAndMakeVisible (rateBadge);
     startTimerHz (30);
 }
 
@@ -69,6 +71,8 @@ void LeftHandView::resized()
     int i = 0;
     for (auto* k : { &width, &rate, &delay })
         k->setBounds (858 + 102 * i++, 422 + 38, 100, 96);
+    widthBadge.placeAt (width.getPosition().toFloat() + width.badgeCentre()); // 2.3
+    rateBadge.placeAt (rate.getPosition().toFloat() + rate.badgeCentre());
 }
 
 void LeftHandView::timerCallback()
@@ -86,7 +90,7 @@ void LeftHandView::paint (juce::Graphics& g)
     paintNow (g, { 840, 12, 336, 190 });
     drawPanel (g, { 840, 214, 336, 196 }, "Fingering", "strings and shifts");
     drawLabel (g, "String choice", 856, 214 + 48);
-    drawPanel (g, { 840, 422, 336, 166 }, "Vibrato", "on the player's own plan");
+    drawPanel (g, { 840, 422, 336, 166 }, "Vibrato", "A / G / M: click a badge to guide it");
     drawText (g, "Intonation and tuning are on the Tone tab.", 856, 422 + 150, Fonts::sans (11.5f), colours::dim);
 }
 

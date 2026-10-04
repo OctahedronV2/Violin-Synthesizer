@@ -60,7 +60,17 @@ inline const juce::ParameterID bow { "bow", 1 };
 inline const juce::ParameterID contactStyle { "contactStyle", 1 };
 inline const juce::ParameterID tremoloSpeed { "tremoloSpeed", 1 };
 inline const juce::ParameterID tremoloSync { "tremoloSync", 1 };
+// 2.3 curves: who is in charge of each dimension (Auto / Guided / Manual), in o2::Dim order
+inline const juce::ParameterID modeDynamics { "modeDynamics", 1 };
+inline const juce::ParameterID modeVibrato { "modeVibrato", 1 };
+inline const juce::ParameterID modeVibratoRate { "modeVibratoRate", 1 };
+inline const juce::ParameterID modeContact { "modeContact", 1 };
+inline const juce::ParameterID modePressure { "modePressure", 1 };
 } // namespace id
+
+// 2.3: the mode parameter of each o2::Dim, and the choices (o2::DimMode order)
+const juce::ParameterID& dimModeId (int dim);
+const juce::StringArray& dimModeNames();
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
 // loads them (Processor::loadRadiationData).
@@ -117,5 +127,6 @@ private:
     std::atomic<float>* bendRangeValue; // M6
     std::atomic<float>*playerStyle, *intonationSystem, *tuningKey, *a4, *mpeOn, *mpeBend; // M7 player
     std::atomic<float>*strings, *rosin, *bow, *contactStyle, *tremoloSpeed, *tremoloSync; // M7 instrument
+    std::array<std::atomic<float>*, o2::dimCount> dimModes {}; // 2.3
 };
 } // namespace octavio2::params

@@ -153,6 +153,13 @@ juce::Rectangle<float> Knob::dialArea() const
     return juce::Rectangle<float> (b.getCentreX() - 26, 44 - 26, 52, 52);
 }
 
+juce::Point<float> Knob::badgeCentre() const
+{
+    const auto b = getLocalBounds().toFloat();
+    return style == Style::card ? juce::Point<float> (b.getRight() - 20, 20)
+                                : juce::Point<float> (b.getCentreX() + 28, 6);
+}
+
 void Knob::resized()
 {
     dial.getProperties().set ("colour", (juce::int64) colour.getARGB());
@@ -182,7 +189,7 @@ void Knob::paint (juce::Graphics& g)
                   Fonts::sans (10, true).withExtraKerningFactor (0.08f),
                   preview ? colours::dim : colours::amber);
         if (badge)
-            drawBadge (g, { b.getRight() - 20, 20 }, *badge);
+            drawBadge (g, badgeCentre(), *badge);
         drawText (g,
                   value,
                   b.getCentreX(),
@@ -215,7 +222,7 @@ void Knob::paint (juce::Graphics& g)
                   preview ? colours::muted : colours::text,
                   juce::Justification::horizontallyCentred);
         if (badge)
-            drawBadge (g, { b.getCentreX() + 28, 6 }, *badge);
+            drawBadge (g, badgeCentre(), *badge);
     }
     if (preview)
     {

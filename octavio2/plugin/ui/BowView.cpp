@@ -115,6 +115,8 @@ BowView::BowView (Processor& p)
     addAndMakeVisible (bowStyle);
     for (auto* k : { &bowChange, &strokeShaping, &bite, &contact })
         addAndMakeVisible (k);
+    addAndMakeVisible (contactBadge); // 2.3
+    addAndMakeVisible (pressureBadge);
     startTimerHz (30);
 }
 
@@ -125,6 +127,9 @@ void BowView::resized()
     int i = 0;
     for (auto* k : { &bowChange, &strokeShaping, &bite, &contact })
         k->setBounds (px + 16 + 76 * i++, py + 170, 76, 96);
+    // 2.3: right of the dial (the label above is as wide as the knob)
+    contactBadge.placeAt (contact.getPosition().toFloat() + juce::Point<float> (70, 30));
+    pressureBadge.placeAt ({ (float) px + 16 + 9, (float) py + 280 });
 }
 
 void BowView::timerCallback()
@@ -148,10 +153,20 @@ void BowView::paint (juce::Graphics& g)
     drawLabel (g, "Strokes", r.getX() + 16, r.getY() + 160);
     g.setColour (colours::line);
     g.drawLine (r.getX() + 16, r.getY() + 140, r.getRight() - 16, r.getY() + 140);
-    const char* notes[] = { "Bow hiss is on the Tone tab; dynamics, expression",
-                            "and the drawn curves (CC1, CC74) still move the bow.",
-                            "Every control here is a host parameter." };
-    float ny = r.getY() + 290;
+    // 2.3: the pressure's mode (pressureBadge sits left of this)
+    const auto pm = ModeBadge::displayed (processor, o2::dimPressure);
+    drawText (g,
+              pm == Mode::autoMode     ? juce::String ("Bow pressure: the player's (CC22 guides it)")
+                  : pm == Mode::guided ? juce::String ("Bow pressure: guided by CC22")
+                                       : juce::String ("Bow pressure: exactly CC22"),
+              r.getX() + 16 + 24,
+              r.getY() + 284,
+              Fonts::sans (11.5f),
+              colours::muted);
+    const char* notes[] = { "Bow hiss is on the Tone tab; dynamics and the drawn",
+                            "curves (Curves tab) still move the bow. Every control",
+                            "here is a host parameter." };
+    float ny = r.getY() + 304;
     for (auto* n : notes)
     {
         drawText (g, n, r.getX() + 16, ny, Fonts::sans (11.5f), colours::dim);

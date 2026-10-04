@@ -991,3 +991,377 @@ TEST_CASE ("Octavio 2's M7 parts default to the 2.1 violin", "[octavio2][m7]")
     CHECK (r.sigma0 == P.sigma0);
     CHECK (r.grain == P.grain);
 }
+
+// ---------------------------------------------------------------- 2.3 curves and modes
+#include "../plugin/ui/CurvesView.h"
+#include "../plugin/ui/ModeBadge.h"
+
+namespace
+{
+// a host's transport: 120 bpm, 4/4, playing from beat 0
+struct Transport final : juce::AudioPlayHead
+{
+    double ppq = 0.0, bpm = 120.0;
+    bool playing = true;
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo p;
+        p.setBpm (bpm);
+        p.setPpqPosition (ppq);
+        p.setIsPlaying (playing);
+        p.setTimeSignature (TimeSignature { 4, 4 });
+        return p;
+    }
+};
+
+struct Played
+{
+    juce::AudioBuffer<float> audio;
+    std::vector<double> dyn, dynBase, vib; // per 10 ms block: dEff, d, vibrato width (sounding string)
+};
+
+// A phrase on the timeline: a long B4 (2 s), a quick run, a long E-flat 5 (1.5 s); velocity 100.
+// transport == nullptr: no host timeline (the standalone app). each() runs after every block.
+Played playTimeline (octavio2::Processor& p, Transport* transport, const std::function<void()>& each = {})
+{
+    const double rate = 48000.0, seconds = 5.0;
+    const int block = 480;
+    p.setPlayHead (transport);
+    p.prepareToPlay (rate, block);
+    struct Note
+    {
+        double on, off;
+        int pitch;
+    };
+    // (sounding an octave up: the Octave parameter's default; all stopped notes, so they vibrate)
+    const Note notes[] = { { 0.0, 2.0, 59 },  { 2.0, 2.25, 61 }, { 2.25, 2.5, 62 },
+                           { 2.5, 2.75, 64 }, { 2.75, 3.0, 66 }, { 3.0, 4.5, 63 } };
+    Played out;
+    out.audio.setSize (2, (int) (seconds * rate));
+    juce::AudioBuffer<float> buf (2, block);
+    for (int b = 0; b < (int) (seconds * rate / block); ++b)
+    {
+        const double t0 = b * block / rate, t1 = (b + 1) * block / rate;
+        if (transport != nullptr)
+            transport->ppq = t0 * transport->bpm / 60.0;
+        juce::MidiBuffer midi;
+        for (const auto& n : notes)
+        {
+            if (n.off >= t0 && n.off < t1)
+                midi.addEvent (juce::MidiMessage::noteOff (1, n.pitch), (int) ((n.off - t0) * rate));
+            if (n.on >= t0 && n.on < t1)
+                midi.addEvent (juce::MidiMessage::noteOn (1, n.pitch, (juce::uint8) 100),
+                               (int) ((n.on - t0) * rate) + 1);
+        }
+        p.processBlock (buf, midi);
+        for (int c = 0; c < 2; ++c)
+            out.audio.copyFrom (c, b * block, buf, c, 0, block);
+        const auto& pl = p.getEngine().getPlayer();
+        out.dyn.push_back (pl.dEff());
+        out.dynBase.push_back (pl.d);
+        out.vib.push_back (pl.st[juce::jlimit (0, 3, pl.lastString)].vibWidth);
+        if (each)
+            each();
+    }
+    p.setPlayHead (nullptr);
+    return out;
+}
+
+void setMode (octavio2::Processor& p, int dim, int mode)
+{
+    setParam (p, octavio2::params::dimModeId (dim).getParamID(), (float) mode);
+}
+
+// a lane from beat a to beat b, value va to vb (the Curves tab's line tool)
+void drawLine (octavio2::Processor& p, int dim, double a, float va, double b, float vb)
+{
+    p.getCurves().setLane (dim, { { a, va }, { b, vb } });
+}
+
+double maxDiff (const std::vector<double>& x, const std::vector<double>& y, size_t from, size_t to)
+{
+    double m = 0;
+    for (size_t i = from; i < std::min ({ to, x.size(), y.size() }); ++i)
+        m = std::max (m, std::abs (x[i] - y[i]));
+    return m;
+}
+} // namespace
+
+TEST_CASE ("Octavio 2.3: Auto with no curve plays as 2.2, whatever the timeline and drawn lanes", "[octavio2][curves]")
+{
+    octavio2::Processor a, b, c;
+    for (int k = 0; k < o2::dimCount; ++k)
+        CHECK (a.getDimMode (k) == o2::modeAuto); // the default
+    const auto ref = playTimeline (a, nullptr);
+    Transport tb;
+    const auto onTimeline = playTimeline (b, &tb);
+    // lanes drawn, but every dimension left on Auto: the player ignores them
+    for (int k = 0; k < o2::laneCount; ++k)
+        drawLine (c, k, 0.0, 0.1f, 10.0, 0.9f);
+    Transport tc;
+    const auto ignored = playTimeline (c, &tc);
+    for (int ch = 0; ch < 2; ++ch)
+        for (int i = 0; i < ref.audio.getNumSamples(); ++i)
+        {
+            REQUIRE (ref.audio.getSample (ch, i) == onTimeline.audio.getSample (ch, i));
+            REQUIRE (ref.audio.getSample (ch, i) == ignored.audio.getSample (ch, i));
+        }
+}
+
+TEST_CASE ("Octavio 2.3: a drawn crescendo, Guided keeps the player's swells, Manual is exactly the curve",
+           "[octavio2][curves]")
+{
+    // beat 0..10 (5 s at 120 bpm): 0.15 -> 0.9
+    auto curveAt = [] (size_t block) { return 0.15 + 0.75 * std::min (1.0, (double) block * 0.01 / 5.0); };
+    Played run[3];
+    for (int mode : { 0, 1, 2 })
+    {
+        octavio2::Processor p;
+        drawLine (p, o2::dimDynamics, 0.0, 0.15f, 10.0, 0.9f);
+        drawLine (p, o2::dimVibWidth, 0.0, 0.5f, 10.0, 0.5f); // 32 cents p-p throughout
+        setMode (p, o2::dimDynamics, mode);
+        setMode (p, o2::dimVibWidth, mode);
+        Transport t;
+        run[mode] = playTimeline (p, &t);
+        CHECK (measure (run[mode].audio).finite);
+        if (mode > 0)
+            CHECK (p.getEngine().getPlayer().userMode[o2::dimDynamics] == mode);
+    }
+    // Manual: the dynamics are the curve (after the bow's short glide), no swell on the long note
+    for (size_t i : { 50, 150, 190, 380, 440 })
+    {
+        CHECK (std::abs (run[2].dyn[i] - curveAt (i)) < 0.03);
+        CHECK (std::abs (run[2].dyn[i] - run[2].dynBase[i]) < 1e-9);
+    }
+    // Guided: the level follows the curve, and the long notes swell on top of it
+    for (size_t i : { 50, 150, 380, 440 })
+        CHECK (std::abs (run[1].dynBase[i] - curveAt (i)) < 0.03);
+    CHECK (run[1].dyn[150] - run[1].dynBase[150] > 0.03); // B4, 1.5 s into its 2 s
+    CHECK (run[1].dyn[150] - run[2].dyn[150] > 0.03);
+    // both crescendo; Auto (velocity 100 throughout) does not follow the curve
+    CHECK (run[1].dyn[440] - run[1].dyn[20] > 0.4);
+    CHECK (run[2].dyn[440] - run[2].dyn[20] > 0.4);
+    CHECK (std::abs (run[0].dyn[20] - curveAt (20)) > 0.2);
+    // vibrato: Manual is the drawn width at once; Guided blooms into it as the player does
+    CHECK (run[2].vib[20] > 25.0);
+    CHECK (run[1].vib[20] < 0.6 * run[2].vib[20]);
+    CHECK (run[1].vib[150] > 20.0);
+    // and the three sound different
+    double d01 = 0, d12 = 0;
+    for (int i = 0; i < run[0].audio.getNumSamples(); ++i)
+    {
+        d01 += std::abs (run[0].audio.getSample (0, i) - run[1].audio.getSample (0, i));
+        d12 += std::abs (run[1].audio.getSample (0, i) - run[2].audio.getSample (0, i));
+    }
+    CHECK (d01 > 0);
+    CHECK (d12 > 0);
+}
+
+TEST_CASE ("Octavio 2.3: an incoming CC makes Auto Guided; CC121 or the badge gives it back", "[octavio2][curves]")
+{
+    const juce::ScopedJuceInitialiser_GUI gui;
+    using octavio2::ui::Mode;
+    using octavio2::ui::ModeBadge;
+    octavio2::Processor p;
+    p.prepareToPlay (48000.0, 480);
+    auto& pl = p.getEngine().getPlayer();
+    block (p, { juce::MidiMessage::controllerEvent (1, 26, 64) }); // vibrato width lane
+    block (p, {});
+    CHECK (pl.userMode[o2::dimVibWidth] == o2::modeGuided);
+    CHECK (p.getDimMode (o2::dimVibWidth) == o2::modeAuto); // the parameter stays Auto ...
+    CHECK (ModeBadge::displayed (p, o2::dimVibWidth) == Mode::guided); // ... the badge shows Guided
+    CHECK (std::abs (pl.userVal[o2::dimVibWidth] - 32.0) < 1e-6);
+
+    // a click on the badge: Manual, then Auto (which lets go of the CC lane)
+    ModeBadge badge (p, o2::dimVibWidth);
+    badge.choose (Mode::manual);
+    CHECK (p.getDimMode (o2::dimVibWidth) == o2::modeManual);
+    block (p, {});
+    CHECK (pl.userMode[o2::dimVibWidth] == o2::modeManual);
+    CHECK (badge.shownMode() == Mode::manual);
+    badge.choose (Mode::autoMode);
+    block (p, {});
+    CHECK (p.getDimMode (o2::dimVibWidth) == o2::modeAuto);
+    CHECK (pl.userMode[o2::dimVibWidth] == o2::modeAuto);
+    CHECK (pl.ccVib < 0.0);
+    CHECK (ModeBadge::displayed (p, o2::dimVibWidth) == Mode::autoMode);
+
+    // CC1, CC74, CC22 make their dimensions Guided; CC121 gives all back
+    block (p,
+           { juce::MidiMessage::controllerEvent (1, 1, 100),
+             juce::MidiMessage::controllerEvent (1, 74, 100),
+             juce::MidiMessage::controllerEvent (1, 22, 90) });
+    block (p, {});
+    CHECK (pl.userMode[o2::dimDynamics] == o2::modeGuided);
+    CHECK (pl.userMode[o2::dimContact] == o2::modeGuided);
+    CHECK (pl.userMode[o2::dimPressure] == o2::modeGuided);
+    CHECK (std::abs (pl.dTarget - 100.0 / 127.0) < 1e-6);
+    block (p, { juce::MidiMessage::controllerEvent (1, 121, 0) });
+    block (p, {});
+    for (int k = 0; k < o2::dimCount; ++k)
+        CHECK (pl.userMode[k] == o2::modeAuto);
+
+    // Manual with nothing to follow plays the knobs (Dynamics: mf + the Dynamics knob)
+    setMode (p, o2::dimDynamics, o2::modeManual);
+    setParam (p, "dynamics", 20.0f);
+    block (p, {});
+    CHECK (pl.userMode[o2::dimDynamics] == o2::modeManual);
+    CHECK (std::abs (pl.dTarget - 0.8) < 1e-6);
+}
+
+TEST_CASE ("Octavio 2.3: the drawn curves are saved with the project, not in presets", "[octavio2][curves]")
+{
+    octavio2::Processor a;
+    a.getCurves().setLane (o2::dimDynamics,
+                           { { 0.0, 0.2f }, { 4.0, 0.8f }, { 6.0, -1.0f }, { 8.0, 0.5f }, { 9.5, 0.25f } });
+    a.getCurves().setLane (o2::dimContact, { { 1.25, 0.6f }, { 3.0, 0.4f } });
+    setMode (a, o2::dimDynamics, o2::modeManual);
+    setMode (a, o2::dimContact, o2::modeGuided);
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+    octavio2::Processor b;
+    b.setStateInformation (state.getData(), (int) state.getSize());
+    for (int k = 0; k < o2::laneCount; ++k)
+    {
+        const auto x = a.getCurves().getLane (k), y = b.getCurves().getLane (k);
+        REQUIRE (x.size() == y.size());
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            CHECK (std::abs (x[i].beat - y[i].beat) < 1e-4);
+            CHECK (std::abs (x[i].v - y[i].v) < 1e-4f);
+        }
+    }
+    CHECK (b.getDimMode (o2::dimDynamics) == o2::modeManual);
+    CHECK (b.getDimMode (o2::dimContact) == o2::modeGuided);
+    // a project from before 2.3 has none
+    octavio2::Processor c;
+    c.getCurves().setLane (0, { { 0.0, 0.5f }, { 1.0, 0.5f } });
+    if (const auto xml = a.getParameters().copyState().createXml())
+    {
+        juce::MemoryBlock m;
+        juce::AudioProcessor::copyXmlToBinary (*xml, m);
+        c.setStateInformation (m.getData(), (int) m.getSize());
+    }
+    CHECK (! c.getCurves().hasCurve (0));
+    // presets leave the modes (and so the curves) alone
+    CHECK (octavio2::Presets::isPerformanceParameter ("modeDynamics"));
+    CHECK (octavio2::Presets::isPerformanceParameter ("modePressure"));
+    CHECK (! octavio2::Presets::isPerformanceParameter ("vibrato"));
+    // the audio thread's copy: breaks leave a gap
+    const auto* set = a.getCurves().forAudio();
+    REQUIRE (set != nullptr);
+    int hint = -1;
+    CHECK (std::abs (set->lane[0].at (2.0, hint) - 0.5f) < 1e-6f);
+    CHECK (set->lane[0].at (7.0, hint) < 0.0f);
+    CHECK (std::abs (set->lane[0].at (9.0, hint) - (0.5f - 0.25f / 1.5f)) < 1e-5f);
+    CHECK (set->lane[0].at (10.0, hint) < 0.0f);
+    hint = 3;
+    CHECK (std::abs (set->lane[0].at (0.5, hint) - 0.275f) < 1e-6f); // a hint from later still finds it
+}
+
+TEST_CASE ("Octavio 2.3: guessed curves played back Guided give the same performance", "[octavio2][curves]")
+{
+    const juce::ScopedJuceInitialiser_GUI gui;
+    octavio2::Processor a;
+    octavio2::ui::CurvesView view (a);
+    Transport ta;
+    const auto autoRun = playTimeline (a, &ta, [&] { view.update(); });
+    REQUIRE (view.onTimeline());
+    REQUIRE (view.guessCurves());
+    for (int k = 0; k < o2::laneCount; ++k)
+    {
+        CHECK (a.getCurves().hasCurve (k));
+        CHECK (a.getDimMode (k) == o2::modeGuided); // drawing (guessing) hands the lane to the curve
+    }
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+    Played run[2];
+    for (int manual : { 0, 1 })
+    {
+        octavio2::Processor b;
+        b.setStateInformation (state.getData(), (int) state.getSize());
+        if (manual)
+            for (int k = 0; k < o2::laneCount; ++k)
+                setMode (b, k, o2::modeManual);
+        Transport tb;
+        run[manual] = playTimeline (b, &tb);
+    }
+    // Guided: the dynamics within a few hundredths of the original all through; Manual loses the
+    // player's swells
+    const double guided = maxDiff (autoRun.dyn, run[0].dyn, 2, 450),
+                 manualErr = maxDiff (autoRun.dyn, run[1].dyn, 2, 450);
+    INFO ("guided " << guided << " manual " << manualErr);
+    CHECK (guided < 0.03);
+    CHECK (manualErr > guided);
+    // the same loudness, 100 ms at a time: within 1.5 dB, and 0.5 dB on average
+    int close = 0, total = 0;
+    double sum = 0;
+    for (int s = 4800; s + 4800 <= autoRun.audio.getNumSamples(); s += 4800)
+    {
+        const double x = measure (autoRun.audio, s, s + 4800).rms, y = measure (run[0].audio, s, s + 4800).rms;
+        if (x < 1e-4)
+            continue;
+        ++total;
+        close += std::abs (dB (x) - dB (y)) < 1.5 ? 1 : 0;
+        sum += std::abs (dB (x) - dB (y));
+    }
+    INFO ("close " << close << " of " << total << ", mean " << sum / total << " dB");
+    CHECK (close == total);
+    CHECK (sum / total < 0.5);
+
+    // the MIDI export from the timeline: notes and the four lanes, from bar 1
+    view.setViewRange (0.0, 12.0);
+    const auto file = juce::File::createTempFile (".mid");
+    REQUIRE (view.writeMidi (file).existsAsFile());
+    juce::FileInputStream in (file);
+    juce::MidiFile midi;
+    REQUIRE (midi.readFrom (in));
+    std::map<int, int> ccs;
+    int ons = 0;
+    for (const auto* e : *midi.getTrack (0))
+    {
+        if (e->message.isController())
+            ++ccs[e->message.getControllerNumber()];
+        ons += e->message.isNoteOn() ? 1 : 0;
+    }
+    CHECK (ons == 6);
+    for (int cc : { 1, 26, 19, 74 })
+        CHECK (ccs[cc] > 0);
+    file.deleteFile();
+}
+
+TEST_CASE ("Octavio 2.3: the Curves and Play tabs with drawn curves", "[octavio2][curves]")
+{
+    // OCTAVIO2_SNAPSHOTS=<folder> saves them as curves-drawn-<tab>.png
+    const juce::ScopedJuceInitialiser_GUI gui;
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("OCTAVIO2_SNAPSHOTS", {});
+    octavio2::Processor p;
+    // a crescendo drawn on dynamics (Guided), a vibrato swell (Manual), the rest the player's
+    p.getCurves().setLane (
+        o2::dimDynamics,
+        { { 0.0, 0.3f }, { 2.0, 0.42f }, { 4.0, 0.55f }, { 6.0, 0.72f }, { 7.0, 0.8f }, { 8.5, 0.6f } });
+    p.getCurves().setLane (o2::dimVibWidth, { { 0.0, 0.2f }, { 3.0, 0.2f }, { 5.0, 0.6f }, { 8.0, 0.45f } });
+    setMode (p, o2::dimDynamics, o2::modeGuided);
+    setMode (p, o2::dimVibWidth, o2::modeManual);
+    Transport t;
+    playTimeline (p, &t);
+    // the transport stopped: the last region stays, ready to edit
+    t.playing = false;
+    p.setPlayHead (&t);
+    block (p, {});
+    for (const int tab : { 1, 0, 2, 3, 6 })
+    {
+        p.editorTab = tab;
+        octavio2::Editor editor (p);
+        const auto image = editor.createComponentSnapshot (editor.getLocalBounds());
+        CHECK (image.getWidth() == octavio2::ui::designWidth);
+        if (folder.isNotEmpty())
+        {
+            juce::File file (folder + "/curves-drawn-" + juce::String (tab) + ".png");
+            file.deleteFile();
+            juce::FileOutputStream out (file);
+            juce::PNGImageFormat().writeImageToStream (image, out);
+        }
+    }
+    p.setPlayHead (nullptr);
+}
