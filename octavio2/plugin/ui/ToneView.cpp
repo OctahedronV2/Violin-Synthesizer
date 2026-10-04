@@ -110,6 +110,38 @@ ToneView::ToneView (Processor& p)
                                                            repaint();
                                                        });
     micAttachment->sendInitialUpdate();
+    // M7 tuning row
+    a4 = std::make_unique<ValueBox> (
+        *p.getParameters().getParameter (params::id::a4.getParamID()),
+        [] (float v) { return "A4 = " + juce::String (v, std::abs (v - std::round (v)) < 0.05f ? 0 : 1) + " Hz"; },
+        std::vector<float> { 415.0f, 430.0f, 432.0f, 440.0f, 442.0f, 443.0f, 466.0f });
+    a4->setTooltip ("The A4 reference: 440 modern, 442-443 many orchestras, 415 baroque, 466 high baroque. Drag "
+                    "to change (shift: finely), right-click for common values. The open strings retune with it.");
+    for (int i = 0; i < params::intonationNames().size(); ++i)
+        intonation.addItem (params::intonationNames()[i], i + 1);
+    for (int i = 0; i < params::keyNames().size(); ++i)
+        key.addItem ("Key: " + params::keyNames()[i], i + 1);
+    intonationAttachment
+        = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.getParameters(),
+                                                                                    params::id::intonation.getParamID(),
+                                                                                    intonation);
+    keyAttachment
+        = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (p.getParameters(),
+                                                                                    params::id::tuningKey.getParamID(),
+                                                                                    key);
+    intonation.setTooltip ("Expressive: the player's own (equal temperament corrected by ear; the Romantic, Baroque "
+                           "and other styles lean Pythagorean). Equal: equal temperament. Just and Pythagorean: "
+                           "pure intervals from the Key, open strings in pure fifths. Scala file: a .scl scale (with "
+                           "an optional .kbm map). MTS-ESP: the tuning of a running MTS-ESP master.");
+    key.setTooltip ("The tonic for Just and Pythagorean (and the Expressive leaning of the styles). The A stays at "
+                    "the A4 reference.");
+    scalaButton.setTooltip ("Load a Scala scale (.scl), and optionally its keyboard map (.kbm, select both). It is "
+                            "saved with your project and plays when Intonation is Scala file.");
+    scalaButton.onClick = [this] { chooseScala(); };
+    addAndMakeVisible (*a4);
+    addAndMakeVisible (intonation);
+    addAndMakeVisible (key);
+    addAndMakeVisible (scalaButton);
     brilliance.setTooltip ("A high shelf at 1.5 kHz on the bridge force (the strings' sparkle).");
     reverb.setTooltip ("The room's level against the direct sound.");
     for (auto* c : { &body, &strings, &rosin, &bow, &mute, &quality, &rooms })
@@ -141,6 +173,11 @@ void ToneView::resized()
     rosin.setBounds (40, y + 350, 328, 30);
     bow.setLayout (0, 30, 4, 160);
     bow.setBounds (40, y + 410, 328, 30);
+    // tuning (M7)
+    a4->setBounds (40, y + 470, 160, 34);
+    intonation.setBounds (208, y + 470, 160, 34);
+    key.setBounds (40, y + 512, 104, 30);
+    scalaButton.setBounds (152, y + 512, 112, 30);
     // bridge and resonance
     int i = 0;
     for (auto* k : { &bridge, &sympathetic, &wolf, &hold, &brilliance, &imperfection })
@@ -181,23 +218,26 @@ void ToneView::paint (juce::Graphics& g)
     drawLabel (g, "Bow hiss", 40, y + 342);
     drawLabel (g, "Bow", 40, y + 402);
     drawLabel (g, "Tuning", 40, y + 462);
-    for (int k = 0; k < 2; ++k)
     {
-        const juce::Rectangle<float> r (40 + k * 168.0f, y + 470, 160, 34);
-        g.setColour (colours::panel2);
-        g.fillRoundedRectangle (r, 7);
-        g.setColour (colours::line);
-        g.drawRoundedRectangle (r.reduced (0.5f), 7, 1);
+        const auto status = tuningStatus();
+        g.saveState();
+        g.reduceClipRegion (272, juce::roundToInt (y + 512), 96, 30);
         drawText (g,
-                  k == 0 ? "A4 = 440 Hz" : "Expressive",
-                  r.getX() + 12,
-                  r.getCentreY() + 5,
-                  Fonts::sans (13),
+                  status.upToFirstOccurrenceOf ("\n", false, false),
+                  272,
+                  y + 524,
+                  Fonts::sans (10.5f),
                   colours::muted);
+        drawText (g,
+                  status.fromFirstOccurrenceOf ("\n", false, false),
+                  272,
+                  y + 538,
+                  Fonts::sans (10.5f),
+                  colours::dim);
+        g.restoreState();
     }
-    drawText (g, "Tuning systems arrive with M7.", 40, y + 526, Fonts::sans (11.5f), colours::dim);
-    drawText (g, "Every option swaps a physical part.", 40, y + 548, Fonts::sans (11.5f), colours::dim);
-    drawText (g, "There is no EQ anywhere in Octavio 2.", 40, y + 564, Fonts::sans (11.5f), colours::dim);
+    drawText (g, "Every option swaps a physical part.", 40, y + 556, Fonts::sans (11.5f), colours::dim);
+    drawText (g, "There is no EQ anywhere in Octavio 2.", 40, y + 570, Fonts::sans (11.5f), colours::dim);
 
     // bridge and resonance
     drawPanel (g, { 396, y, 360, 576 }, "Bridge and resonance");
@@ -271,6 +311,117 @@ void ToneView::paintScope (juce::Graphics& g, juce::Rectangle<float> r)
     }
     g.setColour (clean ? colours::good : colours::coral);
     g.strokePath (p, juce::PathStrokeType (1.8f));
+}
+
+// ---------------------------------------------------------------- M7 tuning
+juce::String ToneView::tuningStatus() const
+{
+    const auto system = intonation.getSelectedItemIndex();
+    if (scalaError.isNotEmpty())
+        return "Scala error\n" + scalaError;
+    if (system == o2::intonScala)
+    {
+        const auto name = processor.getScalaName();
+        return name.isEmpty() ? juce::String ("no scale loaded\nplays equal") : "scale\n" + name;
+    }
+    if (system == o2::intonMts)
+        return processor.mtsHasMaster() ? "MTS-ESP master\n" + processor.mtsScaleName()
+                                        : juce::String ("no MTS-ESP master\nplays equal");
+    const auto name = processor.getScalaName();
+    return name.isEmpty() ? juce::String() : "Scala loaded\n" + name;
+}
+
+void ToneView::chooseScala()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Load a Scala scale (.scl) and optionally its keyboard map (.kbm)",
+                                                   juce::File(),
+                                                   "*.scl;*.kbm");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                              | juce::FileBrowserComponent::canSelectMultipleItems,
+                          [this] (const juce::FileChooser& fc)
+                          {
+                              juce::File scl, kbm;
+                              for (const auto& f : fc.getResults())
+                                  (f.hasFileExtension ("kbm") ? kbm : scl) = f;
+                              if (scl == juce::File())
+                                  return;
+                              scalaError = processor.loadScala (scl, kbm);
+                              if (scalaError.isEmpty())
+                                  if (auto* param
+                                      = processor.getParameters().getParameter (params::id::intonation.getParamID()))
+                                  {
+                                      param->beginChangeGesture();
+                                      param->setValueNotifyingHost (param->convertTo0to1 ((float) o2::intonScala));
+                                      param->endChangeGesture();
+                                  }
+                              repaint();
+                          });
+}
+
+ValueBox::ValueBox (juce::RangedAudioParameter& p, std::function<juce::String (float)> t, std::vector<float> pr)
+    : param (p),
+      attachment (p,
+                  [this] (float v)
+                  {
+                      value = v;
+                      repaint();
+                  }),
+      text (std::move (t)),
+      presets (std::move (pr))
+{
+    attachment.sendInitialUpdate();
+    setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+}
+
+void ValueBox::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (colours::panel2);
+    g.fillRoundedRectangle (r, 7);
+    g.setColour (dragging ? colours::amber : colours::line);
+    g.drawRoundedRectangle (r, 7, 1);
+    drawText (g, text (value), 12, r.getCentreY() + 5, Fonts::sans (13), colours::text);
+}
+
+void ValueBox::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isPopupMenu())
+    {
+        juce::PopupMenu menu;
+        for (float v : presets)
+            menu.addItem (text (v), [this, v] { attachment.setValueAsCompleteGesture (v); });
+        menu.addSeparator();
+        menu.addItem ("Host menu...", [this] { showParameterMenu (*this, param); });
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+        return;
+    }
+    dragStart = value;
+    dragging = true;
+    attachment.beginGesture();
+    repaint();
+}
+
+void ValueBox::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging)
+        return;
+    const float perPixel = e.mods.isShiftDown() ? 0.02f : 0.2f;
+    const auto& range = param.getNormalisableRange();
+    attachment.setValueAsPartOfGesture (
+        range.snapToLegalValue (dragStart - perPixel * (float) e.getDistanceFromDragStartY()));
+}
+
+void ValueBox::mouseUp (const juce::MouseEvent&)
+{
+    if (dragging)
+        attachment.endGesture();
+    dragging = false;
+    repaint();
+}
+
+void ValueBox::mouseDoubleClick (const juce::MouseEvent&)
+{
+    attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
 }
 
 juce::Point<float> ToneView::micPoint (int index) const

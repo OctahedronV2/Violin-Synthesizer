@@ -678,3 +678,199 @@ TEST_CASE ("Octavio 2 saves and loads user presets", "[octavio2][presets]")
     CHECK ((int) presets.list().size() == presets.numFactory());
     folder.deleteRecursively();
 }
+
+// ---------------------------------------------------------------- M7 player: styles, intonation, MPE
+namespace
+{
+// processes `blocks` blocks of 480 samples at 48 kHz, the MIDI at the start of the first block
+void run (octavio2::Processor& p, int blocks, const std::vector<juce::MidiMessage>& first = {})
+{
+    juce::AudioBuffer<float> buf (2, 480);
+    for (int b = 0; b < blocks; ++b)
+    {
+        juce::MidiBuffer midi;
+        if (b == 0)
+            for (const auto& m : first)
+                midi.addEvent (m, 0);
+        p.processBlock (buf, midi);
+    }
+}
+} // namespace
+
+TEST_CASE ("Octavio 2 M7: Modern soloist is the default player, and every style plays", "[octavio2][m7]")
+{
+    octavio2::Processor a, b;
+    // b's engine goes through every style and back: Modern soloist restores the player exactly
+    auto settings = b.getEngine().getSettings();
+    for (int style = o2::styleCount - 1; style >= 0; --style)
+    {
+        settings.playerStyle = style;
+        b.getEngine().setSettings (settings);
+    }
+    const auto x = play (a, 48000.0, 76, 0.6, 1.0);
+    const auto y = play (b, 48000.0, 76, 0.6, 1.0);
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < x.getNumSamples(); ++i)
+            REQUIRE (x.getSample (c, i) == y.getSample (c, i));
+
+    for (int style = 1; style < o2::styleCount; ++style)
+    {
+        octavio2::Processor p;
+        setParam (p, "playerStyle", (float) style);
+        setParam (p, "octave", 2.0f);
+        const auto out = play (p, 48000.0, 74, 1.2, 1.6);
+        const auto l = measure (out, 9600, 57600);
+        INFO ("style " << style << ": " << dB (l.rms) << " dB RMS");
+        CHECK (l.finite);
+        CHECK (dB (l.rms) > -45.0);
+        CHECK (l.peak < 1.0);
+    }
+}
+
+TEST_CASE ("Octavio 2 M7: styles change the player's habits", "[octavio2][m7]")
+{
+    const o2::PlayerParams modern;
+    for (int s = 0; s < o2::styleCount; ++s)
+    {
+        o2::PlayerParams p;
+        o2::applyStyle (p, s);
+        if (s == o2::styleModern)
+            CHECK ((p.vibRate == modern.vibRate && p.vibWidthHi == modern.vibWidthHi && p.slideProb == 0.0
+                    && p.scoop == 0.0 && p.pitchError == 0.0 && p.intonAmount == 0.0 && p.mdvPeak == 0.5
+                    && p.openPenalty == modern.openPenalty && p.bite == modern.bite));
+        if (s == o2::styleRomantic)
+            CHECK ((p.vibWidthHi > modern.vibWidthHi && p.vibRate < modern.vibRate && p.slideProb > 0.0));
+        if (s == o2::styleHungarian)
+            CHECK ((p.vibRate > modern.vibRate && p.bite > modern.bite && p.vibDelay < modern.vibDelay));
+        if (s == o2::styleBaroque)
+            CHECK ((p.vibWidthHi < 0.5 * modern.vibWidthHi && p.mdvDepth > modern.mdvDepth));
+        if (s == o2::styleMaqam)
+            CHECK ((p.scoop > 0.0 && p.slideProb > 0.0));
+        if (s == o2::styleFiddle)
+            CHECK ((p.openPenalty < modern.openPenalty && p.vibWidthHi < modern.vibWidthHi));
+        if (s == o2::styleStudent)
+            CHECK ((p.pitchError > 0.0 && p.accel < modern.accel));
+    }
+    // portamento: a leap in reach on the string the finger is on slides when slideProb is 1
+    o2::Violin vn;
+    vn.init();
+    o2::Player pl;
+    pl.pp.slideProb = 1.0;
+    pl.init (vn, 48000.0);
+    double vb[4], fb[4];
+    pl.noteOn (71, 90); // B4 on the A string
+    for (int i = 0; i < 9600; ++i)
+        pl.tick (vb, fb);
+    pl.noteOn (74, 90); // D5 slurred on (the B is still held): 3 semitones up the A string, in reach
+    CHECK (pl.lastString == 2);
+    CHECK (pl.st[2].slideT0 >= 0.0);
+}
+
+TEST_CASE ("Octavio 2 M7: intonation systems and the A4 reference", "[octavio2][m7]")
+{
+    o2::Violin vn;
+    vn.init();
+    o2::Player pl;
+    pl.init (vn, 48000.0);
+    pl.setTuning (o2::intonExpressive, 0, 440.0, 0.0, nullptr, true);
+    CHECK_FALSE (pl.tuneOn); // the default: exactly the 2.1 pitches
+    pl.setTuning (o2::intonEqual, 0, 415.0, 0.0, nullptr, true);
+    CHECK (pl.tuneOn);
+    CHECK (std::abs (pl.tuneTable[69] - 1200.0 * std::log2 (415.0 / 440.0)) < 1e-9);
+    CHECK (std::abs (pl.openCents[2] - pl.tuneTable[69]) < 1e-9);
+    // Pythagorean in D: A at the reference, F# a Pythagorean third above D
+    pl.setTuning (o2::intonPythagorean, 2, 440.0, 0.0, nullptr, true);
+    CHECK (std::abs (pl.tuneTable[69]) < 1e-9);
+    CHECK (std::abs ((pl.tuneTable[66] - pl.tuneTable[62]) - (1200.0 * std::log2 (81.0 / 64.0) - 400.0)) < 0.02);
+    CHECK (std::abs (pl.openCents[0] - (-3.91)) < 1e-9); // G two pure fifths below A
+    // Just in C: E a pure major third above C, G a pure fifth
+    pl.setTuning (o2::intonJust, 0, 440.0, 0.0, nullptr, true);
+    CHECK (std::abs ((pl.tuneTable[64] - pl.tuneTable[60]) - (1200.0 * std::log2 (5.0 / 4.0) - 400.0)) < 0.02);
+    CHECK (std::abs ((pl.tuneTable[67] - pl.tuneTable[60]) - (1200.0 * std::log2 (3.0 / 2.0) - 700.0)) < 0.02);
+    // the processor: A415 retunes the open strings and the notes
+    octavio2::Processor p;
+    setParam (p, "a4", 415.0f);
+    setParam (p, "octave", 2.0f);
+    p.prepareToPlay (48000.0, 480);
+    run (p, 20, { juce::MidiMessage::noteOn (1, 71, (juce::uint8) 90) });
+    auto& player = p.getEngine().getPlayer();
+    CHECK (std::abs (p.getEngine().getViolin().s[2].d.f0 - 415.0) < 0.01);
+    CHECK (std::abs (player.st[player.lastString].target - (71.0 + 1200.0 * std::log2 (415.0 / 440.0) / 100.0)) < 1e-3);
+}
+
+TEST_CASE ("Octavio 2 M7: Scala files load, play and are saved with the project", "[octavio2][m7]")
+{
+    // 12-TET: nothing moves; 24-EDO quarter tones; a keyboard map with A = 432 Hz
+    const std::string et = "! et.scl\n12-TET\n12\n100.\n200.\n300.\n400.\n500.\n600.\n700.\n800.\n900.\n1000.\n"
+                           "1100.\n2/1\n";
+    auto t = o2::parseScala (et);
+    REQUIRE (t.ok);
+    for (int n = 0; n < 128; ++n)
+        CHECK (std::abs (t.cents[n]) < 1e-9);
+    // 24-EDO, every key the next quarter tone, key 69 at 440: key 61 is 8 quarter tones below A
+    std::string q = "24-EDO\n24\n";
+    for (int i = 1; i < 24; ++i)
+        q += std::to_string (50 * i) + ".0\n";
+    q += "2/1\n";
+    t = o2::parseScala (q);
+    REQUIRE (t.ok);
+    CHECK (std::abs (t.cents[61] - 400.0) < 1e-9);
+    CHECK (std::abs (t.cents[74] - (-250.0)) < 1e-9);
+    const std::string kbm = "! a432.kbm\n0\n0\n127\n60\n69\n432.0\n0\n";
+    t = o2::parseScala (et, kbm);
+    REQUIRE (t.ok);
+    CHECK (t.hasKeyboardMap);
+    CHECK (std::abs (t.cents[69] - 1200.0 * std::log2 (432.0 / 440.0)) < 1e-9);
+    CHECK_FALSE (o2::parseScala ("nonsense").ok);
+
+    octavio2::Processor a;
+    CHECK (a.loadScalaText ("quarter.scl", q, {}).isEmpty());
+    setParam (a, "intonation", (float) o2::intonScala);
+    setParam (a, "octave", 2.0f);
+    a.prepareToPlay (48000.0, 480);
+    run (a, 10, { juce::MidiMessage::noteOn (1, 74, (juce::uint8) 90) });
+    auto& pl = a.getEngine().getPlayer();
+    CHECK (pl.tuneOn);
+    CHECK (std::abs (pl.st[pl.lastString].target - 71.5) < 1e-6); // 5 quarter tones above A4
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+    octavio2::Processor b;
+    b.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (b.getScalaName() == "quarter.scl");
+    b.prepareToPlay (48000.0, 480);
+    run (b, 2);
+    CHECK (std::abs (b.getEngine().getPlayer().tuneTable[74] - (-250.0)) < 1e-6);
+}
+
+TEST_CASE ("Octavio 2 M7: MPE bends, presses and brightens each note; off it changes nothing", "[octavio2][m7]")
+{
+    for (const bool on : { false, true })
+    {
+        octavio2::Processor p;
+        setParam (p, "octave", 2.0f);
+        setParam (p, "mpe", on ? 1.0f : 0.0f);
+        p.prepareToPlay (48000.0, 480);
+        // a semitone up of the 48-semitone range, sent before the note as MPE controllers do
+        const int semitone = 8192 + juce::roundToInt (8192.0 / 48.0);
+        run (p,
+             10,
+             { juce::MidiMessage::pitchWheel (2, semitone),
+               juce::MidiMessage::noteOn (2, 69, (juce::uint8) 90),
+               juce::MidiMessage::channelPressureChange (2, 127),
+               juce::MidiMessage::controllerEvent (2, 74, 127) });
+        auto& pl = p.getEngine().getPlayer();
+        const auto& S = pl.st[pl.lastString];
+        if (on)
+        {
+            CHECK (std::abs (S.mpeBend - 100.0) < 0.5);
+            CHECK (pl.mpeDyn == 1.0);
+            CHECK (pl.mpeContact < 0.6);
+        }
+        else
+        {
+            CHECK (S.mpeBend == 0.0);
+            CHECK (pl.mpeDyn < 0.0);
+            CHECK (pl.mpeContact == 1.0);
+        }
+    }
+}

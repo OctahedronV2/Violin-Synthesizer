@@ -296,7 +296,7 @@ MidiView::MidiView (Processor& p)
             }),
       octave (&p.getParameters(), params::id::octave.getParamID(), { { "-2" }, { "-1" }, { "0" }, { "+1" }, { "+2" } }),
       behaviour (nullptr, {}, { { "Latching" }, { "Momentary" }, { "Off" } }),
-      mpe (nullptr, {}, { { "Off" }, { "On" } })
+      mpe (&p.getParameters(), params::id::mpe.getParamID(), { { "Off" }, { "On" } }) // M7
 {
     curve.setTooltip ("Velocity to dynamics: below 1 soft playing gets louder sooner, above 1 later.");
     dynamics.setTooltip ("Added to every note's dynamics.");
@@ -304,7 +304,8 @@ MidiView::MidiView (Processor& p)
                      "(CC121) centres it.");
     octave.setTooltip ("Moves every note by octaves. +1 suits typing keyboards (z = C4 in FL Studio).");
     behaviour.setTooltip ("Keyswitches C1 and up pick the articulation and latch until the next one.");
-    mpe.setTooltip ("MPE arrives with M7.");
+    mpe.setTooltip ("MPE (lower zone, notes on channels 2-16): each note's pitch bend bends it (range: MPE Bend "
+                    "Range, 48 semitones), pressure sets the dynamics, CC74 moves the bow towards the bridge.");
 
     for (int i = 0; i < MidiMap::presetNames().size(); ++i)
         mapPreset.addItem (MidiMap::presetNames()[i], i + 1);

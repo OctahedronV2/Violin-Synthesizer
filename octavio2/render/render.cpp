@@ -21,6 +21,7 @@
 //   vibrato=x (1), velCurve=x (1), data=octavio2/data
 
 #include "../core/Engine.h"
+#include "../core/Scala.h"
 #include "../core/Wav.h"
 #include "Midi.h"
 
@@ -297,6 +298,18 @@ static void playerOpts (PlayerParams& q)
     O (autoMartele);
     O (autoSpiccato);
     O (drawnCurves);
+    // M7 styles
+    O (slideProb);
+    O (slideMin);
+    O (slideTime);
+    O (scoop);
+    O (scoopProb);
+    O (scoopTime);
+    O (pitchError);
+    O (earFix);
+    O (openPenalty);
+    O (mdvPeak);
+    O (intonAmount);
 #undef O
 }
 
@@ -374,12 +387,42 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.strokeShaping = opt ("strokeShaping", es.strokeShaping);
     es.bite = opt ("bite", es.bite);
     es.contact = opt ("contact", es.contact);
+    // M7: style=0..6 (Modern, Romantic, Hungarian, Baroque, Maqam, Fiddle, Student),
+    // intonation=0..4 (Expressive, Equal, Just, Pythagorean, Scala), key=0..11 (C..B), a4=Hz,
+    // scl=file.scl [kbm=file.kbm] (sets intonation=4 unless given)
+    es.playerStyle = (int) opt ("style", es.playerStyle);
+    es.intonation = (int) opt ("intonation", opts.count ("scl") ? 4 : es.intonation);
+    es.tuningKey = (int) opt ("key", es.tuningKey);
+    es.a4 = opt ("a4", es.a4);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
     stringOpts (engine->getViolin().p); // and any continuous strings Params field
     engine->reset(); // the strings and bridge re-made with those (same state as prepare's)
+    if (opts.count ("scl"))
+    {
+        auto slurp = [] (const std::string& path)
+        {
+            std::string s;
+            if (FILE* f = std::fopen (path.c_str(), "rb"))
+            {
+                char buf[4096];
+                size_t k;
+                while ((k = std::fread (buf, 1, sizeof buf, f)) > 0)
+                    s.append (buf, k);
+                std::fclose (f);
+            }
+            return s;
+        };
+        const auto tuning = parseScala (slurp (opts["scl"]), opts.count ("kbm") ? slurp (opts["kbm"]) : std::string());
+        if (! tuning.ok)
+        {
+            std::fprintf (stderr, "scl: %s\n", tuning.error.c_str());
+            return 1;
+        }
+        engine->setTuningTable (tuning.cents, ! tuning.hasKeyboardMap);
+    }
     engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;

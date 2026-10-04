@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 
+#include "../../third_party/mts-esp/libMTSClient.h"
 #include "../core/Wav.h"
 #include "Octavio2BinaryData.h"
 #include "PluginEditor.h"
@@ -82,12 +83,15 @@ Processor::Processor()
         if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (ps[i]))
             rawValue[(size_t) i] = parameters.getRawParameterValue (r->getParameterID());
     presets = std::make_unique<Presets> (parameters);
+    mts = MTS_RegisterClient(); // M7: finds an MTS-ESP master if one is installed
     startTimerHz (10);
 }
 
 Processor::~Processor()
 {
     stopTimer();
+    if (mts != nullptr)
+        MTS_DeregisterClient (mts);
     keyboardState.removeListener (this);
 }
 
@@ -188,6 +192,9 @@ int64_t Processor::engineTime (int hostOffset) const
 
 void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
 {
+    // M7: MPE expression on the member channels (off: everything is ordinary MIDI)
+    if (reader.mpe() && mpe.handle (m, when, *engine, reader.octaveShift(), reader.mpeBendRange(), sentNotes))
+        return;
     const int channel = juce::jlimit (1, 16, m.getChannel()) - 1;
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
@@ -380,6 +387,7 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
                 telemetry.bpm.store (static_cast<float> (*bpm));
             }
     engine->setSettings (currentSettings());
+    updateTuning();
 
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
@@ -489,6 +497,91 @@ juce::AudioProcessorEditor* Processor::createEditor()
     return new Editor (*this);
 }
 
+// ---------------------------------------------------------------- M7 tuning
+void Processor::updateTuning()
+{
+    // a new Scala table from the message thread (never waits: tried again next block)
+    if (scalaChanged.load (std::memory_order_acquire))
+    {
+        const juce::SpinLock::ScopedTryLockType lock (tuningLock);
+        if (lock.isLocked())
+        {
+            scalaNow = pendingScala;
+            scalaChanged.store (false, std::memory_order_relaxed);
+        }
+    }
+    const int system = reader.intonation();
+    if (system == o2::intonScala && scalaNow.ok)
+        engine->setTuningTable (scalaNow.cents, ! scalaNow.hasKeyboardMap);
+    else if (system == o2::intonMts && mts != nullptr && MTS_HasMaster (mts))
+    {
+        // per sounding pitch, the master's retuning of the key that plays it
+        const int shift = 12 * reader.octaveShift();
+        for (int p = 0; p < 128; ++p)
+        {
+            const int key = p - shift;
+            mtsTable[p] = key >= 0 && key < 128 ? 100.0 * MTS_RetuningInSemitones (mts, (char) key, -1) : 0.0;
+        }
+        engine->setTuningTable (mtsTable, false);
+    }
+    else
+        engine->clearTuningTable();
+}
+
+juce::String Processor::loadScala (const juce::File& scl, const juce::File& kbm)
+{
+    if (! scl.existsAsFile())
+        return "file not found";
+    return loadScalaText (scl.getFileName(),
+                          scl.loadFileAsString(),
+                          kbm.existsAsFile() ? kbm.loadFileAsString() : juce::String());
+}
+
+juce::String Processor::loadScalaText (const juce::String& name, const juce::String& scl, const juce::String& kbm)
+{
+    auto tuning = o2::parseScala (scl.toStdString(), kbm.toStdString());
+    if (! tuning.ok)
+        return juce::String (tuning.error);
+    {
+        const juce::SpinLock::ScopedLockType lock (tuningLock);
+        pendingScala.ok = true;
+        pendingScala.hasKeyboardMap = tuning.hasKeyboardMap;
+        std::copy (std::begin (tuning.cents), std::end (tuning.cents), pendingScala.cents);
+        scalaChanged.store (true, std::memory_order_release);
+    }
+    // saved with the project (parameters.state is written by getStateInformation)
+    parameters.state.setProperty ("scalaName", name, nullptr);
+    parameters.state.setProperty ("scalaText", scl, nullptr);
+    parameters.state.setProperty ("kbmText", kbm, nullptr);
+    return {};
+}
+
+void Processor::clearScala()
+{
+    {
+        const juce::SpinLock::ScopedLockType lock (tuningLock);
+        pendingScala = TuningTable();
+        scalaChanged.store (true, std::memory_order_release);
+    }
+    for (auto* key : { "scalaName", "scalaText", "kbmText" })
+        parameters.state.removeProperty (key, nullptr);
+}
+
+juce::String Processor::getScalaName() const
+{
+    return parameters.state.getProperty ("scalaName").toString();
+}
+
+bool Processor::mtsHasMaster() const
+{
+    return mts != nullptr && MTS_HasMaster (mts);
+}
+
+juce::String Processor::mtsScaleName() const
+{
+    return mtsHasMaster() ? juce::String (MTS_GetScaleName (mts)) : juce::String();
+}
+
 // The state: the parameters (APVTS), the name of the preset they came from (property "preset")
 // and, from M6, the MIDI map as a child MIDIMAP (MidiMap::toTree).
 void Processor::getStateInformation (juce::MemoryBlock& destData)
@@ -511,6 +604,12 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
         state.removeChild (map, nullptr);
         parameters.replaceState (state);
         presets->restoreFromState();
+        // M7: the project's Scala tuning
+        const auto scl = parameters.state.getProperty ("scalaText").toString();
+        if (scl.isNotEmpty())
+            loadScalaText (getScalaName(), scl, parameters.state.getProperty ("kbmText").toString());
+        else
+            clearScala();
     }
 }
 } // namespace octavio2

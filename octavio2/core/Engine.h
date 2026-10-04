@@ -59,6 +59,12 @@ struct EngineSettings
     double strokeShaping = 1.0; // PlayerParams::shapeAmount
     double bite = 1.0; // PlayerParams::biteScale
     double contact = 1.0; // PlayerParams::contactScale
+    // M7 player: style (o2::PlayerStyle), intonation (o2::Intonation), Key (tonic pitch class
+    // for Just, Pythagorean and Expressive, 0 = C), A4 reference (Hz)
+    int playerStyle = 0;
+    int intonation = 0;
+    int tuningKey = 0;
+    double a4 = 440.0;
 };
 
 class Engine
@@ -84,8 +90,10 @@ public:
     void reset()
     {
         violin->init();
+        tuningDirty = true; // M7: the strings are back at their own tuning
         for (int i = 0; i < 4; ++i)
         {
+            baseF0[i] = violin->s[i].d.f0;
             violin->s[i].rng = Rng();
             violin->s[i].rng.s ^= 0x51ED2701ull * (seed + 7 * i);
         }
@@ -132,6 +140,36 @@ public:
     void noteOff (int64_t when, int pitch) { push ({ when, Ev::off, pitch, 0, 0 }); }
     void controller (int64_t when, int cc, double v127) { push ({ when, Ev::cc, cc, v127, 0 }); }
     void allNotesOff (int64_t when) { push ({ when, Ev::allOff, 0, 0, 0 }); }
+    // M7 MPE, per note by its pitch: bend in cents, pressure 0..1 (-1: none), timbre (CC74) 0..127.
+    // Sent before the note-on, they set how the note starts.
+    void noteBend (int64_t when, int pitch, double cents) { push ({ when, Ev::bend, pitch, cents, 0 }); }
+    void notePressure (int64_t when, int pitch, double v) { push ({ when, Ev::pressure, pitch, v, 0 }); }
+    void noteTimbre (int64_t when, int pitch, double v127) { push ({ when, Ev::timbre, pitch, v127, 0 }); }
+
+    // M7: a tuning table (cents on 12-TET at A440 per MIDI note) for the Scala and MTS-ESP
+    // systems. transposes: the A4 setting moves it too. Audio thread (or before playing); copies.
+    void setTuningTable (const double* cents, bool transposes)
+    {
+        bool same = transposes == tableTransposes && hasTable;
+        for (int n = 0; n < 128 && same; ++n)
+            same = std::abs (cents[n] - table[n]) < 0.01;
+        if (same)
+            return;
+        std::copy (cents, cents + 128, table);
+        tableTransposes = transposes;
+        hasTable = true;
+        tuningDirty = true;
+        applyTuning();
+    }
+    void clearTuningTable()
+    {
+        if (hasTable)
+        {
+            hasTable = false;
+            tuningDirty = true;
+            applyTuning();
+        }
+    }
 
     // Audio thread: n samples of stereo at 48 kHz.
     void render (float* outL, float* outR, int n)
@@ -253,7 +291,10 @@ private:
             on,
             off,
             cc,
-            allOff
+            allOff,
+            bend, // M7 MPE
+            pressure,
+            timbre
         };
         int64_t t;
         int type;
@@ -265,6 +306,7 @@ private:
     {
         if (! radiation)
             return;
+        applyStyle();
         radiation->setBrightness (settings.brightnessDb);
         radiation->setHall (settings.hall);
         radiation->setReverbGain (std::pow (10.0, settings.reverbDb / 20.0));
@@ -301,6 +343,52 @@ private:
         player->pp.shapeAmount = settings.strokeShaping;
         player->pp.biteScale = settings.bite;
         player->pp.contactScale = settings.contact;
+        applyTuning();
+    }
+
+    // M7: the player style, as offsets on the parameters it had in Modern soloist (the base,
+    // kept while another style plays, so switching back restores them exactly)
+    void applyStyle()
+    {
+        const int style = std::clamp (settings.playerStyle, 0, (int) styleCount - 1);
+        if (style == styleNow)
+            return;
+        if (styleNow == styleModern)
+            styleBase = player->pp;
+        player->pp = styleBase;
+        o2::applyStyle (player->pp, style);
+        player->pp.seed = seed;
+        styleNow = style;
+        tuningDirty = true;
+    }
+
+    // M7: the intonation system -> the player's pitch table and the open strings' tuning
+    void applyTuning()
+    {
+        const int sys = std::clamp (settings.intonation, 0, (int) intonCount - 1);
+        if (! tuningDirty && sys == tunedSys && settings.tuningKey == tunedKey && settings.a4 == tunedA4
+            && player->pp.intonAmount == tunedAmount)
+            return;
+        tuningDirty = false;
+        tunedSys = sys;
+        tunedKey = settings.tuningKey;
+        tunedA4 = settings.a4;
+        tunedAmount = player->pp.intonAmount;
+        player->setTuning (sys,
+                           ((settings.tuningKey % 12) + 12) % 12,
+                           settings.a4,
+                           player->pp.intonAmount,
+                           hasTable ? table : nullptr,
+                           tableTransposes);
+        for (int i = 0; i < 4; ++i)
+        {
+            const double f0 = baseF0[i] * std::pow (2.0, player->openCents[i] / 1200.0 * (player->tuneOn ? 1.0 : 0.0));
+            if (f0 != violin->s[i].d.f0)
+            {
+                violin->s[i].d.f0 = f0;
+                player->retuneOpen (i);
+            }
+        }
     }
 
     void push (Ev e)
@@ -382,6 +470,15 @@ private:
                     break;
                 case Ev::allOff:
                     releaseAll();
+                    break;
+                case Ev::bend:
+                    player->mpeBend (e.a, e.b);
+                    break;
+                case Ev::pressure:
+                    player->mpePressure (e.a, e.b);
+                    break;
+                case Ev::timbre:
+                    player->mpeTimbre (e.a, e.b);
                     break;
             }
         }
@@ -465,6 +562,14 @@ private:
     Decim dec, dec2, lowDec, lowDec2;
     EngineSettings settings;
     unsigned seed = 1;
+    // M7 styles and intonation
+    PlayerParams styleBase;
+    int styleNow = styleModern;
+    bool tuningDirty = true, hasTable = false, tableTransposes = true;
+    int tunedSys = -1, tunedKey = -1;
+    double tunedA4 = 0.0, tunedAmount = -1.0;
+    double table[128] = {};
+    double baseF0[4] = {};
     int64_t clock = 0;
 
     static constexpr uint64_t qmask = 8191;

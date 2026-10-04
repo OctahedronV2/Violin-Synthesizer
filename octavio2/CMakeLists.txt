@@ -78,7 +78,9 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/Theme.cpp
     plugin/ui/ToneView.cpp
     "${PROJECT_SOURCE_DIR}/source/dsp/PartitionedConvolution.cpp"
-    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp")
+    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp"
+    # M7: MTS-ESP client (0BSD, loads the MTS-ESP library at run time if installed)
+    "${PROJECT_SOURCE_DIR}/third_party/mts-esp/libMTSClient.cpp")
 target_include_directories(Octavio2 PUBLIC "${PROJECT_SOURCE_DIR}/source" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(Octavio2
     PUBLIC
@@ -92,6 +94,7 @@ target_link_libraries(Octavio2
         ViolinSynthPffft
         juce::juce_audio_utils
         juce::juce_dsp
+        ${CMAKE_DL_LIBS}
     PUBLIC
         juce::juce_recommended_config_flags)
 if(VIOLINSYNTH_ENABLE_LTO)

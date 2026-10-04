@@ -1,6 +1,8 @@
 #pragma once
 
+#include "../core/Scala.h"
 #include "MidiMap.h"
+#include "Mpe.h"
 #include "Parameters.h"
 #include "Presets.h"
 #include "ui/Telemetry.h"
@@ -10,6 +12,8 @@
 
 #include <array>
 #include <memory>
+
+struct MTSClient; // M7: third_party/mts-esp
 
 namespace octavio2
 {
@@ -62,6 +66,17 @@ public:
     Presets& getPresets() { return *presets; }
     bool isPedalDown() const { return pedalShown.load (std::memory_order_relaxed); }
     double getLatencyMs() const { return getLatencySamples() * 1000.0 / hostRate; }
+
+    // M7 tuning (message thread): a Scala scale (.scl, and optionally a .kbm keyboard map) for
+    // the Intonation parameter's "Scala file" choice. Parsed here, handed to the audio thread
+    // without blocking it, and saved with the project. Returns an error, or empty on success.
+    juce::String loadScala (const juce::File& scl, const juce::File& kbm = {});
+    juce::String loadScalaText (const juce::String& name, const juce::String& scl, const juce::String& kbm);
+    void clearScala();
+    juce::String getScalaName() const;
+    // MTS-ESP: whether a master is running, and its scale's name
+    bool mtsHasMaster() const;
+    juce::String mtsScaleName() const;
 
 private:
     struct KeyEvent
@@ -132,6 +147,20 @@ private:
     std::atomic<bool> pedalShown { false };
     std::array<bool, 128> deferredOff {}; // engine pitches released while the pedal was down
     double hostBpm = 0.0;
+    // M7: MPE, the Scala table handed to the audio thread, the MTS-ESP client
+    void updateTuning();
+    Mpe mpe;
+    juce::SpinLock tuningLock; // the audio thread only tries it
+    struct TuningTable // plain data: copied on the audio thread
+    {
+        bool ok = false, hasKeyboardMap = false;
+        double cents[128] = {};
+    };
+    TuningTable pendingScala; // written under tuningLock (message thread)
+    std::atomic<bool> scalaChanged { false };
+    TuningTable scalaNow; // audio thread's copy
+    double mtsTable[128] = {};
+    ::MTSClient* mts = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Processor)
 };
