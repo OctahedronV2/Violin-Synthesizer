@@ -104,8 +104,8 @@ void CurvesView::paint (juce::Graphics& g)
 {
     update();
     drawText (g,
-              "The curves the player chose for the last 16 s it played. Drag them into your DAW as MIDI (CC1, CC26, "
-              "CC19, CC74): a lane you play back into Octavio takes over from the player.",
+              "The player's curves for the last 16 s. Drag them into your DAW as MIDI (CC1, 26, 19, 74): a lane "
+              "played back takes over.",
               24,
               132 - top,
               Fonts::sans (12.5f),

@@ -50,6 +50,29 @@ struct EngineSettings
     bool fingerPlan = false; // Viterbi fingering and anticipated shifts (Studio look-ahead)
     bool drawnCurves = true; // CC lanes take over the player's dimension
     bool modalBody = true; // the bridge modes radiate below 1.5 kHz (Radiation::setModalBody)
+    // M6 views: the Play, Bow and Left hand tabs' controls (PlayerParams' M6 block)
+    double portamento = 1.0; // PlayerParams::slideScale
+    double stringPreference = 0.0; // PlayerParams::stringPref, -1 bright .. +1 dark
+    double vibratoRate = 0.0; // Hz, PlayerParams::vibRateAdd
+    double vibratoDelay = 1.0; // PlayerParams::vibDelayScale
+    double bowChange = 1.0; // PlayerParams::accelScale
+    double strokeShaping = 1.0; // PlayerParams::shapeAmount
+    double bite = 1.0; // PlayerParams::biteScale
+    double contact = 1.0; // PlayerParams::contactScale
+    // M7 player: style (o2::PlayerStyle), intonation (o2::Intonation), Key (tonic pitch class
+    // for Just, Pythagorean and Expressive, 0 = C), A4 reference (Hz)
+    int playerStyle = 0;
+    int intonation = 0;
+    int tuningKey = 0;
+    double a4 = 440.0;
+    // M7 instrument: parts and extended articulations
+    int strings = 0; // Violin::setStringSet: 0 synthetic, 1 gut, 2 steel
+    int rosin = 1; // Violin::rosin: 0 light, 1 standard, 2 dark, 3 baroque
+    int bow = 0; // 0 modern, 1 baroque (Engine::applyBow)
+    int contactStyle = 0; // PlayerParams::contact: 0 ordinario, 1 sul ponticello, 2 sul tasto
+    double tremoloRate = 12.0; // strokes per second (free tremolo)
+    int tremoloSync = 0; // 0 free, 1 16ths, 2 16th triplets, 3 32nds (needs tempo)
+    double tempo = 0.0; // the host's tempo, bpm (0 = unknown)
 };
 
 class Engine
@@ -67,6 +90,8 @@ public:
         player = std::make_unique<Player>();
         radiation = std::make_unique<Radiation>();
         radiation->prepare (data);
+        rosinApplied = 1;
+        bowApplied = 0;
         this->seed = seed;
         reset();
     }
@@ -75,8 +100,10 @@ public:
     void reset()
     {
         violin->init();
+        tuningDirty = true; // M7: the strings are back at their own tuning
         for (int i = 0; i < 4; ++i)
         {
+            baseF0[i] = violin->s[i].d.f0;
             violin->s[i].rng = Rng();
             violin->s[i].rng.s ^= 0x51ED2701ull * (seed + 7 * i);
         }
@@ -123,6 +150,36 @@ public:
     void noteOff (int64_t when, int pitch) { push ({ when, Ev::off, pitch, 0, 0 }); }
     void controller (int64_t when, int cc, double v127) { push ({ when, Ev::cc, cc, v127, 0 }); }
     void allNotesOff (int64_t when) { push ({ when, Ev::allOff, 0, 0, 0 }); }
+    // M7 MPE, per note by its pitch: bend in cents, pressure 0..1 (-1: none), timbre (CC74) 0..127.
+    // Sent before the note-on, they set how the note starts.
+    void noteBend (int64_t when, int pitch, double cents) { push ({ when, Ev::bend, pitch, cents, 0 }); }
+    void notePressure (int64_t when, int pitch, double v) { push ({ when, Ev::pressure, pitch, v, 0 }); }
+    void noteTimbre (int64_t when, int pitch, double v127) { push ({ when, Ev::timbre, pitch, v127, 0 }); }
+
+    // M7: a tuning table (cents on 12-TET at A440 per MIDI note) for the Scala and MTS-ESP
+    // systems. transposes: the A4 setting moves it too. Audio thread (or before playing); copies.
+    void setTuningTable (const double* cents, bool transposes)
+    {
+        bool same = transposes == tableTransposes && hasTable;
+        for (int n = 0; n < 128 && same; ++n)
+            same = std::abs (cents[n] - table[n]) < 0.01;
+        if (same)
+            return;
+        std::copy (cents, cents + 128, table);
+        tableTransposes = transposes;
+        hasTable = true;
+        tuningDirty = true;
+        applyTuning();
+    }
+    void clearTuningTable()
+    {
+        if (hasTable)
+        {
+            hasTable = false;
+            tuningDirty = true;
+            applyTuning();
+        }
+    }
 
     // Audio thread: n samples of stereo at 48 kHz.
     void render (float* outL, float* outR, int n)
@@ -162,6 +219,11 @@ public:
                 force[i] = dec.out();
                 low[i] = lowDec.out();
                 scope[(size_t) (scopeWrite++ & (scopeSize - 1))] = (float) force[i];
+                if (--traceLeft <= 0)
+                {
+                    traceLeft = traceEvery;
+                    traceNow();
+                }
                 ++clock;
             }
             scopeWritten.store (scopeWrite, std::memory_order_release);
@@ -204,6 +266,28 @@ public:
     int64_t scopeCount() const { return scopeWritten.load (std::memory_order_acquire); }
     double seconds() const { return (double) clock / rate; }
 
+    // M6: the bow and the left hand every 5 ms of engine time (the Bow and Left hand tabs). Read
+    // as the note log: a reader keeps its own count, at most traceSize - 64 behind the writer.
+    struct Trace
+    {
+        float t = 0; // engine seconds
+        float speed = 0; // bow speed, m/s, + down-bow
+        float force = 0; // N on the sounding string
+        float hair = 0; // where the string is on the hair, 0 frog .. 1 tip
+        float contact = 0; // bow-bridge distance / string length
+        float dynamics = 0; // 0..1
+        float pitch = 0; // finger pitch on the sounding string (MIDI, with slide and vibrato)
+        float target = 0; // the note the finger goes to
+        float handPos = 2; // semitones above the open string where the first finger sits
+        float vibWidth = 0; // cents peak to peak
+        int string = 2; // 0 G .. 3 E
+        bool sounding = false, sliding = false, changing = false;
+    };
+    static constexpr uint64_t traceSize = 4096; // 20 s
+    static constexpr int traceEvery = 240; // samples (5 ms)
+    const Trace& traceEntry (uint64_t i) const { return trace[i & (traceSize - 1)]; }
+    uint64_t traceCount() const { return traceWritten.load (std::memory_order_acquire); }
+
     // for tests and the renderer
     Player& getPlayer() { return *player; }
     Violin& getViolin() { return *violin; }
@@ -217,7 +301,10 @@ private:
             on,
             off,
             cc,
-            allOff
+            allOff,
+            bend, // M7 MPE
+            pressure,
+            timbre
         };
         int64_t t;
         int type;
@@ -229,6 +316,7 @@ private:
     {
         if (! radiation)
             return;
+        applyStyle();
         radiation->setBrightness (settings.brightnessDb);
         radiation->setHall (settings.hall);
         radiation->setReverbGain (std::pow (10.0, settings.reverbDb / 20.0));
@@ -257,6 +345,99 @@ private:
         player->pp.vibAmount = settings.vibrato;
         player->pp.velCurve = settings.velocityCurve;
         player->pp.dynBias = settings.dynamics;
+        player->pp.slideScale = settings.portamento;
+        player->pp.stringPref = settings.stringPreference;
+        player->pp.vibRateAdd = settings.vibratoRate;
+        player->pp.vibDelayScale = settings.vibratoDelay;
+        player->pp.accelScale = settings.bowChange;
+        player->pp.shapeAmount = settings.strokeShaping;
+        player->pp.biteScale = settings.bite;
+        player->pp.contactScale = settings.contact;
+        // M7 instrument (each part is written only when it changes, so the renderer's experiments
+        // on the same fields survive)
+        violin->setStringSet (settings.strings);
+        if (settings.rosin != rosinApplied)
+        {
+            rosinApplied = settings.rosin;
+            violin->setRosin (settings.rosin);
+        }
+        if (settings.bow != bowApplied)
+        {
+            bowApplied = settings.bow;
+            applyBow (settings.bow);
+        }
+        player->pp.contact = settings.contactStyle;
+        player->pp.tremoloRate = settings.tremoloRate;
+        player->pp.tremoloSync = settings.tremoloSync;
+        player->pp.tempo = settings.tempo;
+        applyTuning();
+    }
+
+    // M7: the player style, as offsets on the parameters it had in Modern soloist (the base,
+    // kept while another style plays, so switching back restores them exactly)
+    void applyStyle()
+    {
+        const int style = std::clamp (settings.playerStyle, 0, (int) styleCount - 1);
+        if (style == styleNow)
+            return;
+        if (styleNow == styleModern)
+            styleBase = player->pp;
+        player->pp = styleBase;
+        o2::applyStyle (player->pp, style);
+        player->pp.seed = seed;
+        styleNow = style;
+        tuningDirty = true;
+        bowApplied = -1; // the style reset the bow's player fields: write them again
+    }
+
+    // M7: the intonation system -> the player's pitch table and the open strings' tuning
+    void applyTuning()
+    {
+        const int sys = std::clamp (settings.intonation, 0, (int) intonCount - 1);
+        if (! tuningDirty && sys == tunedSys && settings.tuningKey == tunedKey && settings.a4 == tunedA4
+            && player->pp.intonAmount == tunedAmount)
+            return;
+        tuningDirty = false;
+        tunedSys = sys;
+        tunedKey = settings.tuningKey;
+        tunedA4 = settings.a4;
+        tunedAmount = player->pp.intonAmount;
+        player->setTuning (sys,
+                           ((settings.tuningKey % 12) + 12) % 12,
+                           settings.a4,
+                           player->pp.intonAmount,
+                           hasTable ? table : nullptr,
+                           tableTransposes);
+        for (int i = 0; i < 4; ++i)
+        {
+            const double f0 = baseF0[i] * std::pow (2.0, player->openCents[i] / 1200.0 * (player->tuneOn ? 1.0 : 0.0));
+            if (f0 != violin->s[i].d.f0)
+            {
+                violin->s[i].d.f0 = f0;
+                player->retuneOpen (i);
+            }
+        }
+    }
+
+    // M7: the bow. Modern = the defaults. Baroque: shorter (56 cm of hair) and lighter (the player
+    // presses at most 1.4 N), fewer hairs (8 mm ribbon) at a lower tension (softer hair), light at
+    // the tip, and the baroque player's strokes: each separate note breathes out (lift-off stroke)
+    // and short notes lift off the string and ring instead of stopping on it.
+    void applyBow (int b)
+    {
+        const Params P;
+        PlayerParams Q; // the modern bow: as the current player style plays it
+        o2::applyStyle (Q, styleNow);
+        auto& p = violin->p;
+        auto& q = player->pp;
+        const bool baroque = b == 1;
+        p.bowWidth = baroque ? 0.008 : P.bowWidth;
+        p.hairStiffness = baroque ? 80000.0 : P.hairStiffness;
+        q.bowLength = baroque ? 0.56 : Q.bowLength;
+        q.forceCap = baroque ? 1.4 : Q.forceCap;
+        q.tipLight = baroque ? 0.3 : Q.tipLight;
+        q.liftStroke = baroque ? 0.3 : Q.liftStroke;
+        q.stopBelow = baroque ? 0.0 : Q.stopBelow;
     }
 
     void push (Ev e)
@@ -339,6 +520,15 @@ private:
                 case Ev::allOff:
                     releaseAll();
                     break;
+                case Ev::bend:
+                    player->mpeBend (e.a, e.b);
+                    break;
+                case Ev::pressure:
+                    player->mpePressure (e.a, e.b);
+                    break;
+                case Ev::timbre:
+                    player->mpeTimbre (e.a, e.b);
+                    break;
             }
         }
     }
@@ -369,6 +559,31 @@ private:
         }
     }
 
+    void traceNow()
+    {
+        const Player& p = *player;
+        const int s = std::clamp (p.lastString, 0, 3);
+        const auto& S = p.st[s];
+        Trace e;
+        e.t = (float) seconds();
+        e.speed = (float) p.v;
+        e.force = (float) S.force;
+        e.hair = (float) (p.hair / p.pp.bowLength);
+        e.contact = (float) p.betaFor (s);
+        e.dynamics = (float) p.dEff();
+        e.pitch = (float) S.pitch;
+        e.target = (float) S.target;
+        e.handPos = (float) p.handPos;
+        e.vibWidth = (float) S.vibWidth;
+        e.string = s;
+        e.sounding = p.nHeld > 0 && ! p.releasing;
+        e.sliding = S.slideT0 >= 0.0;
+        e.changing = p.changing;
+        const uint64_t w = traceWritten.load (std::memory_order_relaxed);
+        trace[w & (traceSize - 1)] = e;
+        traceWritten.store (w + 1, std::memory_order_release);
+    }
+
     void log (const NoteLog& n)
     {
         const uint64_t w = logWritten.load (std::memory_order_relaxed);
@@ -396,6 +611,15 @@ private:
     Decim dec, dec2, lowDec, lowDec2;
     EngineSettings settings;
     unsigned seed = 1;
+    // M7 styles and intonation
+    PlayerParams styleBase;
+    int styleNow = styleModern;
+    bool tuningDirty = true, hasTable = false, tableTransposes = true;
+    int tunedSys = -1, tunedKey = -1;
+    double tunedA4 = 0.0, tunedAmount = -1.0;
+    double table[128] = {};
+    double baseF0[4] = {};
+    int rosinApplied = 1, bowApplied = 0; // M7: the parts last written into the strings and player
     int64_t clock = 0;
 
     static constexpr uint64_t qmask = 8191;
@@ -408,5 +632,8 @@ private:
     float scope[scopeSize] = {};
     int64_t scopeWrite = 0;
     std::atomic<int64_t> scopeWritten { 0 };
+    Trace trace[traceSize] = {};
+    std::atomic<uint64_t> traceWritten { 0 };
+    int traceLeft = traceEvery;
 };
 } // namespace o2

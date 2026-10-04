@@ -4,6 +4,7 @@
 #include "plugin/HostKeyboardFocus.h"
 #include "ui/Controls.h"
 #include "ui/Keyboard.h"
+#include "ui/PresetBar.h"
 
 namespace octavio2
 {
@@ -44,7 +45,10 @@ private:
     ui::Keyboard keyboard;
     struct HeaderPreview final : juce::Component, juce::SettableTooltipClient
     {
-    } instrument, player, presets;
+    } instrument;
+    ui::PresetBar presets; // M6
+    juce::ComboBox player; // M7: Player Style
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> playerAttachment;
     Canvas canvas { *this };
     juce::TooltipWindow tooltips { this, 500 };
     violinsynth::HostKeyboardFocus hostFocus { *this };

@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 
+#include "../../third_party/mts-esp/libMTSClient.h"
 #include "../core/Wav.h"
 #include "Octavio2BinaryData.h"
 #include "PluginEditor.h"
@@ -75,12 +76,22 @@ Processor::Processor()
     for (auto& channel : sentNotes)
         channel.fill (-1);
     keyboardState.addListener (this);
+    // M6: the parameters a mapped controller can move, by index (the audio thread's table)
+    const auto& ps = AudioProcessor::getParameters();
+    jassert (ps.size() <= maxMappedParameters);
+    for (int i = 0; i < std::min (ps.size(), maxMappedParameters); ++i)
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (ps[i]))
+            rawValue[(size_t) i] = parameters.getRawParameterValue (r->getParameterID());
+    presets = std::make_unique<Presets> (parameters);
+    mts = MTS_RegisterClient(); // M7: finds an MTS-ESP master if one is installed
     startTimerHz (10);
 }
 
 Processor::~Processor()
 {
     stopTimer();
+    if (mts != nullptr)
+        MTS_DeregisterClient (mts);
     keyboardState.removeListener (this);
 }
 
@@ -120,6 +131,7 @@ void Processor::handleNoteOff (juce::MidiKeyboardState*, int, int note, float)
 void Processor::timerCallback()
 {
     updateLatency();
+    notifyMappedParameters();
     // the keyboard's own copy of its notes is not needed: they reached the audio thread already
     juce::MidiBuffer none;
     keyboardState.processNextMidiBuffer (none, 0, 1, false);
@@ -146,6 +158,9 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     engine->reset();
     for (auto& channel : sentNotes)
         channel.fill (-1);
+    pedal = false;
+    pedalShown = false;
+    deferredOff.fill (false);
     const auto chunk = static_cast<size_t> (std::ceil (512.0 * std::max (1.0, ratio))) + 256;
     for (auto& f : fifo)
         f.assign (chunk, 0.0f);
@@ -177,13 +192,17 @@ int64_t Processor::engineTime (int hostOffset) const
 
 void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
 {
+    // M7: MPE expression on the member channels (off: everything is ordinary MIDI)
+    if (reader.mpe() && mpe.handle (m, when, *engine, reader.octaveShift(), reader.mpeBendRange(), sentNotes))
+        return;
     const int channel = juce::jlimit (1, 16, m.getChannel()) - 1;
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
-        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic) are
-        // fixed keys, whatever the Octave setting
-        if (m.getNoteNumber() >= 24 && m.getNoteNumber() <= 28)
+        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7:
+        // 29-32 Tremolo, Sautille, Portato, Col legno, 33-35 the contact point) are fixed keys,
+        // whatever the Octave setting
+        if (m.getNoteNumber() >= params::keyswitchFirst && m.getNoteNumber() <= params::keyswitchLast)
         {
             engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
             return;
@@ -193,9 +212,9 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
         if (pitch < 55 || pitch > 104)
             return;
         if (sent[static_cast<size_t> (m.getNoteNumber())] >= 0)
-            engine->noteOff (when, sent[static_cast<size_t> (m.getNoteNumber())]);
+            engineNoteOff (when, sent[static_cast<size_t> (m.getNoteNumber())]);
         sent[static_cast<size_t> (m.getNoteNumber())] = static_cast<std::int8_t> (pitch);
-        engine->noteOn (when, pitch, m.getVelocity());
+        engineNoteOn (when, pitch, m.getVelocity());
         lastVelocity = m.getVelocity();
     }
     else if (m.isNoteOff())
@@ -203,16 +222,129 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
         // the pitch it started on, even if Octave changed while it was held
         auto& s = sent[static_cast<size_t> (m.getNoteNumber())];
         if (s >= 0)
-            engine->noteOff (when, s);
+            engineNoteOff (when, s);
         s = -1;
     }
     else if (m.isAllNotesOff() || m.isAllSoundOff())
     {
         engine->allNotesOff (when);
         sent.fill (-1);
+        deferredOff.fill (false);
+    }
+    else if (m.isPitchWheel())
+    {
+        // M6: the wheel's full throw is Bend range semitones; the player bends the bowed notes
+        engine->controller (when, 128, (m.getPitchWheelValue() - 8192) / 8192.0 * reader.bendRange() * 100.0);
     }
     else if (m.isController())
-        engine->controller (when, m.getControllerNumber(), m.getControllerValue());
+    {
+        const int cc = m.getControllerNumber(), value = m.getControllerValue();
+        midiMap.noteIncoming (cc, value);
+        if (cc == 121)
+        {
+            // reset all controllers: the curves go back to the player, the pedal and bend centre
+            engine->controller (when, 121, value);
+            setPedal (false, when);
+        }
+        else
+            mappedController (cc, value, when);
+    }
+}
+
+// M6 ------------------------------------------------------------------------------------------
+o2::EngineSettings Processor::currentSettings() const
+{
+    auto e = reader.read();
+    e.tempo = hostBpm; // M7: tempo-synced tremolo (0 = no host tempo: free)
+    return e;
+}
+
+// The slur pedal (Slur everything, CC64 by default): while it is down a released note keeps
+// sounding until the next note starts, so every note overlaps the next and the player slurs it.
+// Lifting the pedal releases what is still sounding.
+void Processor::engineNoteOn (int64_t when, int pitch, double vel127)
+{
+    const auto p = static_cast<size_t> (pitch & 127);
+    if (deferredOff[p]) // the same note again: it ends first (a repeated note)
+    {
+        engine->noteOff (when, pitch);
+        deferredOff[p] = false;
+    }
+    engine->noteOn (when, pitch, vel127);
+    for (size_t k = 0; k < deferredOff.size(); ++k)
+        if (deferredOff[k])
+        {
+            engine->noteOff (when, static_cast<int> (k));
+            deferredOff[k] = false;
+        }
+}
+
+void Processor::engineNoteOff (int64_t when, int pitch)
+{
+    if (pedal)
+        deferredOff[static_cast<size_t> (pitch & 127)] = true;
+    else
+        engine->noteOff (when, pitch);
+}
+
+void Processor::setPedal (bool down, int64_t when)
+{
+    if (down == pedal)
+        return;
+    pedal = down;
+    pedalShown.store (down, std::memory_order_relaxed);
+    if (! down)
+        for (size_t k = 0; k < deferredOff.size(); ++k)
+            if (deferredOff[k])
+            {
+                engine->noteOff (when, static_cast<int> (k));
+                deferredOff[k] = false;
+            }
+}
+
+// A controller through the map: to the player (its own controller numbers), the slur pedal, or a
+// host parameter. A parameter's value is written where the engine reads it at once (this block)
+// and handed to the message thread, which tells the host and the editor (notifyMappedParameters).
+void Processor::mappedController (int cc, int value, int64_t when)
+{
+    midiMap.forEach (cc,
+                     value,
+                     [this, when] (int target, float x)
+                     {
+                         if (target == MidiMap::slurPedal)
+                             setPedal (x >= 0.5f, when);
+                         else if (target >= 0 && target < 128)
+                             engine->controller (when, target, x * 127.0);
+                         else if (target >= MidiMap::parameterBase)
+                         {
+                             const auto i = static_cast<size_t> (target - MidiMap::parameterBase);
+                             const auto& ps = AudioProcessor::getParameters();
+                             if (i >= rawValue.size() || rawValue[i] == nullptr || (int) i >= ps.size())
+                                 return;
+                             auto* r = static_cast<juce::RangedAudioParameter*> (ps[(int) i]);
+                             rawValue[i]->store (r->convertFrom0to1 (x));
+                             mappedValue[i].store (x, std::memory_order_relaxed);
+                             mappedDirty[i].store (true, std::memory_order_release);
+                             mappedChanged = true;
+                         }
+                     });
+}
+
+void Processor::notifyMappedParameters()
+{
+    const auto& ps = AudioProcessor::getParameters();
+    for (size_t i = 0; i < mappedDirty.size() && (int) i < ps.size(); ++i)
+        if (mappedDirty[i].exchange (false, std::memory_order_acquire))
+        {
+            auto* p = ps[(int) i];
+            const float v = mappedValue[i].load (std::memory_order_relaxed);
+            if (std::abs (p->getValue() - v) > 1e-7f)
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (v);
+                p->endChangeGesture();
+            }
+        }
 }
 
 void Processor::renderEngine (float* left, float* right, int numSamples)
@@ -250,11 +382,15 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     juce::ScopedNoDenormals noDenormals;
     const auto startTicks = juce::Time::getHighResolutionTicks();
     const int n = buffer.getNumSamples();
-    engine->setSettings (reader.read());
     if (auto* head = getPlayHead())
         if (const auto pos = head->getPosition())
             if (const auto bpm = pos->getBpm())
+            {
+                hostBpm = *bpm;
                 telemetry.bpm.store (static_cast<float> (*bpm));
+            }
+    engine->setSettings (currentSettings());
+    updateTuning();
 
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
@@ -262,12 +398,13 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
             const auto when = engineTime (0);
             if (e.velocity > 0.0f)
             {
-                engine->noteOn (when, e.note, e.velocity * 127.0f);
+                engineNoteOn (when, e.note, e.velocity * 127.0f);
                 lastVelocity = juce::roundToInt (e.velocity * 127.0f);
             }
             else
-                engine->noteOff (when, e.note);
+                engineNoteOff (when, e.note);
         });
+    mappedChanged = false;
     for (const auto metadata : midi)
     {
         if (metadata.numBytes > 3)
@@ -275,6 +412,8 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
         handleMidi (metadata.getMessage(), engineTime (metadata.samplePosition));
     }
     midi.clear();
+    if (mappedChanged) // M6: a mapped controller moved a parameter; it plays from this block
+        engine->setSettings (currentSettings());
 
     // in pieces, in case the host sends a block larger than it announced
     const bool stereo = buffer.getNumChannels() > 1;
@@ -331,6 +470,14 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     for (size_t k = 0; k < 4; ++k)
         T.stringForce[k].store (static_cast<float> (pl.st[k].force));
     juce::ignoreUnused (vn);
+    T.sliding.store (S.slideT0 >= 0.0);
+    T.slideFrom.store (static_cast<float> (S.slideFrom));
+    T.target.store (static_cast<float> (S.target));
+    T.changing.store (pl.changing);
+    T.dynMode.store (pl.manDyn ? 2 : 0);
+    T.vibMode.store (pl.ccVib >= 0.0 ? 2 : 0);
+    T.rateMode.store (pl.ccRate > 0.0 ? 2 : 0);
+    T.contactMode.store (pl.ccContact > 0.0 ? 2 : 0);
 
     const double now = engine->seconds();
     if (now >= nextHistoryT)
@@ -353,9 +500,99 @@ juce::AudioProcessorEditor* Processor::createEditor()
     return new Editor (*this);
 }
 
+// ---------------------------------------------------------------- M7 tuning
+void Processor::updateTuning()
+{
+    // a new Scala table from the message thread (never waits: tried again next block)
+    if (scalaChanged.load (std::memory_order_acquire))
+    {
+        const juce::SpinLock::ScopedTryLockType lock (tuningLock);
+        if (lock.isLocked())
+        {
+            scalaNow = pendingScala;
+            scalaChanged.store (false, std::memory_order_relaxed);
+        }
+    }
+    const int system = reader.intonation();
+    if (system == o2::intonScala && scalaNow.ok)
+        engine->setTuningTable (scalaNow.cents, ! scalaNow.hasKeyboardMap);
+    else if (system == o2::intonMts && mts != nullptr && MTS_HasMaster (mts))
+    {
+        // per sounding pitch, the master's retuning of the key that plays it
+        const int shift = 12 * reader.octaveShift();
+        for (int p = 0; p < 128; ++p)
+        {
+            const int key = p - shift;
+            mtsTable[p] = key >= 0 && key < 128 ? 100.0 * MTS_RetuningInSemitones (mts, (char) key, -1) : 0.0;
+        }
+        engine->setTuningTable (mtsTable, false);
+    }
+    else
+        engine->clearTuningTable();
+}
+
+juce::String Processor::loadScala (const juce::File& scl, const juce::File& kbm)
+{
+    if (! scl.existsAsFile())
+        return "file not found";
+    return loadScalaText (scl.getFileName(),
+                          scl.loadFileAsString(),
+                          kbm.existsAsFile() ? kbm.loadFileAsString() : juce::String());
+}
+
+juce::String Processor::loadScalaText (const juce::String& name, const juce::String& scl, const juce::String& kbm)
+{
+    auto tuning = o2::parseScala (scl.toStdString(), kbm.toStdString());
+    if (! tuning.ok)
+        return juce::String (tuning.error);
+    {
+        const juce::SpinLock::ScopedLockType lock (tuningLock);
+        pendingScala.ok = true;
+        pendingScala.hasKeyboardMap = tuning.hasKeyboardMap;
+        std::copy (std::begin (tuning.cents), std::end (tuning.cents), pendingScala.cents);
+        scalaChanged.store (true, std::memory_order_release);
+    }
+    // saved with the project (parameters.state is written by getStateInformation)
+    parameters.state.setProperty ("scalaName", name, nullptr);
+    parameters.state.setProperty ("scalaText", scl, nullptr);
+    parameters.state.setProperty ("kbmText", kbm, nullptr);
+    return {};
+}
+
+void Processor::clearScala()
+{
+    {
+        const juce::SpinLock::ScopedLockType lock (tuningLock);
+        pendingScala = TuningTable();
+        scalaChanged.store (true, std::memory_order_release);
+    }
+    for (auto* key : { "scalaName", "scalaText", "kbmText" })
+        parameters.state.removeProperty (key, nullptr);
+}
+
+juce::String Processor::getScalaName() const
+{
+    return parameters.state.getProperty ("scalaName").toString();
+}
+
+bool Processor::mtsHasMaster() const
+{
+    return mts != nullptr && MTS_HasMaster (mts);
+}
+
+juce::String Processor::mtsScaleName() const
+{
+    return mtsHasMaster() ? juce::String (MTS_GetScaleName (mts)) : juce::String();
+}
+
+// The state: the parameters (APVTS), the name of the preset they came from (property "preset")
+// and, from M6, the MIDI map as a child MIDIMAP (MidiMap::toTree).
 void Processor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (const auto xml = parameters.copyState().createXml())
+    auto state = parameters.copyState();
+    state.removeChild (state.getChildWithName (MidiMap::tag), nullptr);
+    state.appendChild (midiMap.toTree(), nullptr);
+    if (const auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -363,7 +600,20 @@ void Processor::setStateInformation (const void* data, int sizeInBytes)
 {
     const auto xml = getXmlFromBinary (data, sizeInBytes);
     if (xml != nullptr && xml->hasTagName (parameters.state.getType()))
-        parameters.replaceState (juce::ValueTree::fromXml (*xml));
+    {
+        auto state = juce::ValueTree::fromXml (*xml);
+        const auto map = state.getChildWithName (MidiMap::tag);
+        midiMap.fromTree (map); // none (saved before M6): the Octavio 2 map
+        state.removeChild (map, nullptr);
+        parameters.replaceState (state);
+        presets->restoreFromState();
+        // M7: the project's Scala tuning
+        const auto scl = parameters.state.getProperty ("scalaText").toString();
+        if (scl.isNotEmpty())
+            loadScalaText (getScalaName(), scl, parameters.state.getProperty ("kbmText").toString());
+        else
+            clearScala();
+    }
 }
 } // namespace octavio2
 

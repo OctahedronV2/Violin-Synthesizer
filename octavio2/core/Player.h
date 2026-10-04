@@ -210,7 +210,233 @@ struct PlayerParams
     double lhAmp = 0.6, lhTau = 0.25e-3, lhFromNut = 0.2;
     // harmonics: the light finger's resistance in units of the string's impedance
     double harmTouch = 1.0, harmForce = 0.3; // ... and the bow force on a harmonic, x the normal
+
+    // ---------------------------------------------------------------- M6 plugin controls
+    // The user's scales on top of the player's (and its style's) own settings. At their defaults
+    // (1, or 0 for the offsets) every result is bit-identical to the fitted player.
+    double slideScale = 1.0; // Portamento: shift slide time x this (0: clean shifts)
+    // String preference: -1 bright (low positions, higher strings) .. +1 dark (high positions on
+    // lower strings); scales the string-choice costs (greedy and planned)
+    double stringPref = 0.0;
+    double vibRateAdd = 0.0; // Hz added to every note's vibrato rate
+    double vibDelayScale = 1.0; // vibrato delay and bloom time x this
+    double accelScale = 1.0; // bow acceleration (bow changes, getting up to speed) x this
+    double shapeAmount = 1.0; // stroke shaping (detache speed and force release, end taper) x this
+    double biteScale = 1.0; // the extra force at the start of a stroke x this
+    double contactScale = 1.0; // the contact point's distance from the bridge x this
+    // ---------------------------------------------------------------- M7 player styles
+    // Terms the player styles (applyStyle below) turn on. The defaults are the Modern soloist,
+    // which is exactly the 2.1 player: every one of these is off.
+    // portamento: a note on the string the finger is already on (a leap of slideMin semitones or
+    // more, in reach of the hand, so 2.1 would just put the finger down) is slid into with chance
+    // slideProb, over slideTime x the shift's slide time
+    double slideProb = 0.0, slideMin = 3.0, slideTime = 1.0;
+    // an inflection: the finger lands scoop cents low and slides up over scoopTime s (chance
+    // scoopProb per stopped note; Maqam, fiddle and Hungarian ornaments)
+    double scoop = 0.0, scoopProb = 0.0, scoopTime = 0.08;
+    // landing error, cents (sd) of a stopped note; the ear takes 60% of it away over earFix s
+    double pitchError = 0.0, earFix = 0.3;
+    double openPenalty = 0.8; // string choice: an open string on a melody note costs this (Live)
+    double mdvPeak = 0.5; // where in a long note its swell peaks (0.5 the middle; later leans in)
+    // Expressive intonation: this share of the Pythagorean leaning (sharp leading tones and
+    // major thirds, flat minor ones, pure-fifth open strings) relative to the Key parameter
+    double intonAmount = 0.0;
+    // ---------------------------------------------------------------- M7 articulations and bow
+    // articulation (continued): 5 Tremolo, 6 Sautille, 7 Portato, 8 Col legno battuto; keyswitches
+    // keyswitchBase + 5 .. + 8 (MIDI 29-32, F1-G#1). contact: 0 ordinario, 1 sul ponticello,
+    // 2 sul tasto; keyswitches keyswitchBase + 9 .. + 11 (MIDI 33-35, A1-B1), latched separately so
+    // they combine with any bowed articulation (tremolo sul ponticello).
+    double contact = 0;
+    // tremolo: the bow reverses tremoloRate times a second (free), or synced to the host's tempo
+    // (tempo > 0, bpm): tremoloSync 1 = 16ths, 2 = 16th triplets, 3 = 32nds. Short strokes in the
+    // upper half (tremoloHair of the bow from the frog), each reversal a fresh catch (tremoloBite)
+    double tremoloRate = 12.0, tremoloSync = 0, tempo = 0.0, tremoloHair = 0.7, tremoloBite = 0.15;
+    // sautille: one stroke per note at the balance point (sautHair), the stick bouncing: the force
+    // swings between sautFloor and full once per stroke (a half sine), the stroke no longer than
+    // sautLen m; the bounce period follows the notes (sautMin .. sautMax s)
+    double sautHair = 0.38, sautFloor = 0.25, sautLen = 0.035, sautMin = 0.05, sautMax = 0.16;
+    // portato (loure): notes joined in one bow, each with a pulse: the bow eases to portRest of its
+    // speed between notes (for up to portGap s after a note-off), then each note swells in
+    // (from portDip to 1 + portSwell, rise portRise s, decay portDecay s)
+    double portGap = 0.35, portRest = 0.12, portDip = 0.45, portSwell = 0.15, portRise = 0.04, portDecay = 0.15;
+    // col legno battuto: the stick's speed at pp .. ff (m/s), contact time (s), struck clMM from
+    // the bridge, the wood's click (N at ff)
+    double clSpeedPP = 0.25, clSpeedFF = 1.6, clContact = 0.0006, clMM = 30.0, clKnock = 2.0;
+    // contact overrides: mm from the bridge, and the pressure moved in the window (sul ponticello
+    // is played light, the bow nearly on the bridge: glassy upper partials; sul tasto over the
+    // end of the fingerboard: soft, flute-like)
+    // and the bow speed (x): less bow near the bridge (the string swings wider there for the same
+    // speed), more over the fingerboard (flautando)
+    double pontMM = 7.0, pontPress = -0.12, pontSpeed = 0.6, tastoMM = 72.0, tastoPress = -0.08, tastoSpeed = 1.4;
+    // bow (Tone tab): the tip's lightness (force x 1 - tipLight * hair fraction: a baroque bow is
+    // light at the tip and the player lets it be) and the lift-off stroke (a separate note dies
+    // away by liftStroke of its speed, time constant liftTau: every stroke breathes). 0 = modern.
+    double tipLight = 0.0, liftStroke = 0.0, liftTau = 0.35;
 };
+
+// M7: the player styles, in the order of the Player Style parameter (append only)
+enum PlayerStyle : int
+{
+    styleModern,
+    styleRomantic,
+    styleHungarian,
+    styleBaroque,
+    styleMaqam,
+    styleFiddle,
+    styleStudent,
+    styleCount
+};
+
+// A style is a set of offsets on the automation layer only (tone presets stay separate), applied
+// to the user's own settings. Modern soloist leaves them as they are. Tuned by ear-proxy against
+// the renderer (octavio-2/2.2/m7-player clips): each moves only what its players are known for.
+inline void applyStyle (PlayerParams& p, int style)
+{
+    switch (style)
+    {
+        case styleRomantic: // slow, wide vibrato; more and slower slides; deep swells, broad arcs
+            p.vibRate -= 0.5;
+            p.vibWidthLo *= 1.3;
+            p.vibWidthHi *= 1.35;
+            p.vibDelay *= 0.7;
+            p.vibBloom *= 1.3;
+            p.shiftBase *= 1.8;
+            p.shiftPerSemi *= 1.8;
+            p.shiftLighten = 0.3;
+            p.slideProb = 0.45;
+            p.slideTime = 1.6;
+            p.mdvDepth *= 1.8;
+            p.mdvMin *= 0.8;
+            p.mdvPeak = 0.6; // leans into the note: the swell peaks late (agogic within the note)
+            p.phraseArc *= 1.4;
+            p.agogic *= 2.0;
+            p.highLoud *= 1.3;
+            p.intonAmount = 0.5;
+            break;
+        case styleHungarian: // bite, fast intense vibrato that blooms at once, quick ornamental slides
+            p.bite *= 2.0;
+            p.biteFF *= 1.6;
+            p.restAccent *= 1.8;
+            p.stress *= 2.0;
+            p.vibRate += 0.8; // ~6.7 Hz and ~40 cents at f: fast and intense, but still a violinist's
+            p.vibRateDyn += 0.3;
+            p.vibWidthLo *= 1.2;
+            p.vibWidthHi *= 1.15;
+            p.vibWander = 0.25; // and alive: no two notes the same
+            p.vibDelay *= 0.35;
+            p.vibBloom *= 0.4;
+            p.vibGrowStart = 0.8;
+            p.shiftBase *= 0.8;
+            p.shiftPerSemi *= 0.8;
+            p.slideProb = 0.35;
+            p.slideTime = 0.9;
+            p.scoop = 35.0;
+            p.scoopProb = 0.2;
+            p.scoopTime = 0.06;
+            p.phraseArc *= 1.2;
+            p.intonAmount = 0.7;
+            break;
+        case styleBaroque: // little vibrato (an ornament on long notes), messa di voce, light, articulated
+            p.vibWidthLo *= 0.25;
+            p.vibWidthHi *= 0.35;
+            p.vibDelay = 0.45;
+            p.vibBloom *= 1.5;
+            p.vibGrowStart = 0.2;
+            p.mdvDepth *= 2.5;
+            p.mdvMin = 0.4;
+            p.mdvFull = 1.0;
+            p.posRange *= 0.75; // lighter strokes: lower in the Schelleng window
+            p.biteFF *= 0.6;
+            p.speedFF *= 0.85;
+            p.strokeTaper = 0.3;
+            p.taperDepth = 0.8; // more space between notes
+            p.stopBelow = 0.8;
+            p.phraseArc *= 0.8;
+            p.stress *= 1.5;
+            p.costHigh *= 1.5; // low positions, open strings welcome
+            p.openPenalty = 0.3;
+            p.costOpen *= 0.4;
+            p.intonAmount = 1.0;
+            break;
+        case styleMaqam: // slides and inflections between degrees, moderate vibrato
+            p.slideProb = 0.6;
+            p.slideMin = 2.0;
+            p.slideTime = 1.4;
+            p.scoop = 45.0;
+            p.scoopProb = 0.35;
+            p.scoopTime = 0.11;
+            p.vibWidthHi *= 0.8;
+            p.vibRate += 0.3;
+            p.vibDelay *= 1.4;
+            p.mdvDepth *= 1.3;
+            break;
+        case styleFiddle: // light short bows, open strings, little vibrato, rhythmic bite, slides into notes
+            p.posRange *= 0.9;
+            p.bite *= 1.8;
+            p.stress *= 2.5;
+            p.restAccent *= 1.4;
+            p.strokeTaper = 0.28;
+            p.taperDepth = 0.75;
+            p.speedFF *= 0.9;
+            p.vibWidthLo *= 0.4;
+            p.vibWidthHi *= 0.45;
+            p.vibDelay = 0.3;
+            p.openPenalty = 0.2; // takes the ringing open string far more often
+            p.costOpen = 0.2;
+            p.costHigh *= 2.0;
+            p.scoop = 40.0;
+            p.scoopProb = 0.25;
+            p.scoopTime = 0.07;
+            p.phraseArc *= 0.6;
+            p.mdvDepth *= 0.5;
+            p.intonAmount = 0.5;
+            break;
+        case styleStudent: // pitch error, slow bow changes, scratchy, irregular vibrato
+            p.pitchError = 14.0;
+            p.accel *= 0.5;
+            p.accelFF *= 0.5;
+            p.changeDip = 0.75;
+            p.posRange *= 1.45; // pressing: high in the Schelleng window, scratchier
+            p.earUp *= 0.4; // and slower to hear it
+            p.earMax = 1.4;
+            p.vibWander = 0.35;
+            p.vibRate += 0.5;
+            p.vibWidthHi *= 0.8;
+            p.vibDelay *= 1.5;
+            p.shiftBase *= 2.0;
+            p.shiftLighten = 0.05;
+            p.phraseArc *= 0.5;
+            p.mdvDepth *= 0.4;
+            break;
+        default:
+            break;
+    }
+}
+
+// M7 intonation systems, in the order of the Intonation parameter (append only)
+enum Intonation : int
+{
+    intonExpressive,
+    intonEqual,
+    intonJust,
+    intonPythagorean,
+    intonScala,
+    intonMts,
+    intonCount
+};
+
+// cents from 12-TET of each degree above the tonic: 5-limit just and Pythagorean (fifths -5..+6)
+inline double justCents (int degree)
+{
+    static constexpr double c[12]
+        = { 0.0, 11.73, 3.91, 15.64, -13.69, -1.96, -9.78, 1.96, 13.69, -15.64, -3.91, -11.73 };
+    return c[((degree % 12) + 12) % 12];
+}
+inline double pythagoreanCents (int degree)
+{
+    static constexpr double c[12] = { 0.0, -9.78, 3.91, -5.87, 7.82, -1.96, 11.73, 1.96, -7.82, 5.87, -3.91, 9.78 };
+    return c[((degree % 12) + 12) % 12];
+}
 
 struct Player
 {
@@ -256,6 +482,7 @@ struct Player
     bool shaped = false, quick = false;
     double expr = 1.0, exprTarget = 1.0, centsTrim = 0.0, pressTrim = 0.0, biteTrim = 0.0, vibScale = 1.0,
            vibEnd = -1.0;
+    double bendCents = 0.0; // M6: channel pitch bend (the plugin's controller 128, in cents)
     // the stroke shape in use (set at each new stroke from the normal or the quick settings)
     double fSus = 1, fTau = 0.1, fHold = 0, sSus = 1, sTau = 0.1, stF = 1, stT = 0.04, stA = 25, stD = 0;
     double lastVel = 64.0;
@@ -289,6 +516,11 @@ struct Player
     double pendingOff = -1.0; // Legato: the bow keeps going this long after the last note-off
     bool cutDone = false;
     double dEff() const { return std::clamp (d + dEnv, 0.0, 1.0); }
+    // M6 Stroke shaping: a sustain level (1 = no release) moved away from 1 by pp.shapeAmount
+    double shapedSus (double sus) const
+    {
+        return pp.shapeAmount == 1.0 ? sus : std::clamp (1.0 - (1.0 - sus) * pp.shapeAmount, 0.05, 1.0);
+    }
     // drawn curves (CC lanes) that have taken over a dimension; -1 / false = the player's own
     bool manDyn = false;
     double ccDyn = 0.6, ccVib = -1.0, ccRate = -1.0, ccContact = -1.0;
@@ -318,6 +550,9 @@ struct Player
         bool captured = true;
         int earHigh = 0;
         double earT = 0.0;
+        // M7: MPE per-note bend (cents), a landing error the ear corrects (cents), an inflection slide
+        double mpeBend = 0.0, err = 0.0;
+        bool scooping = false;
     } st[4];
 
     // hand position: semitones above the open string where the first finger sits. A position
@@ -337,6 +572,8 @@ struct Player
             st[i].pitch = st[i].target = openPitch[i];
             st[i].fScale = 1.0;
         }
+        for (auto& p : mpePressFor) // M7: no MPE pressure yet
+            p = -1.0;
     }
 
     double dynFromVel (double vel127) const
@@ -346,6 +583,15 @@ struct Player
     }
 
     // ---------------------------------------------------------------- string choice
+    // M6 String preference (pp.stringPref) as weights on the costs: 1, 1, 0 at the default
+    // (on a square-root scale: the greedy choice holds a position until a cost tips it over, so
+    // the first half of the knob would do little on a linear one)
+    double prefK() const { return pp.stringPref < 0.0 ? -std::sqrt (-pp.stringPref) : std::sqrt (pp.stringPref); }
+    double prefSemi() const { return 1.0 - 0.9 * prefK(); }
+    double prefHigh() const { return std::pow (6.0, -prefK()); }
+    double prefString (int s) const { return 0.9 * prefK() * (double) s; }
+    // bright still keeps long notes off open strings (they ring much louder than a stopped note)
+    double prefOpen() const { return 1.0 + 1.5 * std::max (0.0, -prefK()); }
     int chooseString (int pitch, int avoid1 = -1, int avoid2 = -1) const
     {
         if (m5String >= 0) // M5: a harmonic's string, picked by m5Harmonic
@@ -360,14 +606,16 @@ struct Player
             const double top = s == 3 ? 28 : 16;
             if (semis < 0 || semis > top)
                 continue;
-            double c = 0.12 * semis + 0.6 * std::max (0.0, semis - 7.0);
+            double c = 0.12 * semis * prefSemi() + 0.6 * prefHigh() * std::max (0.0, semis - 7.0) + prefString (s);
             c += 0.9 * std::abs (s - lastString);
             if (semis > 0)
                 c += inReach (semis)
                     ? 0.0
                     : 0.6 + 0.1 * std::min (std::abs (semis - handPos), std::abs (semis - handPos - 5.0));
             if (semis == 0 && pitch != 55)
-                c += 0.8; // open strings can't vibrate: a violinist mostly stops the note
+                c += pp.openPenalty * prefOpen(); // open strings can't vibrate: a violinist mostly stops the note
+            if (tuneOn)
+                c += m7OpenCost (s, pitch); // M7: an open string out of tune with the system
             if (c < bestCost)
             {
                 bestCost = c;
@@ -393,9 +641,11 @@ struct Player
     double placeCost (int s, int pitch, double dur) const
     {
         const double semis = pitch - openPitch[s];
-        double c = 0.12 * semis + pp.costHigh * std::max (0.0, semis - 7.0);
+        double c = 0.12 * semis * prefSemi() + pp.costHigh * prefHigh() * std::max (0.0, semis - 7.0) + prefString (s);
         if (semis == 0 && pitch != 55) // an open string can't vibrate: avoided on expressive notes
-            c += dur <= 0.0 || dur > 0.25 ? pp.costOpen : 0.15 * pp.costOpen;
+            c += (dur <= 0.0 || dur > 0.25 ? pp.costOpen : 0.15 * pp.costOpen) * prefOpen();
+        if (tuneOn)
+            c += m7OpenCost (s, pitch);
         return c;
     }
     // moving from string s0 (hand at hp0) to pitch on s after gap seconds of rest
@@ -588,7 +838,10 @@ struct Player
         {
             const double depth = pp.mdvDepth * pp.phrase
                 * std::clamp ((len - pp.mdvMin) / std::max (0.05, pp.mdvFull - pp.mdvMin), 0.0, 1.0);
-            dEnv = depth * (std::sin (pi * std::clamp (age / len, 0.0, 1.0)) - 0.4);
+            double u = std::clamp (age / len, 0.0, 1.0);
+            if (pp.mdvPeak != 0.5) // M7: the swell peaks at mdvPeak of the note
+                u = std::pow (u, std::log (0.5) / std::log (std::clamp (pp.mdvPeak, 0.1, 0.9)));
+            dEnv = depth * (std::sin (pi * u) - 0.4);
         }
         else if (len <= 0.0 && age > 0.3)
         {
@@ -604,8 +857,11 @@ struct Player
         if (ccContact > 0.0)
             return ccContact;
         const double L = stringLength * std::pow (2.0, -(st[s].pitch - openPitch[s]) / 12.0);
+        if (const double mm = m7ContactMM(); mm > 0.0) // M7: sul ponticello, sul tasto
+            return std::clamp (mm * 1e-3 / L, 0.02, 0.3);
         // on a shorter (stopped) string the player moves the bow towards the bridge too
-        const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow);
+        const double c = contactMM * (quick ? pp.quickContact : 1.0) * std::pow (L / stringLength, pp.contactFollow)
+            * pp.contactScale * mpeContact;
         return std::clamp (c * 1e-3 / L, 0.02, 0.3);
     }
 
@@ -616,7 +872,9 @@ struct Player
         const double fMax = pp.cUpper * speed / beta * z;
         const double fMin = pp.cLower * speed / (beta * beta) * z * z;
         const double p
-            = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim, 0.02, 0.95);
+            = std::clamp (pp.posLo + pp.posRange * dEff() + (quick ? pp.quickP : 0.0) + pressTrim + m7Press(),
+                          0.02,
+                          0.95);
         return std::min (pp.forceCap, std::exp ((1 - p) * std::log (fMin) + p * std::log (fMax)));
     }
 
@@ -639,10 +897,12 @@ struct Player
     void setStroke (double vel127, bool jump = true)
     {
         dTarget = manDyn ? ccDyn : std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
+        if (mpeDyn >= 0.0 && ! manDyn) // M7: MPE pressure is the note's dynamics
+            dTarget = mpeDyn;
         if (jump)
             d = dTarget;
         applyDyn();
-        accel = pp.accel + (pp.accelFF - pp.accel) * dTarget;
+        accel = (pp.accel + (pp.accelFF - pp.accel) * dTarget) * pp.accelScale;
     }
     void applyDyn()
     {
@@ -655,27 +915,41 @@ struct Player
     {
         Str& S = st[s];
         const double semis = pitch - openPitch[s];
-        const double from = S.lifted ? openPitch[s] : S.pitch;
-        const double jump = std::abs (pitch - from);
+        const double from = S.lifted ? openTuned (s) : S.pitch;
+        const double tp = semis == 0 ? openTuned (s) : tunedPitch (pitch); // M7: the system's pitch
+        const double jump = std::abs (tp - from);
         // a shift: same string, finger already down, the hand moves more than a tone
         // a shift: the note is out of the hand's reach (the finger slides on this string if one is down)
         const bool outOfReach = semis > 0 && ! inReach (semis);
         const bool pre = preDone && s == preString && pitch == prePitch; // slid there already (Studio)
         const bool shift = ! pre && ! S.lifted && outOfReach && jump > 1.0;
-        S.target = pitch;
+        S.target = tp;
+        S.scooping = false;
+        m7Note (S, pitch, semis);
         if (shift)
         {
             S.slideFrom = S.pitch;
             S.slideT0 = t;
-            S.slideDur = pp.shiftBase + pp.shiftPerSemi * jump;
+            S.slideDur = std::max (0.004, (pp.shiftBase + pp.shiftPerSemi * jump) * pp.slideScale);
         }
         else if (pre) // a planned shift's slide carries on to the note; the ear starts afresh
             vn->s[s].fingerCents = 0.0;
+        else if (pp.slideProb > 0.0 && m7Portamento (S, semis, jump))
+            S.slideDur = (pp.shiftBase + pp.shiftPerSemi * jump) * pp.slideTime; // M7: slid though in reach
         else
         {
             S.slideT0 = -1.0;
-            S.pitch = pitch;
-            vn->s[s].setNote (pitch);
+            S.pitch = tp;
+            if (pp.scoop > 0.0 && semis > 0 && 0.5 + 0.5 * rng.uni() < pp.scoopProb)
+            {
+                // M7: an inflection, the finger lands low and slides up into the note
+                S.pitch = tp - pp.scoop / 100.0;
+                S.slideFrom = S.pitch;
+                S.slideT0 = t;
+                S.slideDur = pp.scoopTime;
+                S.scooping = true;
+            }
+            vn->s[s].setNote (S.pitch);
             S.setPitchAt = t;
         }
         if (outOfReach) // the hand moves: up, the note under the third finger; down, under the first
@@ -695,7 +969,7 @@ struct Player
         S.wanderW = pp.vibWander * rng.gauss() * 0.5;
         S.rateAdd = pp.vibRateHigh * std::clamp (semis / 12.0, 0.0, 1.5);
         S.vibWidthTarget *= 1.0 + pp.vibStress * noteWeight;
-        S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR);
+        S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd) * (1.0 + S.wanderR);
     }
 
     // ---------------------------------------------------------------- M4: note decisions
@@ -725,7 +999,9 @@ struct Player
         preT = t + a.dt;
         prePitch = a.pitch;
         preString = s;
-        preDur = std::min (0.6 * a.dt, pp.shiftBase + pp.shiftPerSemi * std::abs (a.pitch - pitch));
+        preDur = std::min (
+            0.6 * a.dt,
+            std::max (0.004, (pp.shiftBase + pp.shiftPerSemi * std::abs (a.pitch - pitch)) * pp.slideScale));
     }
 
     // the stroke's articulation: the Bow style override, or inferred from length and gap (Auto)
@@ -783,6 +1059,8 @@ struct Player
     {
         if (m5NoteOn (pitch, vel127)) // M5: keyswitches, plucked and harmonic notes
             return;
+        m7NoteOn (pitch);
+        m7ArticulationNoteOn(); // M7: tremolo, sautille, portato
         const bool anyHeld = nHeld > 0;
         const bool chord = anyHeld && (t - held[nHeld - 1].on) < pp.chordWindow;
         const int style = (int) pp.bowStyle;
@@ -814,7 +1092,8 @@ struct Player
                 st[s].landAt = t;
         }
         const bool rebow = anyHeld && ! chord
-            && (style == 2 || style >= 3 || cutDone || (pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
+            && (style == 2 || style >= 3 || cutDone || m7Mode == artSautille
+                || (pp.slurMaxNotes > 0 && slurNotes + 1 >= pp.slurMaxNotes)
                 || (pp.slurMaxTime > 0 && t - strokeStart > pp.slurMaxTime)
                 || (pp.slurAccent > 0 && vel127 - lastVel >= pp.slurAccent));
         if (rebow)
@@ -839,7 +1118,10 @@ struct Player
             noteNow = pitch;
             const double dNew = std::clamp (dynFromVel (vel127) + phraseOff, 0.0, 1.0);
             dTarget = manDyn ? ccDyn : (1.0 - pp.slurFollow) * d + pp.slurFollow * dNew;
+            if (mpeDyn >= 0.0 && ! manDyn) // M7: MPE pressure is the note's dynamics
+                dTarget = mpeDyn;
             nHeld = 0; // slurred-over notes no longer sound
+            m7PulseAt = t; // M7: a portato note's pulse
         }
         else
         {
@@ -862,6 +1144,7 @@ struct Player
             noteNow = pitch;
             setStroke (vel127);
             chooseArt (style, vel127);
+            m7Stroke(); // M7: where the stroke starts, the bounce or reversal timing
             const bool bowMoving = std::abs (v) > 0.01;
             if (bowMoving && strokeStart >= 0.0)
             {
@@ -939,6 +1222,13 @@ struct Player
     // 10 ms per step (0 = it doesn't), replacing vibTaper.
     void controller (int cc, double v127)
     {
+        // M6: pitch bend arrives as controller 128, its value in cents (the plugin scales it by
+        // the Bend range parameter); CC121 below centres it again
+        if (cc == 128)
+        {
+            bendCents = v127;
+            return;
+        }
         if (cc == 11)
             exprTarget = std::pow (10.0, (v127 - 100.0) * 0.4 / 20.0);
         else if (cc == 21)
@@ -972,6 +1262,7 @@ struct Player
         {
             manDyn = false;
             ccVib = ccRate = ccContact = -1.0;
+            bendCents = 0.0; // M6
         }
     }
 
@@ -1009,6 +1300,8 @@ struct Player
         {
             lastOffT = t;
             if (cutDone) // the stroke already ended (staccato, martele, spiccato)
+                return;
+            if (m7NoteOff()) // M7: portato waits in the bow for the next note, sautille lifts
                 return;
             if ((int) pp.bowStyle == 1 && pp.legatoGap > 0.0)
             {
@@ -1072,13 +1365,14 @@ struct Player
                 S.slideFrom = S.pitch;
                 S.slideT0 = t;
                 S.slideDur = preDur;
-                S.target = prePitch;
+                S.target = tunedPitch (prePitch);
                 preDone = true;
             }
             else
                 preT = -1.0;
         }
         updateEnvelope (lastString);
+        m7Tick(); // M7: tremolo reversals
         // bow budget: change bow before the hair runs out
         if (! releasing && nHeld > 0)
         {
@@ -1101,7 +1395,10 @@ struct Player
         const double balance[4] = { pp.speedG, pp.speedD, pp.speedA, pp.speedE };
         double shape = 1.0;
         if (shaped)
-            shape = sSus + (1.0 - sSus) * std::exp (-(t - strokeStart) / sTau);
+        {
+            const double sus = shapedSus (sSus);
+            shape = sus + (1.0 - sus) * std::exp (-(t - strokeStart) / sTau);
+        }
         expr += (exprTarget - expr) * std::min (1.0, dt / 0.015);
         if (pp.strokeTaper > 0.0 && strokeLen > 0.0 && nHeld > 0)
         {
@@ -1109,11 +1406,14 @@ struct Player
             const double down = std::clamp ((age - (strokeLen - taper)) / taper, 0.0, 1.0);
             const double up = std::clamp ((age - strokeLen - 0.05) / 0.2, 0.0, 1.0); // the note goes on
             const double k = down * down * (3 - 2 * down) * (1.0 - up * up * (3 - 2 * up));
-            shape *= 1.0 - pp.taperDepth * k;
+            shape *= 1.0 - std::min (0.95, pp.taperDepth * pp.shapeAmount) * k;
         }
+        shape *= m7Shape(); // M7: portato pulses, the baroque bow's lift-off stroke (1 otherwise)
         vTarget = dir * V * shape * balance[lastString] * expr;
         if (strokeCap > 0.0 && std::abs (vTarget) > strokeCap)
             vTarget *= std::max (0.5, strokeCap / std::abs (vTarget));
+        if (m7VCap > 0.0 && std::abs (vTarget) > m7VCap) // M7: sautille's short strokes
+            vTarget = vTarget > 0 ? m7VCap : -m7VCap;
         if (pp.budgetSoft > 0.0 && ! releasing && nHeld > 0)
         {
             // slow down in time for the end of the hair
@@ -1139,7 +1439,7 @@ struct Player
                 releasing = true;
             }
         }
-        const double a = (stopping ? stA : accel) * dt;
+        const double a = (stopping ? stA : std::max (accel, m7AccelMin)) * dt;
         v += std::clamp (vTarget - v, -a, a);
         if (changing && std::abs (v - vTarget) < 1e-4)
             changing = false;
@@ -1154,16 +1454,23 @@ struct Player
             {
                 const double u = (t - S.slideT0) / S.slideDur;
                 if (u >= 1.0)
+                {
                     S.slideT0 = -1.0;
+                    S.scooping = false;
+                }
                 else
                     pitch = S.slideFrom + (S.target - S.slideFrom) * 0.5 * (1.0 - std::cos (pi * u));
             }
+            if (S.bowed)
+                pitch += bendCents / 100.0; // M6: pitch bend moves the bowed notes
+            if (S.mpeBend != 0.0 || S.err != 0.0) // M7: MPE bend, landing error the ear is correcting
+                pitch += m7PitchAdd (S);
             const bool sliding = S.slideT0 >= 0.0;
             if (S.vibWidthTarget > 0.0 && S.bowed)
             {
                 const double age = t - S.noteOn;
-                const double q = S.vibSqueeze, delay = pp.vibDelay * q;
-                const double env = std::clamp ((age - delay) / (pp.vibBloom * q), 0.0, 1.0);
+                const double q = S.vibSqueeze, delay = pp.vibDelay * pp.vibDelayScale * q;
+                const double env = std::clamp ((age - delay) / (pp.vibBloom * pp.vibDelayScale * q), 0.0, 1.0);
                 double w = S.vibWidthTarget * vibScale * pp.vibAmount * (1.0 + S.wanderW) * env * env * (3 - 2 * env);
                 w *= std::min (pp.vibGrowMax, pp.vibGrowStart + pp.vibGrow * std::max (0.0, age - delay));
                 const double taper = (vibEnd >= 0.0 ? vibEnd : pp.vibTaper) * q;
@@ -1180,7 +1487,8 @@ struct Player
                 {
                     S.vibPhase -= 2 * pi;
                     // per-cycle wander: no two cycles alike
-                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd) * (1.0 + S.wanderR + 0.04 * rng.gauss());
+                    S.vibRate = (pp.vibRate + pp.vibRateDyn * d + S.rateAdd + pp.vibRateAdd)
+                        * (1.0 + S.wanderR + 0.04 * rng.gauss());
                     if (ccRate > 0.0)
                         S.vibRate = ccRate;
                 }
@@ -1200,8 +1508,8 @@ struct Player
             else if (! S.lifted && t - S.lastBowed > pp.liftAfter && nHeld > 0)
             {
                 S.lifted = true;
-                S.target = S.pitch = openPitch[s];
-                vn->s[s].setNote (openPitch[s]);
+                S.target = S.pitch = openTuned (s);
+                vn->s[s].setNote (S.pitch);
                 S.dampEnv = 1.0;
             }
             S.dampEnv *= std::exp (-dt / pp.liftDampTime);
@@ -1223,15 +1531,20 @@ struct Player
                 ft = forceFor (s, std::max (std::abs (v), 0.3 * V * balance[s]));
                 ft *= 1.0 + pp.crossBite * std::exp (-(t - S.landAt) / pp.crossBiteTime);
                 const double age = t - strokeStart;
-                ft *= 1.0 + (pp.bite + pp.biteFF * d * d + biteTrim + strokeBite) * std::exp (-age / pp.biteTime);
+                ft *= 1.0
+                    + ((pp.bite + pp.biteFF * d * d) * pp.biteScale + biteTrim + strokeBite * pp.biteScale)
+                        * std::exp (-age / pp.biteTime);
                 if (changing)
                     ft *= 1.0 - pp.changeDip * (1.0 - std::min (1.0, std::abs (v) / std::max (1e-3, V)));
-                if (sliding)
+                if (sliding && ! S.scooping)
                     ft *= 1.0 - pp.shiftLighten;
                 if (stopping)
                     ft *= stF;
                 if (shaped && age > fHold)
-                    ft *= fSus + (1.0 - fSus) * std::exp (-(age - fHold) / fTau);
+                {
+                    const double sus = shapedSus (fSus);
+                    ft *= sus + (1.0 - sus) * std::exp (-(age - fHold) / fTau);
+                }
             }
             // listening: every few ms compare the slip rate with the note's frequency
             if (S.bowed && ! releasing && S.force > 0.0)
@@ -1272,6 +1585,8 @@ struct Player
                 S.ear += (1.0 - S.ear) * std::min (1.0, dt / pp.earRelax);
             }
             ft *= m5Force (s); // M5: light bow on a harmonic
+            if (S.bowed && ! releasing)
+                ft *= m7Force(); // M7: sautille's bounce, tremolo's catches, the baroque bow's light tip
             S.forceTarget = S.bowed ? std::max (ft, S.forceTarget * 0.0) : 0.0;
             const double tau = releasing ? relTime : (S.bowed ? (S.force < 1e-4 ? pp.landTime : 0.01) : pp.crossTime);
             S.force += (ft - S.force) * std::min (1.0, dt / tau);
@@ -1284,6 +1599,136 @@ struct Player
             vn->s[s].widthScale = pp.tiltPP + (1.0 - pp.tiltPP) * d;
         }
         t += dt;
+    }
+
+    // ================================================================ M7 intonation, styles, MPE
+    // Intonation: cents on top of 12-TET at A440 for each MIDI note (tuneTable) and each open
+    // string (openCents), set by setTuning. tuneOn false (Expressive with no leaning at A440,
+    // the default) leaves every pitch exactly as 2.1 played it.
+    bool tuneOn = false;
+    double tuneTable[128] = {};
+    double openCents[4] = {};
+    // MPE: per pitch, the bend (cents) and pressure (dynamics 0..1, -1 none) the note's channel
+    // carries, and the bow's contact scale from the latest note's timbre (CC74)
+    double mpeBendFor[128] = {};
+    double mpePressFor[128] = {}; // -1 from init()
+    double mpeTimbreFor[128] = {};
+    double mpeDyn = -1.0, mpeContact = 1.0;
+
+    double tunedPitch (int pitch) const { return tuneOn ? pitch + tuneTable[pitch & 127] / 100.0 : (double) pitch; }
+    double openTuned (int s) const { return tuneOn ? openPitch[s] + openCents[s] / 100.0 : openPitch[s]; }
+    // an open string more than 4 cents from the system's pitch for its note is stopped instead
+    double m7OpenCost (int s, int pitch) const
+    {
+        return pitch == (int) openPitch[s] && pitch != 55 && std::abs (tuneTable[pitch & 127] - openCents[s]) > 4.0
+            ? 2.0
+            : 0.0;
+    }
+
+    // system: Intonation; key: tonic pitch class (0 = C); a4: Hz; amount: Expressive leaning
+    // (PlayerParams::intonAmount); table: cents per MIDI note for Scala / MTS-ESP (else unused);
+    // tableTransposes: the A4 setting moves the table too (a Scala file without a keyboard map).
+    void setTuning (int system, int key, double a4, double amount, const double* table, bool tableTransposes)
+    {
+        double a4c = 1200.0 * std::log2 (std::clamp (a4, 300.0, 600.0) / 440.0);
+        if (std::abs (a4c) < 0.01)
+            a4c = 0.0;
+        const bool ext = (system == intonScala || system == intonMts) && table != nullptr;
+        tuneOn = a4c != 0.0 || system == intonJust || system == intonPythagorean || ext
+            || (system == intonExpressive && amount > 0.0);
+        if (! tuneOn)
+            return;
+        // A stays at the A4 setting: the tonic moves instead (as a violinist tunes to the A)
+        const int aDeg = 9 - key;
+        for (int n = 0; n < 128; ++n)
+        {
+            const int deg = n - key;
+            double c = a4c;
+            if (ext)
+                c = table[n] + (tableTransposes ? a4c : 0.0);
+            else if (system == intonJust)
+                c += justCents (deg) - justCents (aDeg);
+            else if (system == intonPythagorean)
+                c += pythagoreanCents (deg) - pythagoreanCents (aDeg);
+            else if (system == intonExpressive)
+                c += amount * (pythagoreanCents (deg) - pythagoreanCents (aDeg));
+            tuneTable[n] = c;
+        }
+        // open strings in pure fifths from the A (Scala / MTS-ESP: as the scale says)
+        static constexpr double fifths[4] = { -3.91, -1.96, 0.0, 1.96 };
+        for (int s = 0; s < 4; ++s)
+            openCents[s] = ext         ? tuneTable[(int) openPitch[s]]
+                : system == intonEqual ? a4c
+                                       : a4c + (system == intonExpressive ? amount : 1.0) * fifths[s];
+    }
+    // after the open strings were retuned: a string ringing open takes its new pitch
+    void retuneOpen (int s)
+    {
+        Str& S = st[s];
+        if (S.lifted && S.slideT0 < 0.0)
+        {
+            S.target = S.pitch = openTuned (s);
+            vn->s[s].setNote (S.pitch);
+        }
+    }
+
+    // a new note's MPE expression (set by the host before its note-on) and the landing error
+    void m7NoteOn (int pitch)
+    {
+        mpeDyn = mpePressFor[pitch & 127];
+        if (mpeTimbreFor[pitch & 127] > 0.0)
+            mpeContact = mpeTimbreFor[pitch & 127];
+    }
+    void m7Note (Str& S, int pitch, double semis)
+    {
+        S.mpeBend = mpeBendFor[pitch & 127];
+        S.err = pp.pitchError > 0.0 && semis > 0 ? pp.pitchError * rng.gauss() : 0.0;
+    }
+    double m7PitchAdd (const Str& S) const
+    {
+        double c = S.mpeBend;
+        if (S.err != 0.0)
+            c += S.err * (0.4 + 0.6 * std::exp (-(t - S.noteOn) / std::max (0.01, pp.earFix)));
+        return c / 100.0;
+    }
+    // portamento into a note the hand can reach, on the string the finger is already on
+    bool m7Portamento (Str& S, double semis, double jump)
+    {
+        if (S.lifted || semis <= 0 || jump < pp.slideMin - 0.3 || t - S.lastBowed > 0.15 || S.noteOn > t - 0.05)
+            return false;
+        if (0.5 + 0.5 * rng.uni() >= pp.slideProb)
+            return false;
+        S.slideFrom = S.pitch;
+        S.slideT0 = t;
+        return true;
+    }
+
+    // MPE (the plugin's MPE mode): per note, by its pitch. cents: the note's bend; pressure 0..1
+    // (-1: none yet) sets the dynamics while that note is the newest; timbre 0..127 (CC74, 64 =
+    // the player's own contact point) moves the bow towards the bridge (up) or the fingerboard
+    void mpeBend (int pitch, double cents)
+    {
+        mpeBendFor[pitch & 127] = cents;
+        for (int i = 0; i < nHeld; ++i)
+            if (held[i].pitch == pitch && held[i].str >= 0)
+                st[held[i].str].mpeBend = cents;
+    }
+    void mpePressure (int pitch, double v)
+    {
+        mpePressFor[pitch & 127] = v;
+        if (nHeld > 0 && held[nHeld - 1].pitch == pitch)
+        {
+            mpeDyn = v;
+            if (v >= 0.0 && ! manDyn)
+                dTarget = std::clamp (v, 0.0, 1.0);
+        }
+    }
+    void mpeTimbre (int pitch, double v127)
+    {
+        const double k = std::pow (2.0, (64.0 - std::clamp (v127, 0.0, 127.0)) / 64.0);
+        mpeTimbreFor[pitch & 127] = k;
+        if (nHeld > 0 && held[nHeld - 1].pitch == pitch)
+            mpeContact = k;
     }
 
     // ================================================================ M5 articulations
@@ -1321,7 +1766,7 @@ struct Player
             m5Param = pp.articulation;
             m5Key = -1;
         }
-        return std::clamp (m5Key >= 0 ? m5Key : (int) std::lround (pp.articulation), 0, 4);
+        return std::clamp (m5Key >= 0 ? m5Key : (int) std::lround (pp.articulation), 0, m7ArtLast);
     }
 
     bool m5NoteOn (int pitch, double vel127)
@@ -1329,8 +1774,14 @@ struct Player
         if (m5Busy)
             return false;
         const int ks = (int) pp.keyswitchBase;
-        if (ks > 0 && pitch >= ks && pitch <= ks + 4)
+        if (ks > 0 && pitch >= ks && pitch <= ks + m7KeyLast)
         {
+            if (pitch - ks >= m7ContactKey0) // M7: the contact keyswitches latch on their own
+            {
+                m7Contact();
+                m7ContactKey = pitch - ks - m7ContactKey0;
+                return true;
+            }
             m5Articulation();
             m5Key = pitch - ks;
             return true;
@@ -1343,6 +1794,11 @@ struct Player
         }
         if (art == artHarmonic && m5Harmonic (pitch, vel127))
             return true;
+        if (art == artColLegno)
+        {
+            m7Strike (pitch, vel127);
+            return true;
+        }
         for (int k = 0; k < 4; ++k) // an ordinary note: the light finger is lifted
             if (vn->s[k].touchOn)
                 vn->s[k].setTouch (0.0, 0.0);
@@ -1382,12 +1838,14 @@ struct Player
         if (semis > 0 && ! inReach (semis))
             handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
         S.slideT0 = -1.0;
-        S.target = S.pitch = pitch;
+        S.target = S.pitch = semis == 0 ? openTuned (s) : tunedPitch (pitch);
         S.vibWidthTarget = 0.0;
         S.lifted = semis == 0;
         S.noteOn = t;
         S.bowed = false;
-        vn->s[s].setNote (pitch);
+        S.mpeBend = mpeBendFor[pitch & 127];
+        S.err = 0.0;
+        vn->s[s].setNote (S.pitch);
         if (vn->s[s].touchOn)
             vn->s[s].setTouch (0.0, 0.0);
         const double dd = dynFromVel (vel127);
@@ -1510,6 +1968,199 @@ struct Player
         vn->s[s].setTouch (x, pp.harmTouch * vn->s[s].d.Z);
         m5Harm[pitch & 127] = (int) finger + 1;
         return true;
+    }
+    // ================================================================ M7 articulations
+    // Tremolo, sautille and portato are bowed through the same physics: the player only changes
+    // how the bow moves (reversals, bounce, pulses). Col legno battuto strikes the string with the
+    // stick (String::strike). Sul ponticello and sul tasto move the contact point (latched on
+    // their own, so they combine with any bowed articulation).
+    enum M7Art : int
+    {
+        artTremolo = 5,
+        artSautille,
+        artPortato,
+        artColLegno
+    };
+    static constexpr int m7ArtLast = artColLegno;
+    static constexpr int m7ContactKey0 = 9; // keyswitchBase + 9..11: ordinario, ponticello, tasto
+    static constexpr int m7KeyLast = 11;
+    int m7Mode = 0; // the bowed M7 articulation of the current note (0: none)
+    mutable int m7ContactKey = -1; // (mutable: a parameter change, seen from the const bow targets, unlatches the key)
+    mutable double m7ContactParam = 0.0;
+    double m7PulseAt = -10.0, m7NextFlip = -1.0, m7FlipAt = -10.0, m7Bounce = 0.1, m7VCap = 0.0, m7AccelMin = 0.0;
+    bool m7Rest = false;
+
+    int m7Contact() const
+    {
+        if (pp.contact != m7ContactParam)
+        {
+            m7ContactParam = pp.contact;
+            m7ContactKey = -1;
+        }
+        return std::clamp (m7ContactKey >= 0 ? m7ContactKey : (int) std::lround (pp.contact), 0, 2);
+    }
+    double m7ContactMM() const
+    {
+        const int c = m7Contact();
+        return c == 1 ? pp.pontMM : c == 2 ? pp.tastoMM : 0.0;
+    }
+    double m7Press() const
+    {
+        const int c = m7Contact();
+        return c == 1 ? pp.pontPress : c == 2 ? pp.tastoPress : 0.0;
+    }
+
+    double m7TremoloRate() const
+    {
+        static constexpr double perBeat[4] = { 0.0, 4.0, 6.0, 8.0 };
+        const int sync = std::clamp ((int) std::lround (pp.tremoloSync), 0, 3);
+        const double r = sync > 0 && pp.tempo > 0.0 ? pp.tempo / 60.0 * perBeat[sync] : pp.tremoloRate;
+        return std::clamp (r, 2.0, 32.0);
+    }
+
+    void m7ArticulationNoteOn()
+    {
+        const int a = m5Articulation();
+        m7Mode = a >= artTremolo && a <= artPortato ? a : 0;
+        m7Rest = false;
+        m7VCap = m7AccelMin = 0.0;
+    }
+
+    // at a new stroke (after chooseArt, before the direction is decided)
+    void m7Stroke()
+    {
+        m7PulseAt = t;
+        const bool moving = std::abs (v) > 0.01;
+        if (m7Mode == artTremolo)
+        {
+            shaped = quick = false;
+            m7NextFlip = t + 1.0 / m7TremoloRate();
+            if (! moving)
+                hair = pp.tremoloHair * pp.bowLength;
+        }
+        else if (m7Mode == artSautille)
+        {
+            shaped = quick = false;
+            const double ioi = t - lastOn;
+            const double len = nextDur > 0.0 ? nextDur : (ioi < 0.3 ? ioi : pp.sautMax);
+            m7Bounce = std::clamp (len, pp.sautMin, pp.sautMax);
+            if (! moving)
+                hair = pp.sautHair * pp.bowLength;
+        }
+    }
+
+    // per sample, before the bow moves
+    void m7Tick()
+    {
+        m7VCap = m7AccelMin = 0.0;
+        if (m7Mode == artTremolo && nHeld > 0 && ! releasing && ! stopping)
+        {
+            const double rate = m7TremoloRate();
+            // a reversal takes at most half a stroke
+            m7AccelMin = 4.0 * V * rate;
+            if (t >= m7NextFlip)
+            {
+                dir = -dir;
+                changing = true;
+                m7FlipAt = t;
+                m7NextFlip = std::max (m7NextFlip + 1.0 / rate, t + 0.5 / rate);
+            }
+        }
+        else if (m7Mode == artSautille && nHeld > 0)
+        {
+            m7VCap = 2.0 * pp.sautLen / m7Bounce;
+            m7AccelMin = 4.0 * std::min (V, m7VCap) / m7Bounce;
+        }
+    }
+
+    // the bow speed's shape (x)
+    double m7Shape() const
+    {
+        const int c = m7Contact();
+        double k = c == 1 ? pp.pontSpeed : c == 2 ? pp.tastoSpeed : 1.0;
+        if (m7Mode == artPortato)
+        {
+            if (m7Rest)
+                return k * pp.portRest;
+            const double age = t - m7PulseAt;
+            const double r = std::clamp (age / pp.portRise, 0.0, 1.0), sm = r * r * (3 - 2 * r);
+            k *= pp.portDip + (1.0 - pp.portDip) * sm + pp.portSwell * sm * std::exp (-age / pp.portDecay);
+        }
+        else if (pp.liftStroke > 0.0 && m7Mode == 0 && slurNotes == 0 && ! releasing)
+            k *= 1.0 - pp.liftStroke * (1.0 - std::exp (-(t - strokeStart) / pp.liftTau));
+        return k;
+    }
+
+    // the bow force (x), on a bowed string
+    double m7Force() const
+    {
+        double k = 1.0;
+        if (pp.tipLight > 0.0)
+            k *= 1.0 - pp.tipLight * std::clamp (hair / pp.bowLength, 0.0, 1.0);
+        if (m7Mode == artSautille)
+        {
+            const double x = std::clamp ((t - strokeStart) / m7Bounce, 0.0, 1.0);
+            k *= pp.sautFloor + (1.0 - pp.sautFloor) * std::sin (pi * x);
+        }
+        else if (m7Mode == artTremolo)
+            k *= 1.0 + pp.tremoloBite * std::exp (-(t - m7FlipAt) / 0.01);
+        else if (m7Mode == artPortato && ! m7Rest)
+        {
+            const double age = t - m7PulseAt;
+            k *= std::sqrt (std::max (0.1, pp.portDip + (1.0 - pp.portDip) * std::clamp (age / pp.portRise, 0.0, 1.0)));
+        }
+        return k;
+    }
+
+    // the last note let go: true when handled here
+    bool m7NoteOff()
+    {
+        if (m7Mode == artPortato && pp.portGap > 0.0)
+        {
+            pendingOff = t + pp.portGap; // the next note within portGap joins this bow
+            m7Rest = true;
+            return true;
+        }
+        if (m7Mode == artSautille)
+        {
+            releasing = true;
+            relTime = 0.02;
+            lastStop = t;
+            return true;
+        }
+        return false;
+    }
+
+    // col legno battuto: the stick strikes the stopped (or open) string
+    void m7Strike (int pitch, double vel127)
+    {
+        const int s = chooseString (pitch);
+        Str& S = st[s];
+        const double semis = std::max (0.0, pitch - openPitch[s]);
+        if (semis > 0 && ! inReach (semis))
+            handPos = semis > handPos ? std::max (2.0, semis - 3.0) : std::max (2.0, semis);
+        S.slideT0 = -1.0;
+        S.target = S.pitch = pitch;
+        S.vibWidthTarget = 0.0;
+        S.lifted = semis == 0;
+        S.noteOn = t;
+        S.bowed = false;
+        vn->s[s].setNote (pitch);
+        if (vn->s[s].touchOn)
+            vn->s[s].setTouch (0.0, 0.0);
+        const double dd = dynFromVel (vel127);
+        const double L = stringLength * std::pow (2.0, -semis / 12.0);
+        M5Str& M = m5[s];
+        M.pluckAt = -1.0;
+        M.offAt = -1.0;
+        M.beta = std::clamp (pp.clMM * 1e-3 / L, 0.04, 0.5);
+        vn->s[s].setBeta (M.beta);
+        const double speed = pp.clSpeedPP * std::pow (pp.clSpeedFF / pp.clSpeedPP, dd);
+        const double tc = std::min (pp.clContact, 0.4 / std::max (1.0, vn->s[s].f1));
+        vn->s[s].strike (speed, tc, pp.clKnock * (0.2 + 0.8 * dd));
+        lastString = s;
+        lastOn = t;
+        m5Pluck[pitch & 127] = s + 1;
     }
 };
 } // namespace o2

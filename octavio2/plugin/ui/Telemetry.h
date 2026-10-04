@@ -31,6 +31,13 @@ struct Telemetry
     std::atomic<float> cpu { 0 }; // share of real time
     std::atomic<float> bpm { 0 }; // host tempo, 0 = unknown (the Curves tab's MIDI export)
     std::array<std::atomic<float>, 4> stringForce {};
+    // M6 views: the left hand's shift, the bow change, and who sets each dimension (0 the player,
+    // 2 a drawn curve: the CC lane has taken it over; the values of ui::Mode)
+    std::atomic<bool> sliding { false }; // the finger is sliding to target (a shift)
+    std::atomic<float> slideFrom { 0 }; // MIDI pitch the slide left from
+    std::atomic<float> target { 0 }; // MIDI pitch the finger is going to
+    std::atomic<bool> changing { false }; // the bow is turning round
+    std::atomic<int> dynMode { 0 }, vibMode { 0 }, rateMode { 0 }, contactMode { 0 };
 
     // the auto curves: one point every 10 ms of engine time
     struct Point

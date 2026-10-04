@@ -1,9 +1,10 @@
 #include "PluginEditor.h"
 
 #include "ui/ArticulationView.h"
+#include "ui/BowView.h"
 #include "ui/CurvesView.h"
+#include "ui/LeftHandView.h"
 #include "ui/MidiView.h"
-#include "ui/PlaceholderView.h"
 #include "ui/PlayView.h"
 #include "ui/ToneView.h"
 
@@ -65,15 +66,24 @@ Editor::Editor (Processor& p)
     : AudioProcessorEditor (p),
       processor (p),
       mode (&p.getParameters(), params::id::mode.getParamID(), { { "Live" }, { "Studio" } }),
-      keyboard (p)
+      keyboard (p),
+      presets (p)
 {
     setLookAndFeel (&lookAndFeel);
     mode.setLayout (0, 30, 4, 70);
     mode.setTooltip ("Live plays at once. Studio looks 1.2 s ahead so the player knows each note's length; the DAW "
                      "compensates the delay.");
     instrument.setTooltip ("Viola, cello and bass arrive after the violin (the strings section).");
-    player.setTooltip ("Player styles (baroque, romantic, folk) arrive with the styles milestone (M7).");
-    presets.setTooltip ("Presets arrive with the plugin milestone (M6). Your host's presets save every setting now.");
+    // M7: the player's style, offsets on the automation (vibrato, slides, bow, swells, intonation)
+    for (int i = 0; i < params::playerStyleNames().size(); ++i)
+        player.addItem ("Player: " + params::playerStyleNames()[i], i + 1);
+    playerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        p.getParameters(),
+        params::id::playerStyle.getParamID(),
+        player);
+    player.setTooltip ("How the virtual violinist plays: vibrato, slides, bow strokes, swells and expressive "
+                       "intonation. Modern soloist is the default player; the others shift its habits and still "
+                       "follow your controls.");
     for (auto* c : std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets })
         canvas.addAndMakeVisible (c);
     mode.setBounds (916, 16, 144, 30);
@@ -83,15 +93,8 @@ Editor::Editor (Processor& p)
     keyboard.setBounds (24, 712, designWidth - 48, 58);
     canvas.views.push_back (std::make_unique<PlayView> (p));
     canvas.views.push_back (std::make_unique<CurvesView> (p));
-    canvas.views.push_back (
-        std::make_unique<PlaceholderView> ("Bow",
-                                           "The bow's plan and physics: speed, force and contact over each stroke, "
-                                           "where on the hair it plays, bow changes and how much bow is left.",
-                                           "Arrives with the player and bow-physics milestones (M2, M4)."));
-    canvas.views.push_back (std::make_unique<PlaceholderView> (
-        "Left hand",
-        "Fingering, positions and shifts, string choice, vibrato shape, and intonation (expressive, equal or just).",
-        "Arrives with the player milestone (M4)."));
+    canvas.views.push_back (std::make_unique<BowView> (p));
+    canvas.views.push_back (std::make_unique<LeftHandView> (p));
     canvas.views.push_back (std::make_unique<ArticulationView> (p));
     canvas.views.push_back (std::make_unique<ToneView> (p));
     canvas.views.push_back (std::make_unique<MidiView> (p));
@@ -194,10 +197,7 @@ void Editor::Canvas::paint (juce::Graphics& g)
               colours::dim);
     // instrument, player, presets (previews)
     previewBox (g, { 214, 14, 170, 34 }, "Modern violin", true);
-    previewBox (g, { 394, 14, 180, 34 }, "Player: Modern soloist", true);
-    previewBox (g, { 592, 14, 34, 34 }, juce::String::fromUTF8 ("‹"), false, juce::Justification::horizontallyCentred);
-    previewBox (g, { 630, 14, 230, 34 }, "Default", false, juce::Justification::horizontallyCentred);
-    previewBox (g, { 864, 14, 34, 34 }, juce::String::fromUTF8 ("›"), false, juce::Justification::horizontallyCentred);
+    // presets: ui::PresetBar (M6); player: the Player Style box (M7)
     drawText (g, editor.latencyText, 1176, 36, Fonts::mono (11), colours::muted, juce::Justification::right);
     // tabs
     for (int i = 0; i < tabCount; ++i)

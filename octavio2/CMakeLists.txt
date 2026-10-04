@@ -13,7 +13,7 @@ endif()
 
 juce_add_plugin(Octavio2
     PRODUCT_NAME "Octavio 2"
-    VERSION 2.1.0
+    VERSION 2.2.0
     COMPANY_NAME "OctahedronV2"
     BUNDLE_ID "com.octahedronv2.octavio2"
     # Permanent once released: hosts save projects against these.
@@ -59,7 +59,9 @@ juce_add_binary_data(Octavio2Data
 set_target_properties(Octavio2Data PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 target_sources(Octavio2 PRIVATE
+    plugin/MidiMap.cpp
     plugin/Parameters.cpp
+    plugin/Presets.cpp
     plugin/PluginEditor.cpp
     plugin/PluginProcessor.cpp
     plugin/ui/Controls.cpp
@@ -68,12 +70,17 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/MidiView.cpp
     plugin/ui/NoteTrack.cpp
     plugin/ui/ArticulationView.cpp
+    plugin/ui/BowView.cpp
+    plugin/ui/LeftHandView.cpp
     plugin/ui/PlaceholderView.cpp
     plugin/ui/PlayView.cpp
+    plugin/ui/PresetBar.cpp
     plugin/ui/Theme.cpp
     plugin/ui/ToneView.cpp
     "${PROJECT_SOURCE_DIR}/source/dsp/PartitionedConvolution.cpp"
-    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp")
+    "${PROJECT_SOURCE_DIR}/source/plugin/HostKeyboardFocus.cpp"
+    # M7: MTS-ESP client (0BSD, loads the MTS-ESP library at run time if installed)
+    "${PROJECT_SOURCE_DIR}/third_party/mts-esp/libMTSClient.cpp")
 target_include_directories(Octavio2 PUBLIC "${PROJECT_SOURCE_DIR}/source" "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(Octavio2
     PUBLIC
@@ -87,6 +94,7 @@ target_link_libraries(Octavio2
         ViolinSynthPffft
         juce::juce_audio_utils
         juce::juce_dsp
+        ${CMAKE_DL_LIBS}
     PUBLIC
         juce::juce_recommended_config_flags)
 if(VIOLINSYNTH_ENABLE_LTO)

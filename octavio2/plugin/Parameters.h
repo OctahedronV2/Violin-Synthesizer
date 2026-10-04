@@ -35,6 +35,31 @@ inline const juce::ParameterID movement { "movement", 1 };
 inline const juce::ParameterID distance { "distance", 1 };
 inline const juce::ParameterID bridge { "bridge", 1 };
 inline const juce::ParameterID mute { "mute", 1 };
+// M6 views (Play, Bow and Left hand tabs)
+inline const juce::ParameterID portamento { "portamento", 1 };
+inline const juce::ParameterID stringPreference { "stringPreference", 1 };
+inline const juce::ParameterID vibratoRate { "vibratoRate", 1 };
+inline const juce::ParameterID vibratoDelay { "vibratoDelay", 1 };
+inline const juce::ParameterID bowChange { "bowChange", 1 };
+inline const juce::ParameterID strokeShaping { "strokeShaping", 1 };
+inline const juce::ParameterID bite { "bite", 1 };
+inline const juce::ParameterID contact { "contact", 1 };
+// MIDI (M6): semitones of the pitch wheel's full throw
+inline const juce::ParameterID bendRange { "bendRange", 1 };
+// M7 player: style, intonation, MPE
+inline const juce::ParameterID playerStyle { "playerStyle", 1 };
+inline const juce::ParameterID intonation { "intonation", 1 };
+inline const juce::ParameterID tuningKey { "tuningKey", 1 };
+inline const juce::ParameterID a4 { "a4", 1 };
+inline const juce::ParameterID mpe { "mpe", 1 };
+inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
+// M7 instrument: string set, rosin, bow, contact point, tremolo
+inline const juce::ParameterID strings { "strings", 1 };
+inline const juce::ParameterID rosin { "rosin", 1 };
+inline const juce::ParameterID bow { "bow", 1 };
+inline const juce::ParameterID contactStyle { "contactStyle", 1 };
+inline const juce::ParameterID tremoloSpeed { "tremoloSpeed", 1 };
+inline const juce::ParameterID tremoloSync { "tremoloSync", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -46,6 +71,20 @@ const juce::StringArray& violinNames();
 const juce::StringArray& micNames();
 const juce::StringArray& articulationNames();
 const juce::StringArray& bowStyleNames();
+// M7: Player Style, Intonation and Key choices, in the engine's order (o2::PlayerStyle, o2::Intonation)
+const juce::StringArray& playerStyleNames();
+const juce::StringArray& intonationNames();
+const juce::StringArray& keyNames();
+// M7 instrument
+const juce::StringArray& stringsNames();
+const juce::StringArray& rosinNames();
+const juce::StringArray& bowNames();
+const juce::StringArray& contactNames();
+const juce::StringArray& tremoloSyncNames();
+
+// Keyswitches are fixed keys, whatever the Octave: C1 (MIDI 24) .. B1 (35). 24-32 pick the
+// Articulation (in its order), 33-35 the contact point (ordinario, sul ponticello, sul tasto).
+inline constexpr int keyswitchFirst = 24, keyswitchLast = 35;
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -62,10 +101,21 @@ public:
     o2::EngineSettings read() const;
     int octaveShift() const;
     bool studio() const { return mode->load() >= 0.5f; }
+    double bendRange() const { return bendRangeValue->load(); } // M6: semitones
+    // M7 MPE: on/off and the per-note bend range in semitones
+    bool mpe() const { return mpeOn->load() >= 0.5f; }
+    float mpeBendRange() const { return mpeBend->load(); }
+    int intonation() const { return juce::roundToInt (intonationSystem->load()); }
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
     std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
         *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
+    // M6 views
+    std::atomic<float>*portamento, *stringPreference, *vibratoRate, *vibratoDelay, *bowChange, *strokeShaping, *bite,
+        *contact;
+    std::atomic<float>* bendRangeValue; // M6
+    std::atomic<float>*playerStyle, *intonationSystem, *tuningKey, *a4, *mpeOn, *mpeBend; // M7 player
+    std::atomic<float>*strings, *rosin, *bow, *contactStyle, *tremoloSpeed, *tremoloSync; // M7 instrument
 };
 } // namespace octavio2::params

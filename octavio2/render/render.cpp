@@ -19,8 +19,12 @@
 //   Live mode: no lengths), studio (the plugin's Studio mode: look-ahead)
 //   hall=0..8 (0 none, 1 Arvedi near seat), bright=dB (5), reverb=dB (0), volume=dB (0),
 //   vibrato=x (1), velCurve=x (1), data=octavio2/data
+// M7: articulation=0..8 (5 tremolo, 6 sautille, 7 portato, 8 col legno), contact=0..2 (ord, sul
+//   ponticello, sul tasto), strings=0..2 (synthetic, gut, steel), rosin=0..3 (light, standard, dark,
+//   baroque), bow=0..1 (modern, baroque), tremoloRate=/s, tremoloSync=0..3 with tempo=bpm
 
 #include "../core/Engine.h"
+#include "../core/Scala.h"
 #include "../core/Wav.h"
 #include "Midi.h"
 
@@ -297,6 +301,18 @@ static void playerOpts (PlayerParams& q)
     O (autoMartele);
     O (autoSpiccato);
     O (drawnCurves);
+    // M7 styles
+    O (slideProb);
+    O (slideMin);
+    O (slideTime);
+    O (scoop);
+    O (scoopProb);
+    O (scoopTime);
+    O (pitchError);
+    O (earFix);
+    O (openPenalty);
+    O (mdvPeak);
+    O (intonAmount);
 #undef O
 }
 
@@ -364,12 +380,62 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
     es.wolf = opt ("wolf", es.wolf);
     es.hold = opt ("hold", es.hold);
     es.modalBody = opt ("modalBody", es.modalBody) != 0;
+    // M6 views: the plugin's Portamento, String Preference, Vibrato Rate/Delay, Bow Change, Stroke
+    // Shaping, Bite and Contact Point controls (plain scales: 1 = 100 %, offsets 0)
+    es.portamento = opt ("portamento", es.portamento);
+    es.stringPreference = opt ("stringPreference", es.stringPreference);
+    es.vibratoRate = opt ("vibratoRate", es.vibratoRate);
+    es.vibratoDelay = opt ("vibratoDelay", es.vibratoDelay);
+    es.bowChange = opt ("bowChange", es.bowChange);
+    es.strokeShaping = opt ("strokeShaping", es.strokeShaping);
+    es.bite = opt ("bite", es.bite);
+    es.contact = opt ("contact", es.contact);
+    // M7: style=0..6 (Modern, Romantic, Hungarian, Baroque, Maqam, Fiddle, Student),
+    // intonation=0..4 (Expressive, Equal, Just, Pythagorean, Scala), key=0..11 (C..B), a4=Hz,
+    // scl=file.scl [kbm=file.kbm] (sets intonation=4 unless given)
+    es.playerStyle = (int) opt ("style", es.playerStyle);
+    es.intonation = (int) opt ("intonation", opts.count ("scl") ? 4 : es.intonation);
+    es.tuningKey = (int) opt ("key", es.tuningKey);
+    es.a4 = opt ("a4", es.a4);
+    // the player's and M7's choices (as the plugin's parameters set them)
+    es.articulation = (int) opt ("articulation", es.articulation);
+    es.bowStyle = (int) opt ("bowStyle", es.bowStyle);
+    es.strings = (int) opt ("strings", es.strings);
+    es.rosin = (int) opt ("rosin", es.rosin);
+    es.bow = (int) opt ("bow", es.bow);
+    es.contactStyle = (int) opt ("contactStyle", es.contactStyle);
+    es.tremoloRate = opt ("tremoloRate", es.tremoloRate);
+    es.tremoloSync = (int) opt ("tremoloSync", es.tremoloSync);
+    es.tempo = opt ("tempo", es.tempo);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);
     playerOpts (engine->getPlayer().pp); // experiments: any PlayerParams field
     stringOpts (engine->getViolin().p); // and any continuous strings Params field
     engine->reset(); // the strings and bridge re-made with those (same state as prepare's)
+    if (opts.count ("scl"))
+    {
+        auto slurp = [] (const std::string& path)
+        {
+            std::string s;
+            if (FILE* f = std::fopen (path.c_str(), "rb"))
+            {
+                char buf[4096];
+                size_t k;
+                while ((k = std::fread (buf, 1, sizeof buf, f)) > 0)
+                    s.append (buf, k);
+                std::fclose (f);
+            }
+            return s;
+        };
+        const auto tuning = parseScala (slurp (opts["scl"]), opts.count ("kbm") ? slurp (opts["kbm"]) : std::string());
+        if (! tuning.ok)
+        {
+            std::fprintf (stderr, "scl: %s\n", tuning.error.c_str());
+            return 1;
+        }
+        engine->setTuningTable (tuning.cents, ! tuning.hasKeyboardMap);
+    }
     engine->getPlayer().log = opt ("log", 0) != 0;
 
     const double sr = Engine::rate;
