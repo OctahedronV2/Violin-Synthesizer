@@ -24,6 +24,8 @@
 //   baroque), bow=0..1 (modern, baroque), tremoloRate=/s, tremoloSync=0..3 with tempo=bpm
 // 2.3: curves=file.txt (drawn curves in beats, core/Curves.h), curveBpm=n; modeDynamics=,
 //   modeVibrato=, modeRate=, modeContact=, modePressure= 0 Auto, 1 Guided, 2 Manual
+// 2.3: imperfection=0..1, velSens=x, attackWeight=x (1 = as 2.2); bowStyle=0..5 (Live: fixed
+//   short strokes for staccato, martele, spiccato)
 
 #include "../core/Engine.h"
 #include "../core/Scala.h"
@@ -416,6 +418,11 @@ static int renderSound (const std::vector<NoteEvent>& notes, const std::vector<C
         for (int k = 0; k < dimCount; ++k)
             es.dimMode[k] = (int) opt (names[k], es.dimMode[k]);
     }
+    // 2.3: imperfection=0..1 (also loosens the timing), velSens=x (1), attackWeight=x (1); the Take
+    // is seed= (prepare)
+    es.imperfection = opt ("imperfection", es.imperfection);
+    es.velocitySensitivity = opt ("velSens", es.velocitySensitivity);
+    es.attackWeight = opt ("attackWeight", es.attackWeight);
     if (opts.count ("size"))
         engine->getRadiation().setBodySize (opt ("size", 1.0));
     engine->setSettings (es);

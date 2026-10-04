@@ -313,8 +313,20 @@ MidiView::MidiView (Processor& p)
                 const int st = juce::roundToInt (v);
                 return st == 0 ? juce::String ("off") : juce::String::fromUTF8 ("±") + juce::String (st) + " st";
             }),
+      sensitivity (&p.getParameters(),
+                   params::id::velocitySensitivity.getParamID(),
+                   "Sensitivity",
+                   Knob::Style::small,
+                   [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
+      attackWeight (&p.getParameters(),
+                    params::id::attackWeight.getParamID(),
+                    "Attack weight",
+                    Knob::Style::small,
+                    [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }),
       octave (&p.getParameters(), params::id::octave.getParamID(), { { "-2" }, { "-1" }, { "0" }, { "+1" }, { "+2" } }),
-      behaviour (nullptr, {}, { { "Latching" }, { "Momentary" }, { "Off" } }),
+      behaviour (&p.getParameters(),
+                 params::id::keyswitchMode.getParamID(),
+                 { { "Latching" }, { "Momentary" }, { "Off" } }),
       mpe (&p.getParameters(), params::id::mpe.getParamID(), { { "Off" }, { "On" } }) // M7
 {
     curve.setTooltip ("Velocity to dynamics: below 1 soft playing gets louder sooner, above 1 later.");
@@ -322,7 +334,22 @@ MidiView::MidiView (Processor& p)
     bend.setTooltip ("The pitch wheel's full throw, in semitones. It bends the bowed notes; reset all controllers "
                      "(CC121) centres it.");
     octave.setTooltip ("Moves every note by octaves. +1 suits typing keyboards (z = C4 in FL Studio).");
-    behaviour.setTooltip ("Keyswitches C1 and up pick the articulation and latch until the next one.");
+    sensitivity.setTooltip ("How far velocity moves the dynamics. 100 %: pp to ff. Lower: a narrower range around "
+                            "velocity 100's dynamic (0 %: every note at it). Above 100 %: wider.");
+    attackWeight.setTooltip ("How much velocity moves the attack's bite. 100 %: a harder, quicker catch at ff. 0 %: "
+                             "the same attack at every velocity. 200 %: soft notes start gently, loud ones bite.");
+    behaviour.setTooltip ("Latching: a keyswitch picks the articulation until the next one. Momentary: only while "
+                          "the key is held, then back to what played before. Off: the keys play as ordinary notes "
+                          "(silent below the violin). UACC on CC32 picks the articulation too: 1 long, 8 sul tasto, "
+                          "10 harmonics, 11-15 tremolo, 20 legato, 40 staccato, 41 martele, 42 spiccato, 43 "
+                          "sautille, 44 detache, 50 portato, 56 pizz, 57 left-hand pizz, 58 Bartok, 59 col legno.");
+    keyswitchStart = std::make_unique<ValueBox> (
+        *p.getParameters().getParameter (params::id::keyswitchStart.getParamID()),
+        [] (float v) { return juce::MidiMessage::getMidiNoteName (juce::roundToInt (v), true, true, middleCOctave()); },
+        std::vector<float> { 0.0f, 12.0f, 24.0f, 36.0f, 96.0f, 108.0f });
+    keyswitchStart->setTooltip ("The first keyswitch key: twelve keys from here pick the nine articulations, then the "
+                                "three contact points, whatever the Octave. Drag to move the block, right-click for "
+                                "common places, double-click for C1.");
     mpe.setTooltip ("MPE (lower zone, notes on channels 2-16): each note's pitch bend bends it (range: MPE Bend "
                     "Range, 48 semitones), pressure sets the dynamics, CC74 moves the bow towards the bridge.");
 
@@ -346,6 +373,9 @@ MidiView::MidiView (Processor& p)
     viewport.setScrollBarThickness (8);
     for (auto* c : std::initializer_list<juce::Component*> { &curve,
                                                              &dynamics,
+                                                             &sensitivity,
+                                                             &attackWeight,
+                                                             keyswitchStart.get(),
                                                              &bend,
                                                              &octave,
                                                              &behaviour,
@@ -383,16 +413,20 @@ void MidiView::resized()
     rowsHolder.setSize (viewport.getWidth() - 10, std::max (1, (int) rows.size()) * rowH);
     for (size_t i = 0; i < rows.size(); ++i)
         rows[i]->setBounds (0, (int) i * rowH, rowsHolder.getWidth(), rowH);
-    curve.setBounds (680 + 432 - 50, (int) py + 110 - 44, 100, 100);
-    dynamics.setBounds (680 + 432 - 50, (int) py + 240 - 44, 100, 100);
+    // 2.3: two columns of knobs beside the graph (mockup midi.svg: Sensitivity, Attack weight)
+    curve.setBounds (1046 - 40, (int) py + 110 - 44, 80, 100);
+    dynamics.setBounds (1046 - 40, (int) py + 240 - 44, 80, 100);
+    sensitivity.setBounds (1128 - 40, (int) py + 110 - 44, 80, 100);
+    attackWeight.setBounds (1128 - 40, (int) py + 240 - 44, 80, 100);
     const int yb = (int) py + 360;
     octave.setLayout (0, 30, 4, 46);
     octave.setBounds (696, yb + 58, 250, 30);
     bend.setBounds (1066, yb + 14, 100, 100);
-    behaviour.setLayout (0, 30, 4, 96);
-    behaviour.setBounds (696, yb + 126, 300, 30);
-    mpe.setLayout (0, 30, 4, 60);
-    mpe.setBounds (1016, yb + 126, 130, 30);
+    keyswitchStart->setBounds (696, yb + 126, 66, 30);
+    behaviour.setLayout (0, 30, 4, 80);
+    behaviour.setBounds (774, yb + 126, 250, 30);
+    mpe.setLayout (0, 30, 4, 54);
+    mpe.setBounds (1056, yb + 126, 112, 30);
 }
 
 void MidiView::rebuildRows()
@@ -552,6 +586,18 @@ void MidiView::timerCallback()
             r->repaint();
     }
 
+    auto& state = processor.getParameters();
+    const std::array<float, 4> response {
+        state.getRawParameterValue (params::id::velocityCurve.getParamID())->load(),
+        state.getRawParameterValue (params::id::dynamics.getParamID())->load(),
+        state.getRawParameterValue (params::id::velocitySensitivity.getParamID())->load(),
+        state.getRawParameterValue (params::id::keyswitchStart.getParamID())->load()
+    };
+    if (response != shownResponse)
+    {
+        shownResponse = response;
+        repaint();
+    }
     const int v = processor.getTelemetry().velocity.load();
     if (v != shownVelocity && isShowing())
     {
@@ -612,16 +658,22 @@ void MidiView::paint (juce::Graphics& g)
     const float yb = y + 360;
     drawPanel (g, { 680, yb, 496, 216 }, "Octave, bend, keyswitches and MPE");
     drawLabel (g, "Octave", 696, yb + 50);
-    drawLabel (g, "Keyswitches", 696, yb + 118);
-    drawLabel (g, "MPE", 1016, yb + 118);
+    drawLabel (g, "Start key", 696, yb + 118);
+    drawLabel (g, "Behaviour", 774, yb + 118);
+    drawLabel (g, "MPE", 1056, yb + 118);
+    auto name = [] (int note) { return juce::MidiMessage::getMidiNoteName (note, true, true, middleCOctave()); };
+    const int ks = juce::roundToInt (
+        processor.getParameters().getRawParameterValue (params::id::keyswitchStart.getParamID())->load());
     drawText (g,
-              juce::String::fromUTF8 ("Keyswitches (C1–B1) pick the articulation; MPE (pressure → dynamics,"),
+              juce::String::fromUTF8 ("Keyswitches (") + name (ks) + juce::String::fromUTF8 ("–")
+                  + name (ks + params::keyswitchCount - 1)
+                  + juce::String::fromUTF8 (") and UACC (CC32) pick the articulation; MPE: pressure"),
               696,
               yb + 182,
               Fonts::sans (11),
               colours::dim);
     drawText (g,
-              juce::String::fromUTF8 ("slide → contact) arrives with M7. +1 octave: z on a typing keyboard plays C4."),
+              juce::String::fromUTF8 ("→ dynamics, slide → contact. +1 octave: z on a typing keyboard plays C4."),
               696,
               yb + 199,
               Fonts::sans (11),
@@ -631,7 +683,7 @@ void MidiView::paint (juce::Graphics& g)
 void MidiView::paintVelocity (juce::Graphics& g, juce::Rectangle<float> r)
 {
     drawPanel (g, r, "Velocity", "full range");
-    const float gx = r.getX() + 70, gy = r.getY() + 56, gw = 300, gh = 226;
+    const float gx = r.getX() + 62, gy = r.getY() + 56, gw = 262, gh = 226;
     g.setColour (colours::well);
     g.fillRoundedRectangle (gx, gy, gw, gh, 4);
     static const char* dyn[] = { "pp", "p", "mp", "mf", "f", "ff" };
@@ -667,19 +719,22 @@ void MidiView::paintVelocity (juce::Graphics& g, juce::Rectangle<float> r)
     auto& state = processor.getParameters();
     const double c = state.getRawParameterValue (params::id::velocityCurve.getParamID())->load();
     const double bias = state.getRawParameterValue (params::id::dynamics.getParamID())->load() / 100.0;
-    auto dynOf = [&pp] (double v, double curve, double b)
+    const double sens = state.getRawParameterValue (params::id::velocitySensitivity.getParamID())->load() / 100.0;
+    auto dynOf = [&pp] (double v, double curve, double b, double sn)
     {
+        // as o2::Player::dynFromVel (2.3: Sensitivity around velocity velSensRef's dynamic)
         const double x = std::clamp ((v - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0);
-        return std::clamp (std::pow (x, curve) + b, 0.0, 1.0);
+        const double r = std::pow (std::clamp ((pp.velSensRef - pp.velLo) / (pp.velHi - pp.velLo), 0.0, 1.0), curve);
+        return std::clamp (r + sn * (std::pow (x, curve) - r) + b, 0.0, 1.0);
     };
-    auto pointOf = [&] (double v, double curve, double b)
-    { return juce::Point<float> (gx + gw * (float) v / 127.0f, gy + gh - (float) dynOf (v, curve, b) * gh); };
+    auto pointOf = [&] (double v, double curve, double b, double sn = 1.0)
+    { return juce::Point<float> (gx + gw * (float) v / 127.0f, gy + gh - (float) dynOf (v, curve, b, sn) * gh); };
     for (int pass = 0; pass < 2; ++pass)
     {
         juce::Path p;
         for (int v = 1; v <= 127; ++v)
         {
-            const auto pt = pass == 0 ? pointOf (v, 1.0, 0.0) : pointOf (v, c, bias);
+            const auto pt = pass == 0 ? pointOf (v, 1.0, 0.0) : pointOf (v, c, bias, sens);
             v == 1 ? p.startNewSubPath (pt) : p.lineTo (pt);
         }
         if (pass == 0)
@@ -698,11 +753,11 @@ void MidiView::paintVelocity (juce::Graphics& g, juce::Rectangle<float> r)
     }
     for (int v : { 64, 100, 127 })
     {
-        const auto pt = pointOf (v, c, bias);
+        const auto pt = pointOf (v, c, bias, sens);
         g.setColour (colours::gold);
         g.fillEllipse (pt.x - 4.5f, pt.y - 4.5f, 9, 9);
         drawText (g,
-                  juce::String (v) + " = " + dynamicName ((float) dynOf (v, c, bias)),
+                  juce::String (v) + " = " + dynamicName ((float) dynOf (v, c, bias, sens)),
                   pt.x - 8,
                   pt.y - 10,
                   Fonts::sans (10.5f),
@@ -711,7 +766,7 @@ void MidiView::paintVelocity (juce::Graphics& g, juce::Rectangle<float> r)
     }
     if (shownVelocity > 0)
     {
-        const auto pt = pointOf (shownVelocity, c, bias);
+        const auto pt = pointOf (shownVelocity, c, bias, sens);
         g.setColour (colours::steel);
         g.drawEllipse (pt.x - 7, pt.y - 7, 14, 14, 2);
         drawText (g,
@@ -724,10 +779,10 @@ void MidiView::paintVelocity (juce::Graphics& g, juce::Rectangle<float> r)
     }
     drawText (g,
               "dashed = even curve",
-              r.getX() + 432,
-              r.getY() + 176,
+              gx + gw,
+              gy + gh + 36,
               Fonts::sans (10.5f),
               colours::muted,
-              juce::Justification::horizontallyCentred);
+              juce::Justification::right);
 }
 } // namespace octavio2::ui

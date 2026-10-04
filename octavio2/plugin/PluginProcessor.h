@@ -67,6 +67,9 @@ public:
     Presets& getPresets() { return *presets; }
     bool isPedalDown() const { return pedalShown.load (std::memory_order_relaxed); }
     double getLatencyMs() const { return getLatencySamples() * 1000.0 / hostRate; }
+    // 2.3 (any thread): what keyswitches or UACC latched goes back to the parameters (bit 0 the
+    // articulation, 1 the bow style, 2 the contact point), from the next block
+    void clearKeyswitchLatches (int mask) { clearLatches.fetch_or (mask); }
 
     // M7 tuning (message thread): a Scala scale (.scl, and optionally a .kbm keyboard map) for
     // the Intonation parameter's "Scala file" choice. Parsed here, handed to the audio thread
@@ -89,8 +92,9 @@ public:
 private:
     struct KeyEvent
     {
-        int note = -1;
+        int note = -1; // keyswitch: its index
         float velocity = 0.0f; // 0: note off
+        bool keyswitch = false; // 2.3: a keyswitch key clicked on the editor's keyboard
     };
     class KeyQueue
     {
@@ -127,7 +131,8 @@ private:
     std::unique_ptr<o2::Engine> engine;
     juce::MidiKeyboardState keyboardState;
     KeyQueue keysToAudio;
-    std::array<std::int8_t, 128> clickedKeys {}; // message thread: note sent for each held key
+    std::array<std::int8_t, 128>
+        clickedKeys {}; // message thread: note sent for each held key (-2 - index: a keyswitch)
     std::array<std::array<std::int8_t, 128>, 16> sentNotes {}; // audio thread: pitch played per incoming note
 
     // host rate <-> 48 kHz
@@ -154,6 +159,8 @@ private:
     bool pedal = false;
     std::atomic<bool> pedalShown { false };
     std::array<bool, 128> deferredOff {}; // engine pitches released while the pedal was down
+    std::array<std::int8_t, 128> keyswitchHeld {}; // 2.3: keyswitch index + 1 per held key (0: none)
+    std::atomic<int> clearLatches { 0 };
     double hostBpm = 0.0;
     // M7: MPE, the Scala table handed to the audio thread, the MTS-ESP client
     void updateTuning();

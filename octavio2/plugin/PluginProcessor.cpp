@@ -113,6 +113,14 @@ void Processor::KeyQueue::popAll (Fn&& fn)
 
 void Processor::handleNoteOn (juce::MidiKeyboardState*, int, int note, float velocity)
 {
+    // 2.3: the keyswitch keys are drawn where they are played (whatever the Octave)
+    const int ks = reader.keyswitchStart();
+    if (reader.keyswitchMode() != params::keysOff && note >= ks && note < ks + params::keyswitchCount)
+    {
+        clickedKeys[static_cast<size_t> (note)] = static_cast<std::int8_t> (-2 - (note - ks));
+        keysToAudio.push ({ note - ks, 1.0f, true });
+        return;
+    }
     const int sent = note - 12 * reader.octaveShift();
     if (sent < 0 || sent > 127)
         return;
@@ -125,6 +133,8 @@ void Processor::handleNoteOff (juce::MidiKeyboardState*, int, int note, float)
     auto& sent = clickedKeys[static_cast<size_t> (note)];
     if (sent >= 0)
         keysToAudio.push ({ sent, 0.0f });
+    else if (sent <= -2)
+        keysToAudio.push ({ -2 - sent, 0.0f, true });
     sent = -1;
 }
 
@@ -161,6 +171,7 @@ void Processor::prepareToPlay (double sampleRate, int samplesPerBlock)
     pedal = false;
     pedalShown = false;
     deferredOff.fill (false);
+    keyswitchHeld.fill (0);
     const auto chunk = static_cast<size_t> (std::ceil (512.0 * std::max (1.0, ratio))) + 256;
     for (auto& f : fifo)
         f.assign (chunk, 0.0f);
@@ -199,12 +210,14 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     auto& sent = sentNotes[static_cast<size_t> (channel)];
     if (m.isNoteOn())
     {
-        // keyswitches (M5: MIDI 24-28 pick Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7:
-        // 29-32 Tremolo, Sautille, Portato, Col legno, 33-35 the contact point) are fixed keys,
-        // whatever the Octave setting
-        if (m.getNoteNumber() >= params::keyswitchFirst && m.getNoteNumber() <= params::keyswitchLast)
+        // keyswitches (M5: Arco, Pizzicato, Bartok, Left-hand pizz, Harmonic; M7: Tremolo,
+        // Sautille, Portato, Col legno, then the three contact points) are twelve keys from
+        // Keyswitch Start (C1), whatever the Octave setting; Behaviour Off plays them as notes
+        const int key = m.getNoteNumber(), ks = reader.keyswitchStart();
+        if (reader.keyswitchMode() != params::keysOff && key >= ks && key < ks + params::keyswitchCount)
         {
-            engine->noteOn (when, m.getNoteNumber(), m.getVelocity());
+            engine->keyswitch (when, key - ks, true);
+            keyswitchHeld[(size_t) key] = (std::int8_t) (key - ks + 1);
             return;
         }
         // notes outside the violin (G3 to E7, after Octave) stay silent, as in Octavio 1
@@ -219,6 +232,14 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     }
     else if (m.isNoteOff())
     {
+        // 2.3: a keyswitch let go (Momentary: back to what played before it)
+        if (auto& k = keyswitchHeld[(size_t) m.getNoteNumber()]; k > 0)
+        {
+            if (reader.keyswitchMode() == params::keysMomentary)
+                engine->keyswitch (when, k - 1, false);
+            k = 0;
+            return;
+        }
         // the pitch it started on, even if Octave changed while it was held
         auto& s = sent[static_cast<size_t> (m.getNoteNumber())];
         if (s >= 0)
@@ -240,6 +261,8 @@ void Processor::handleMidi (const juce::MidiMessage& m, int64_t when)
     {
         const int cc = m.getControllerNumber(), value = m.getControllerValue();
         midiMap.noteIncoming (cc, value);
+        if (cc == params::uaccController && value > 0) // 2.3: UACC picks the articulation
+            engine->uacc (when, value);
         if (cc == 121)
         {
             // reset all controllers: the curves go back to the player, the pedal and bend centre
@@ -393,11 +416,18 @@ void Processor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer
     updateTuning();
     updateTimeline(); // 2.3
 
+    if (const int mask = clearLatches.exchange (0)) // 2.3: the Play tab chose the parameter again
+        engine->clearKeyswitches (engineTime (0), mask);
     keysToAudio.popAll (
         [this] (const KeyEvent& e)
         {
             const auto when = engineTime (0);
-            if (e.velocity > 0.0f)
+            if (e.keyswitch)
+            {
+                if (e.velocity > 0.0f || reader.keyswitchMode() == params::keysMomentary)
+                    engine->keyswitch (when, e.note, e.velocity > 0.0f);
+            }
+            else if (e.velocity > 0.0f)
             {
                 engineNoteOn (when, e.note, e.velocity * 127.0f);
                 lastVelocity = juce::roundToInt (e.velocity * 127.0f);
@@ -487,6 +517,17 @@ void Processor::updateTelemetry (double blockSeconds, juce::int64 startTicks)
     T.ccHolds[o2::dimVibRate].store (pl.ccRate > 0.0);
     T.ccHolds[o2::dimContact].store (pl.ccContact > 0.0);
     T.ccHolds[o2::dimPressure].store (pl.pressHeld);
+    // 2.3: the stroke, and what keyswitches or UACC latched over the parameters (-1: none)
+    const int style = pl.bowStyleNow();
+    T.stroke.store (pl.art >= 3 ? pl.art : style == 1 || style == 2 ? style : 0);
+    const int art = pl.articulationNow(), contact = pl.contactNow();
+    T.articulation.store (art);
+    T.articulationLatch.store (art != juce::roundToInt (pl.pp.articulation) ? art : -1);
+    T.articulationParam.store (juce::roundToInt (pl.pp.articulation));
+    T.styleLatch.store (style != juce::roundToInt (pl.pp.bowStyle) ? style : -1);
+    T.styleParam.store (juce::roundToInt (pl.pp.bowStyle));
+    T.contactLatch.store (contact != juce::roundToInt (pl.pp.contact) ? contact : -1);
+    T.contactParam.store (juce::roundToInt (pl.pp.contact));
 
     const double now = engine->seconds();
     if (now >= nextHistoryT)

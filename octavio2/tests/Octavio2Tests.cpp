@@ -3,6 +3,8 @@
 
 #include "../plugin/PluginEditor.h"
 #include "../plugin/PluginProcessor.h"
+#include "../plugin/ui/Instruments.h"
+#include "../plugin/ui/PlayerText.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -1364,4 +1366,309 @@ TEST_CASE ("Octavio 2.3: the Curves and Play tabs with drawn curves", "[octavio2
         }
     }
     p.setPlayHead (nullptr);
+}
+// ---------------------------------------------------------------- 2.3 controls
+namespace
+{
+// Plays `seconds` through a processor (Live, Octave +1), the MIDI events at their block (480
+// samples = 10 ms each); returns the left channel.
+struct Timed
+{
+    int block;
+    juce::MidiMessage message;
+};
+std::vector<float> run23 (octavio2::Processor& p, const std::vector<Timed>& events, double seconds = 2.0)
+{
+    const int block = 480;
+    p.prepareToPlay (48000.0, block);
+    juce::AudioBuffer<float> buf (2, block);
+    std::vector<float> out;
+    const int blocks = (int) (seconds * 48000.0 / block);
+    for (int k = 0; k < blocks; ++k)
+    {
+        juce::MidiBuffer midi;
+        for (const auto& e : events)
+            if (e.block == k)
+                midi.addEvent (e.message, 0);
+        p.processBlock (buf, midi);
+        out.insert (out.end(), buf.getReadPointer (0), buf.getReadPointer (0) + block);
+    }
+    return out;
+}
+double peakBetween (const std::vector<float>& x, double from, double to)
+{
+    double m = 0;
+    for (size_t i = (size_t) (from * 48000); i < std::min (x.size(), (size_t) (to * 48000)); ++i)
+        m = std::max (m, (double) std::abs (x[i]));
+    return m;
+}
+double maxDiff (const std::vector<float>& a, const std::vector<float>& b)
+{
+    double d = 0;
+    for (size_t i = 0; i < std::min (a.size(), b.size()); ++i)
+        d = std::max (d, (double) std::abs (a[i] - b[i]));
+    return d;
+}
+bool allFinite (const std::vector<float>& x)
+{
+    for (float v : x)
+        if (! std::isfinite (v))
+            return false;
+    return true;
+}
+juce::MidiMessage on (int note, int vel = 100)
+{
+    return juce::MidiMessage::noteOn (1, note, (juce::uint8) vel);
+}
+juce::MidiMessage off (int note)
+{
+    return juce::MidiMessage::noteOff (1, note);
+}
+juce::MidiMessage uacc (int value)
+{
+    return juce::MidiMessage::controllerEvent (1, 32, value);
+}
+std::unique_ptr<octavio2::Processor> dryProcessor()
+{
+    auto p = std::make_unique<octavio2::Processor>();
+    setParam (*p, "room", 0.0f);
+    return p;
+}
+} // namespace
+
+TEST_CASE ("Octavio 2.3: the new parameters default to the 2.2 player", "[octavio2][23]")
+{
+    octavio2::Processor p;
+    const auto e = octavio2::params::Reader (p.getParameters()).read();
+    CHECK (e.seed == 1u); // the seed the 2.2 plugin always used
+    CHECK (e.imperfection == 0.0);
+    CHECK (e.velocitySensitivity == 1.0);
+    CHECK (e.attackWeight == 1.0);
+    const o2::PlayerParams pp;
+    CHECK (pp.velSens == 1.0);
+    CHECK (pp.attackWeight == 1.0);
+    CHECK (pp.imperfection == 0.0);
+    CHECK (juce::roundToInt (p.getParameters().getRawParameterValue ("keyswitchMode")->load()) == 0);
+    CHECK (juce::roundToInt (p.getParameters().getRawParameterValue ("keyswitchStart")->load()) == 24);
+    // the 2.2 parameters keep their indices (the MIDI map addresses them by index): the new ones
+    // come after the last 2.2 one
+    const auto& ps = p.AudioProcessor::getParameters();
+    int tremoloSync = -1, first23 = 1000;
+    for (int i = 0; i < ps.size(); ++i)
+        if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (ps[i]))
+        {
+            const auto id = r->getParameterID();
+            if (id == "tremoloSync")
+                tremoloSync = i;
+            for (auto* n :
+                 { "keyswitchMode", "keyswitchStart", "seed", "imperfection", "velocitySensitivity", "attackWeight" })
+                if (id == n)
+                    first23 = std::min (first23, i);
+        }
+    CHECK (tremoloSync == 45);
+    CHECK (first23 > tremoloSync); // after every 2.2 parameter (the 2.3 mode parameters come first)
+    // explicitly at their defaults, they play what an untouched plugin plays
+    auto a = dryProcessor(), b = dryProcessor();
+    for (auto* id : { "imperfection", "velocitySensitivity", "attackWeight", "seed", "keyswitchStart" })
+    {
+        auto* param = b->getParameters().getParameter (id);
+        param->setValueNotifyingHost (param->getDefaultValue());
+    }
+    const std::vector<Timed> melody { { 0, on (57) },   { 30, off (57) },     { 30, on (59, 80) },
+                                      { 60, off (59) }, { 62, on (61, 120) }, { 100, off (61) } };
+    CHECK (maxDiff (run23 (*a, melody), run23 (*b, melody)) == 0.0);
+}
+
+TEST_CASE ("Octavio 2.3: keyswitch behaviour and start key", "[octavio2][23]")
+{
+    // C#1 (25) is pizzicato: a plucked A4 (57 at Octave +1) has died away by 1.7 s, a bowed one
+    // held to the end has not
+    auto late = [] (int mode, int start, std::vector<Timed> keys)
+    {
+        auto p = dryProcessor();
+        setParam (*p, "keyswitchMode", (float) mode);
+        setParam (*p, "keyswitchStart", (float) start);
+        keys.push_back ({ 20, on (57) });
+        return dB (peakBetween (run23 (*p, keys), 1.7, 2.0));
+    };
+    constexpr int latching = 0, momentary = 1, keysOff = 2;
+    const double bowed = late (latching, 24, {});
+    INFO ("bowed " << bowed << " dB");
+    // Latching: pressed and let go before the note, it still picks pizzicato
+    CHECK (late (latching, 24, { { 0, on (25) }, { 5, off (25) } }) < bowed - 10.0);
+    // Momentary: only while the key is held
+    CHECK (late (momentary, 24, { { 0, on (25) }, { 5, off (25) } }) > bowed - 3.0);
+    CHECK (late (momentary, 24, { { 0, on (25) }, { 199, off (25) } }) < bowed - 10.0);
+    // Off: the key is an ordinary (silent) note and changes nothing
+    CHECK (late (keysOff, 24, { { 0, on (25) }, { 5, off (25) } }) > bowed - 3.0);
+    // the block moved to C2: C#2 (37) is pizzicato now, C#1 nothing
+    CHECK (late (latching, 36, { { 0, on (37) }, { 5, off (37) } }) < bowed - 10.0);
+    CHECK (late (latching, 36, { { 0, on (25) }, { 5, off (25) } }) > bowed - 3.0);
+
+    // the Play tab's strip sees the latch through the telemetry, and a click clears it
+    auto p = dryProcessor();
+    run23 (*p, { { 0, on (25) }, { 2, off (25) } }, 0.1);
+    CHECK (p->getTelemetry().articulationLatch.load() == 1);
+    CHECK (p->getTelemetry().articulation.load() == 1);
+    p->clearKeyswitchLatches (1);
+    juce::AudioBuffer<float> buf (2, 480);
+    juce::MidiBuffer none;
+    p->processBlock (buf, none);
+    p->processBlock (buf, none);
+    CHECK (p->getTelemetry().articulationLatch.load() == -1);
+}
+
+TEST_CASE ("Octavio 2.3: UACC on CC32 picks the articulation and bow style", "[octavio2][23]")
+{
+    int art, style, contact;
+    CHECK (o2::uaccMap (56, art, style, contact));
+    CHECK (art == 1);
+    CHECK (o2::uaccMap (42, art, style, contact));
+    CHECK ((art == 0 && style == 5));
+    CHECK (o2::uaccMap (14, art, style, contact));
+    CHECK ((art == 5 && contact == 1));
+    CHECK (o2::uaccMap (20, art, style, contact));
+    CHECK (style == 1);
+    CHECK_FALSE (o2::uaccMap (0, art, style, contact));
+    CHECK_FALSE (o2::uaccMap (99, art, style, contact));
+
+    auto late = [] (std::vector<Timed> ev)
+    {
+        auto p = dryProcessor();
+        ev.push_back ({ 20, on (57) });
+        return dB (peakBetween (run23 (*p, ev), 1.7, 2.0));
+    };
+    const double bowed = late ({});
+    CHECK (late ({ { 0, uacc (56) } }) < bowed - 10.0); // pizzicato
+    CHECK (late ({ { 0, uacc (40) } }) < bowed - 10.0); // staccato: a short stroke
+    CHECK (late ({ { 0, uacc (56) }, { 5, uacc (1) } }) > bowed - 3.0); // back to a long note
+    CHECK (late ({ { 0, uacc (0) } }) > bowed - 3.0); // 0: nothing
+
+    // the bow style parameter wins again when it changes
+    auto p = dryProcessor();
+    run23 (*p, { { 0, uacc (40) } }, 0.1);
+    CHECK (p->getTelemetry().styleLatch.load() == 3);
+    setParam (*p, "bowStyle", 1.0f);
+    juce::AudioBuffer<float> buf (2, 480);
+    juce::MidiBuffer none;
+    p->processBlock (buf, none);
+    CHECK (p->getTelemetry().styleLatch.load() == -1);
+}
+
+TEST_CASE ("Octavio 2.3: short bow styles shorten held notes in Live mode", "[octavio2][23]")
+{
+    // a note held for a second in Live mode (its length unknown when it starts)
+    auto play = [] (int style, std::vector<Timed> ev)
+    {
+        auto p = dryProcessor();
+        setParam (*p, "bowStyle", (float) style);
+        return run23 (*p, ev, 1.5);
+    };
+    const std::vector<Timed> held { { 0, on (57) }, { 100, off (57) } };
+    const auto autoNote = play (0, held), staccato = play (3, held), martele = play (4, held),
+               spiccato = play (5, held);
+    const double sustained = dB (peakBetween (autoNote, 0.4, 0.9));
+    INFO ("auto " << sustained << " dB; staccato " << dB (peakBetween (staccato, 0.4, 0.9)) << ", martele "
+                  << dB (peakBetween (martele, 0.4, 0.9)) << ", spiccato " << dB (peakBetween (spiccato, 0.4, 0.9)));
+    for (const auto* x : { &staccato, &martele, &spiccato })
+    {
+        CHECK (dB (peakBetween (*x, 0.0, 0.15)) > sustained - 12.0); // it speaks
+        CHECK (dB (peakBetween (*x, 0.4, 0.9)) < sustained - 12.0); // and is over long before the note-off
+    }
+    // three different strokes
+    CHECK (maxDiff (staccato, martele) > 1e-3);
+    CHECK (maxDiff (staccato, spiccato) > 1e-3);
+    // Detache: separate (not overlapping) notes, each its own articulated stroke
+    const std::vector<Timed> separate { { 0, on (57) }, { 40, off (57) }, { 45, on (59) }, { 85, off (59) } };
+    CHECK (maxDiff (play (0, separate), play (2, separate)) > 1e-3);
+
+    // the Play tab's readout shows the stroke
+    auto p = dryProcessor();
+    setParam (*p, "bowStyle", 4.0f);
+    run23 (*p, { { 0, on (57) } }, 0.05);
+    CHECK (p->getTelemetry().stroke.load() == 4);
+    CHECK (octavio2::ui::strokeText (4, false, 0, 0, 0).startsWith (juce::String::fromUTF8 ("Martelé")));
+}
+
+TEST_CASE ("Octavio 2.3: the Take gives another performance; Imperfection loosens it", "[octavio2][23]")
+{
+    const std::vector<Timed> melody { { 0, on (57) }, { 60, off (57) }, { 60, on (64) }, { 140, off (64) } };
+    auto play = [&] (int take, float imperfection)
+    {
+        auto p = dryProcessor();
+        setParam (*p, "seed", (float) take);
+        setParam (*p, "imperfection", imperfection);
+        return run23 (*p, melody, 1.6);
+    };
+    const auto take1 = play (1, 0.0f);
+    CHECK (maxDiff (take1, play (1, 0.0f)) == 0.0); // the same take, the same performance
+    const auto take2 = play (2, 0.0f);
+    CHECK (maxDiff (take1, take2) > 1e-3);
+    CHECK (maxDiff (take2, play (2, 0.0f)) == 0.0);
+    const auto loose = play (1, 100.0f);
+    CHECK (maxDiff (take1, loose) > 1e-3);
+    CHECK (allFinite (loose));
+    CHECK (dB (peakBetween (loose, 0.2, 1.2)) > -45.0);
+}
+
+TEST_CASE ("Octavio 2.3: velocity sensitivity and attack weight", "[octavio2][23]")
+{
+    o2::Player full, pl;
+    CHECK (full.dynFromVel (40) < full.dynFromVel (120));
+    pl.pp.velSens = 0.0;
+    CHECK (std::abs (pl.dynFromVel (40) - pl.dynFromVel (120)) < 1e-12);
+    CHECK (std::abs (pl.dynFromVel (40) - full.dynFromVel (100)) < 1e-12);
+    pl.pp.velSens = 0.5;
+    CHECK (pl.dynFromVel (120) - pl.dynFromVel (40) < full.dynFromVel (120) - full.dynFromVel (40));
+
+    const std::vector<Timed> soft { { 0, on (57, 30) }, { 50, off (57) } };
+    auto play = [&] (float sensitivity, float weight)
+    {
+        auto p = dryProcessor();
+        setParam (*p, "velocitySensitivity", sensitivity);
+        setParam (*p, "attackWeight", weight);
+        return run23 (*p, soft, 0.8);
+    };
+    const auto plain = play (100.0f, 100.0f);
+    // at 0 % a soft velocity plays like velocity 100: louder
+    CHECK (dB (peakBetween (play (0.0f, 100.0f), 0.2, 0.5)) > dB (peakBetween (plain, 0.2, 0.5)) + 2.0);
+    CHECK (maxDiff (plain, play (100.0f, 200.0f)) > 1e-4);
+}
+
+TEST_CASE ("Octavio 2.3: the header's Instrument menu sets the parts as the Tone tab does", "[octavio2][23]")
+{
+    octavio2::Processor p;
+    auto& s = p.getParameters();
+    CHECK (octavio2::ui::instruments::active (s) == 0);
+    octavio2::ui::instruments::choose (s, 1);
+    CHECK (octavio2::ui::instruments::active (s) == 1);
+    CHECK (juce::roundToInt (s.getRawParameterValue ("strings")->load()) == 1);
+    CHECK (std::abs (s.getRawParameterValue ("a4")->load() - 415.0f) < 0.05f);
+    setParam (p, "rosin", 0.0f);
+    CHECK (octavio2::ui::instruments::active (s) == -1);
+    octavio2::ui::instruments::choose (s, 0);
+    CHECK (octavio2::ui::instruments::active (s) == 0);
+}
+
+TEST_CASE ("Octavio 2.3: the Play tab shows the stroke and what a keyswitch latched", "[octavio2][23]")
+{
+    // OCTAVIO2_SNAPSHOTS=<folder> saves it as play-latched.png
+    const juce::ScopedJuceInitialiser_GUI gui;
+    auto p = dryProcessor();
+    setParam (*p, "bowStyle", 4.0f); // Martele
+    run23 (*p, { { 0, on (34) }, { 1, off (34) }, { 2, on (60) } }, 0.08); // sul ponticello, then C5
+    CHECK (p->getTelemetry().contactLatch.load() == 1);
+    CHECK (p->getTelemetry().stroke.load() == 4);
+    p->editorTab = 0;
+    octavio2::Editor editor (*p);
+    const auto image = editor.createComponentSnapshot (editor.getLocalBounds());
+    CHECK (image.getWidth() == octavio2::ui::designWidth);
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("OCTAVIO2_SNAPSHOTS", {});
+    if (folder.isNotEmpty())
+    {
+        juce::File file (folder + "/play-latched.png");
+        file.deleteFile();
+        juce::FileOutputStream out (file);
+        juce::PNGImageFormat().writeImageToStream (image, out);
+    }
 }
