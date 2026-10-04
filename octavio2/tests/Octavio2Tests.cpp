@@ -307,3 +307,257 @@ TEST_CASE ("Octavio 2's interface paints every tab while it plays", "[octavio2]"
         }
     }
 }
+
+// M6: MIDI mapping, slur pedal, pitch bend, presets ------------------------------------------
+#include "../plugin/ui/MidiView.h"
+
+namespace
+{
+int parameterIndex (octavio2::Processor& p, const juce::String& id)
+{
+    const auto& ps = p.AudioProcessor::getParameters();
+    for (int i = 0; i < ps.size(); ++i)
+        if (auto* w = dynamic_cast<juce::AudioProcessorParameterWithID*> (ps[i]))
+            if (w->paramID == id)
+                return i;
+    return -1;
+}
+
+void block (octavio2::Processor& p, std::initializer_list<juce::MidiMessage> messages, int n = 480)
+{
+    juce::AudioBuffer<float> buf (2, n);
+    juce::MidiBuffer midi;
+    for (const auto& m : messages)
+        midi.addEvent (m, 0);
+    p.processBlock (buf, midi);
+}
+} // namespace
+
+TEST_CASE ("Octavio 2 saves its MIDI map with the project", "[octavio2][midi]")
+{
+    using octavio2::MidiMap;
+    octavio2::Processor a;
+    auto e = a.getMidiMap().getEntries();
+    CHECK (a.getMidiMap().matchingPreset() == 0); // the Octavio 2 map by default
+    e.push_back ({ 20, MidiMap::parameterBase + parameterIndex (a, "reverb"), 0.25f, 0.75f, true });
+    e.erase (e.begin()); // CC1 -> dynamics removed
+    a.getMidiMap().setEntries (e);
+    CHECK (a.getMidiMap().matchingPreset() == -1);
+    setParam (a, "bendRange", 7.0f);
+    juce::MemoryBlock state;
+    a.getStateInformation (state);
+
+    octavio2::Processor b;
+    b.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (b.getMidiMap().getEntries() == a.getMidiMap().getEntries());
+    CHECK (juce::roundToInt (b.getParameters().getRawParameterValue ("bendRange")->load()) == 7);
+
+    // a project saved before M6 (no map in it) gets the Octavio 2 map
+    octavio2::Processor c;
+    c.getMidiMap().loadPreset (MidiMap::Preset::none);
+    const auto old = a.getParameters().copyState(); // the parameters only, as 2.1 saved them
+    juce::MemoryBlock oldState;
+    juce::AudioProcessor::copyXmlToBinary (*old.createXml(), oldState);
+    c.setStateInformation (oldState.getData(), (int) oldState.getSize());
+    CHECK (c.getMidiMap().matchingPreset() == 0);
+}
+
+TEST_CASE ("Octavio 2 mapped controllers move parameters and the player", "[octavio2][midi]")
+{
+    using octavio2::MidiMap;
+    octavio2::Processor p;
+    p.prepareToPlay (48000.0, 480);
+    auto e = p.getMidiMap().getEntries();
+    e.push_back ({ 20, MidiMap::parameterBase + parameterIndex (p, "reverb") });
+    e.push_back ({ 20, MidiMap::parameterBase + parameterIndex (p, "width"), 0.0f, 0.5f, true });
+    p.getMidiMap().setEntries (e);
+    block (p, { juce::MidiMessage::controllerEvent (1, 20, 127) });
+    // in this block already: the engine has the new settings
+    CHECK (std::abs (p.getEngine().getSettings().reverbDb - 6.0) < 1e-3);
+    CHECK (std::abs (p.getEngine().getSettings().width - 0.0) < 1e-3); // inverted: 127 -> range start
+    block (p, { juce::MidiMessage::controllerEvent (1, 20, 0) });
+    CHECK (std::abs (p.getParameters().getRawParameterValue ("reverb")->load() - -24.0f) < 1e-3f);
+    CHECK (std::abs (p.getParameters().getRawParameterValue ("width")->load() - 100.0f) < 1e-2f);
+
+    // the default map: CC1 is the player's dynamics (a drawn curve takes over)
+    block (p, { juce::MidiMessage::controllerEvent (1, 1, 32) });
+    block (p, {});
+    CHECK (p.getEngine().getPlayer().manDyn);
+    CHECK (std::abs (p.getEngine().getPlayer().ccDyn - 32.0 / 127.0) < 1e-6);
+    block (p, { juce::MidiMessage::controllerEvent (1, 121, 0) });
+    block (p, {});
+    CHECK (! p.getEngine().getPlayer().manDyn);
+
+    // the legacy map: CC1 is vibrato, dynamics stay the player's
+    p.getMidiMap().loadPreset (MidiMap::Preset::legacy);
+    block (p, { juce::MidiMessage::controllerEvent (1, 1, 0) });
+    block (p, {});
+    CHECK (! p.getEngine().getPlayer().manDyn);
+    CHECK (p.getEngine().getPlayer().vibScale < 1e-6);
+
+    // no map: controllers do nothing
+    p.getMidiMap().loadPreset (MidiMap::Preset::none);
+    block (p, { juce::MidiMessage::controllerEvent (1, 1, 100) });
+    block (p, {});
+    CHECK (! p.getEngine().getPlayer().manDyn);
+}
+
+TEST_CASE ("Octavio 2 slurs everything while the sustain pedal is down, and bends", "[octavio2][midi]")
+{
+    for (const bool pedal : { false, true })
+    {
+        octavio2::Processor p;
+        p.prepareToPlay (48000.0, 480);
+        if (pedal)
+            block (p, { juce::MidiMessage::controllerEvent (1, 64, 127) });
+        CHECK (p.isPedalDown() == pedal);
+        // detached notes: the first ends well before the second starts
+        block (p, { juce::MidiMessage::noteOn (1, 69 - 12, (juce::uint8) 90) });
+        for (int i = 0; i < 40; ++i)
+            block (p, {});
+        block (p, { juce::MidiMessage::noteOff (1, 69 - 12) });
+        for (int i = 0; i < 10; ++i)
+            block (p, {});
+        block (p, { juce::MidiMessage::noteOn (1, 71 - 12, (juce::uint8) 90) });
+        block (p, {});
+        CHECK ((p.getEngine().getPlayer().slurNotes > 0) == pedal);
+        block (p, { juce::MidiMessage::pitchWheel (1, 16383) });
+        block (p, {});
+        CHECK (std::abs (p.getEngine().getPlayer().bendCents - 200.0 * 8191.0 / 8192.0) < 0.01); // +-2 st default
+        block (p, { juce::MidiMessage::controllerEvent (1, 64, 0) });
+        CHECK (! p.isPedalDown());
+    }
+}
+
+TEST_CASE ("Octavio 2 Learn assigns the controller that moves", "[octavio2][midi]")
+{
+    const juce::ScopedJuceInitialiser_GUI gui;
+    using octavio2::MidiMap;
+    octavio2::Processor p;
+    p.prepareToPlay (48000.0, 480);
+    octavio2::ui::MidiView view (p);
+    const int target = MidiMap::parameterBase + parameterIndex (p, "brightness");
+    const auto before = p.getMidiMap().getEntries().size();
+    view.startLearn (target);
+    CHECK (view.isLearning());
+    view.poll();
+    block (p, { juce::MidiMessage::controllerEvent (1, 85, 100) });
+    view.poll();
+    CHECK (! view.isLearning());
+    const auto e = p.getMidiMap().getEntries();
+    REQUIRE (e.size() == before + 1);
+    CHECK (e.back().cc == 85);
+    CHECK (e.back().target == target);
+    // and it plays
+    block (p, { juce::MidiMessage::controllerEvent (1, 85, 0) });
+    CHECK (std::abs (p.getParameters().getRawParameterValue ("brightness")->load() - -6.0f) < 1e-3f);
+}
+
+TEST_CASE ("Octavio 2 factory presets load and play cleanly", "[octavio2][presets]")
+{
+    octavio2::Processor p;
+    auto& presets = p.getPresets();
+    presets.setUserFolder (juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("o2-no-presets"));
+    REQUIRE (presets.numFactory() >= 8);
+    CHECK (presets.currentName() == "Concert Soloist");
+    CHECK (! presets.isModified());
+    for (int i = 0; i < presets.numFactory(); ++i)
+    {
+        INFO (presets.list()[(size_t) i].name);
+        REQUIRE (presets.load (i));
+        CHECK (! presets.isModified());
+        // a phrase (Octave +1): a soft low note, a loud one, a high one, a fast run. Not double
+        // stops: two strings at ff reach +4..+6 dBFS in the default sound too (the engine's level,
+        // unchanged by M6; see the M6 report)
+        const double rate = 48000.0;
+        const int n = 480;
+        p.prepareToPlay (rate, n);
+        juce::AudioBuffer<float> buf (2, n);
+        double peak = 0, sum = 0;
+        bool finite = true;
+        long count = 0;
+        double segPeak[5] = {};
+        const int total = (int) (5.0 * rate / n);
+        for (int b = 0; b < total; ++b)
+        {
+            juce::MidiBuffer midi;
+            const double t = b * n / rate;
+            auto at = [&] (double when, const juce::MidiMessage& m)
+            {
+                const int s = (int) std::lround (when * rate) - b * n;
+                if (s >= 0 && s < n)
+                    midi.addEvent (m, s);
+            };
+            at (0.0, juce::MidiMessage::noteOn (1, 55, (juce::uint8) 40));
+            at (1.0, juce::MidiMessage::noteOff (1, 55));
+            at (1.05, juce::MidiMessage::noteOn (1, 64, (juce::uint8) 127));
+            at (2.0, juce::MidiMessage::noteOff (1, 64));
+            at (2.05, juce::MidiMessage::noteOn (1, 88, (juce::uint8) 110));
+            at (2.9, juce::MidiMessage::noteOff (1, 88));
+            for (int k = 0; k < 8; ++k)
+            {
+                const int note = 50 + (k * 5) % 14;
+                at (3.0 + 0.12 * k, juce::MidiMessage::noteOn (1, note, (juce::uint8) 100));
+                at (3.0 + 0.12 * k + 0.1, juce::MidiMessage::noteOff (1, note));
+            }
+            at (4.0, juce::MidiMessage::allNotesOff (1));
+            p.processBlock (buf, midi);
+            const auto l = measure (buf);
+            finite = finite && l.finite;
+            peak = std::max (peak, l.peak);
+            segPeak[std::min (4, (int) t)] = std::max (segPeak[std::min (4, (int) t)], l.peak);
+            sum += l.rms * l.rms;
+            ++count;
+        }
+        CHECK (finite);
+        CHECK (peak < 1.0);
+        CHECK (dB (std::sqrt (sum / count)) > -60.0); // it plays
+        UNSCOPED_INFO (presets.list()[(size_t) i].name
+                       << ": peak " << dB (peak) << " dBFS, rms " << dB (std::sqrt (sum / count)) << " dBFS; by second "
+                       << dB (segPeak[0]) << " " << dB (segPeak[1]) << " " << dB (segPeak[2]) << " " << dB (segPeak[3])
+                       << " " << dB (segPeak[4]));
+    }
+    // the modified marker, next and previous
+    presets.load (0);
+    setParam (p, "vibrato", 1.9f);
+    CHECK (presets.isModified());
+    presets.loadNext();
+    CHECK (presets.currentIndex() == 1);
+    presets.loadPrevious();
+    presets.loadPrevious();
+    CHECK (presets.currentIndex() == presets.numFactory() - 1);
+}
+
+TEST_CASE ("Octavio 2 saves and loads user presets", "[octavio2][presets]")
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("o2-presets-test");
+    folder.deleteRecursively();
+    octavio2::Processor p;
+    auto& presets = p.getPresets();
+    presets.setUserFolder (folder);
+    setParam (p, "vibrato", 0.3f);
+    setParam (p, "room", 4.0f);
+    setParam (p, "octave", 4.0f); // a performance setting: not in presets
+    REQUIRE (presets.save ("My Church").wasOk());
+    CHECK (presets.currentName() == "My Church");
+    CHECK (! presets.isModified());
+    CHECK (presets.save ("Concert Soloist").failed()); // a factory name
+    presets.load (0);
+    CHECK (std::abs (p.getParameters().getRawParameterValue ("vibrato")->load() - 1.0f) < 1e-4f);
+    CHECK (juce::roundToInt (p.getParameters().getRawParameterValue ("octave")->load()) == 4);
+    REQUIRE ((int) presets.list().size() == presets.numFactory() + 1);
+    presets.load (presets.numFactory());
+    CHECK (std::abs (p.getParameters().getRawParameterValue ("vibrato")->load() - 0.3f) < 1e-4f);
+    CHECK (juce::roundToInt (p.getParameters().getRawParameterValue ("room")->load()) == 4);
+    // the preset's name comes back with the project
+    juce::MemoryBlock state;
+    p.getStateInformation (state);
+    octavio2::Processor q;
+    q.getPresets().setUserFolder (folder);
+    q.setStateInformation (state.getData(), (int) state.getSize());
+    CHECK (q.getPresets().currentName() == "My Church");
+    CHECK (! q.getPresets().isModified());
+    REQUIRE (presets.remove (presets.currentIndex()).wasOk());
+    CHECK ((int) presets.list().size() == presets.numFactory());
+    folder.deleteRecursively();
+}

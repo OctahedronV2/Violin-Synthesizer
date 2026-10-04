@@ -117,6 +117,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::phrasing, "Phrasing", { 0.0f, 200.0f }, 100.0f, "%", 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::fingerPlan, "Plan Fingering", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::drawnCurves, "Drawn Curves", true));
+    // MIDI (M6): the pitch wheel's range in semitones (0 = ignored)
+    layout.add (floatParam (id::bendRange, "Bend Range", { 0.0f, 12.0f, 1.0f }, 2.0f, "st", 0));
     return layout;
 }
 
@@ -145,7 +147,8 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       bowStyle (s.getRawParameterValue (id::bowStyle.getParamID())),
       phrasing (s.getRawParameterValue (id::phrasing.getParamID())),
       fingerPlan (s.getRawParameterValue (id::fingerPlan.getParamID())),
-      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID()))
+      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID())),
+      bendRangeValue (s.getRawParameterValue (id::bendRange.getParamID()))
 {
 }
 

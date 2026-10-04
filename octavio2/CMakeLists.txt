@@ -59,7 +59,9 @@ juce_add_binary_data(Octavio2Data
 set_target_properties(Octavio2Data PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
 
 target_sources(Octavio2 PRIVATE
+    plugin/MidiMap.cpp
     plugin/Parameters.cpp
+    plugin/Presets.cpp
     plugin/PluginEditor.cpp
     plugin/PluginProcessor.cpp
     plugin/ui/Controls.cpp
@@ -70,6 +72,7 @@ target_sources(Octavio2 PRIVATE
     plugin/ui/ArticulationView.cpp
     plugin/ui/PlaceholderView.cpp
     plugin/ui/PlayView.cpp
+    plugin/ui/PresetBar.cpp
     plugin/ui/Theme.cpp
     plugin/ui/ToneView.cpp
     "${PROJECT_SOURCE_DIR}/source/dsp/PartitionedConvolution.cpp"

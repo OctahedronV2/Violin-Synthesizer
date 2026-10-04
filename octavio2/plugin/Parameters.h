@@ -35,6 +35,8 @@ inline const juce::ParameterID movement { "movement", 1 };
 inline const juce::ParameterID distance { "distance", 1 };
 inline const juce::ParameterID bridge { "bridge", 1 };
 inline const juce::ParameterID mute { "mute", 1 };
+// MIDI (M6): semitones of the pitch wheel's full throw
+inline const juce::ParameterID bendRange { "bendRange", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -62,10 +64,12 @@ public:
     o2::EngineSettings read() const;
     int octaveShift() const;
     bool studio() const { return mode->load() >= 0.5f; }
+    double bendRange() const { return bendRangeValue->load(); } // M6: semitones
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
     std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
         *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
+    std::atomic<float>* bendRangeValue; // M6
 };
 } // namespace octavio2::params
