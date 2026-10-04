@@ -46,14 +46,15 @@ MidiView::MidiView (Processor& p)
                 }),
       octave (&p.getParameters(), params::id::octave.getParamID(), { { "-2" }, { "-1" }, { "0" }, { "+1" }, { "+2" } }),
       behaviour (nullptr, {}, { { "Latching" }, { "Momentary" }, { "Off" } }),
-      mpe (nullptr, {}, { { "Off" }, { "On" } }),
+      mpe (&p.getParameters(), params::id::mpe.getParamID(), { { "Off" }, { "On" } }), // M7
       learn (juce::String::fromUTF8 ("◉ Learn"), "the MIDI mapping milestone (M6)")
 {
     curve.setTooltip ("Velocity to dynamics: below 1 soft playing gets louder sooner, above 1 later.");
     dynamics.setTooltip ("Added to every note's dynamics.");
     octave.setTooltip ("Moves every note by octaves. +1 suits typing keyboards (z = C4 in FL Studio).");
     behaviour.setTooltip ("Keyswitches arrive with the articulations (M4 and M7).");
-    mpe.setTooltip ("MPE arrives with M7.");
+    mpe.setTooltip ("MPE (lower zone, notes on channels 2-16): each note's pitch bend bends it (range: MPE Bend "
+                    "Range, 48 semitones), pressure sets the dynamics, CC74 moves the bow towards the bridge.");
     for (auto* c : std::initializer_list<juce::Component*> { &curve, &dynamics, &octave, &behaviour, &mpe, &learn })
         addAndMakeVisible (c);
     startTimerHz (15);

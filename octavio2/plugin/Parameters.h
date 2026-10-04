@@ -35,6 +35,13 @@ inline const juce::ParameterID movement { "movement", 1 };
 inline const juce::ParameterID distance { "distance", 1 };
 inline const juce::ParameterID bridge { "bridge", 1 };
 inline const juce::ParameterID mute { "mute", 1 };
+// M7 player: style, intonation, MPE
+inline const juce::ParameterID playerStyle { "playerStyle", 1 };
+inline const juce::ParameterID intonation { "intonation", 1 };
+inline const juce::ParameterID tuningKey { "tuningKey", 1 };
+inline const juce::ParameterID a4 { "a4", 1 };
+inline const juce::ParameterID mpe { "mpe", 1 };
+inline const juce::ParameterID mpeBendRange { "mpeBendRange", 1 };
 } // namespace id
 
 // The Room choices: "None" (the two microphones only), then the halls in the order the engine
@@ -46,6 +53,10 @@ const juce::StringArray& violinNames();
 const juce::StringArray& micNames();
 const juce::StringArray& articulationNames();
 const juce::StringArray& bowStyleNames();
+// M7: Player Style, Intonation and Key choices, in the engine's order (o2::PlayerStyle, o2::Intonation)
+const juce::StringArray& playerStyleNames();
+const juce::StringArray& intonationNames();
+const juce::StringArray& keyNames();
 
 // Choices of the Octave parameter; index 2 plays notes where they are.
 inline constexpr int octaveChoiceOffset = 2;
@@ -62,10 +73,15 @@ public:
     o2::EngineSettings read() const;
     int octaveShift() const;
     bool studio() const { return mode->load() >= 0.5f; }
+    // M7 MPE: on/off and the per-note bend range in semitones
+    bool mpe() const { return mpeOn->load() >= 0.5f; }
+    float mpeBendRange() const { return mpeBend->load(); }
+    int intonation() const { return juce::roundToInt (intonationSystem->load()); }
 
 private:
     std::atomic<float>*mode, *octave, *velocityCurve, *vibrato, *brightness, *room, *reverb, *volume, *dynamics;
     std::atomic<float>*violin, *mic, *width, *movement, *distance, *bridge, *mute, *hiss, *sympathetic, *wolf, *hold,
         *articulation, *bowStyle, *phrasing, *fingerPlan, *drawnCurves;
+    std::atomic<float>*playerStyle, *intonationSystem, *tuningKey, *a4, *mpeOn, *mpeBend; // M7 player
 };
 } // namespace octavio2::params

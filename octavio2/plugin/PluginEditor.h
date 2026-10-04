@@ -44,7 +44,9 @@ private:
     ui::Keyboard keyboard;
     struct HeaderPreview final : juce::Component, juce::SettableTooltipClient
     {
-    } instrument, player, presets;
+    } instrument, presets;
+    juce::ComboBox player; // M7: Player Style
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> playerAttachment;
     Canvas canvas { *this };
     juce::TooltipWindow tooltips { this, 500 };
     violinsynth::HostKeyboardFocus hostFocus { *this };

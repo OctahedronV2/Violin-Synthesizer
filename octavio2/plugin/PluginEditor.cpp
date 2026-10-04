@@ -72,7 +72,16 @@ Editor::Editor (Processor& p)
     mode.setTooltip ("Live plays at once. Studio looks 1.2 s ahead so the player knows each note's length; the DAW "
                      "compensates the delay.");
     instrument.setTooltip ("Viola, cello and bass arrive after the violin (the strings section).");
-    player.setTooltip ("Player styles (baroque, romantic, folk) arrive with the styles milestone (M7).");
+    // M7: the player's style, offsets on the automation (vibrato, slides, bow, swells, intonation)
+    for (int i = 0; i < params::playerStyleNames().size(); ++i)
+        player.addItem ("Player: " + params::playerStyleNames()[i], i + 1);
+    playerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        p.getParameters(),
+        params::id::playerStyle.getParamID(),
+        player);
+    player.setTooltip ("How the virtual violinist plays: vibrato, slides, bow strokes, swells and expressive "
+                       "intonation. Modern soloist is the default player; the others shift its habits and still "
+                       "follow your controls.");
     presets.setTooltip ("Presets arrive with the plugin milestone (M6). Your host's presets save every setting now.");
     for (auto* c : std::initializer_list<juce::Component*> { &mode, &keyboard, &instrument, &player, &presets })
         canvas.addAndMakeVisible (c);
@@ -194,7 +203,6 @@ void Editor::Canvas::paint (juce::Graphics& g)
               colours::dim);
     // instrument, player, presets (previews)
     previewBox (g, { 214, 14, 170, 34 }, "Modern violin", true);
-    previewBox (g, { 394, 14, 180, 34 }, "Player: Modern soloist", true);
     previewBox (g, { 592, 14, 34, 34 }, juce::String::fromUTF8 ("‹"), false, juce::Justification::horizontallyCentred);
     previewBox (g, { 630, 14, 230, 34 }, "Default", false, juce::Justification::horizontallyCentred);
     previewBox (g, { 864, 14, 34, 34 }, juce::String::fromUTF8 ("›"), false, juce::Justification::horizontallyCentred);

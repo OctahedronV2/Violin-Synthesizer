@@ -36,6 +36,25 @@ const juce::StringArray& bowStyleNames()
     return names;
 }
 
+const juce::StringArray& playerStyleNames()
+{
+    static const juce::StringArray names { "Modern soloist", "Romantic", "Hungarian", "Baroque",
+                                           "Maqam",          "Fiddle",   "Student" };
+    return names;
+}
+
+const juce::StringArray& intonationNames()
+{
+    static const juce::StringArray names { "Expressive", "Equal", "Just", "Pythagorean", "Scala file", "MTS-ESP" };
+    return names;
+}
+
+const juce::StringArray& keyNames()
+{
+    static const juce::StringArray names { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    return names;
+}
+
 const juce::StringArray& micNames()
 {
     static const juce::StringArray names { "Front", "Above", "Player's ear", "Side" };
@@ -117,6 +136,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     layout.add (floatParam (id::phrasing, "Phrasing", { 0.0f, 200.0f }, 100.0f, "%", 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::fingerPlan, "Plan Fingering", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (id::drawnCurves, "Drawn Curves", true));
+    // ---- M7 player (append only): the player's style (offsets on the automation, Modern soloist
+    // = the 2.1 player), the intonation system, its key, the A4 reference, MPE
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::playerStyle, "Player Style", playerStyleNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::intonation, "Intonation", intonationNames(), 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (id::tuningKey, "Key", keyNames(), 0));
+    layout.add (floatParam (id::a4, "A4 Reference", { 415.0f, 466.0f, 0.1f }, 440.0f, "Hz", 1));
+    layout.add (std::make_unique<juce::AudioParameterBool> (id::mpe, "MPE", false));
+    layout.add (std::make_unique<juce::AudioParameterInt> (id::mpeBendRange, "MPE Bend Range", 1, 96, 48));
     return layout;
 }
 
@@ -145,7 +172,13 @@ Reader::Reader (juce::AudioProcessorValueTreeState& s)
       bowStyle (s.getRawParameterValue (id::bowStyle.getParamID())),
       phrasing (s.getRawParameterValue (id::phrasing.getParamID())),
       fingerPlan (s.getRawParameterValue (id::fingerPlan.getParamID())),
-      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID()))
+      drawnCurves (s.getRawParameterValue (id::drawnCurves.getParamID())),
+      playerStyle (s.getRawParameterValue (id::playerStyle.getParamID())),
+      intonationSystem (s.getRawParameterValue (id::intonation.getParamID())),
+      tuningKey (s.getRawParameterValue (id::tuningKey.getParamID())),
+      a4 (s.getRawParameterValue (id::a4.getParamID())),
+      mpeOn (s.getRawParameterValue (id::mpe.getParamID())),
+      mpeBend (s.getRawParameterValue (id::mpeBendRange.getParamID()))
 {
 }
 
@@ -177,6 +210,11 @@ o2::EngineSettings Reader::read() const
     e.fingerPlan = fingerPlan->load() > 0.5f;
     e.drawnCurves = drawnCurves->load() > 0.5f;
     e.hiss = hissScale[juce::jlimit (0, 2, juce::roundToInt (hiss->load()))];
+    // M7 player
+    e.playerStyle = juce::roundToInt (playerStyle->load());
+    e.intonation = juce::roundToInt (intonationSystem->load());
+    e.tuningKey = juce::roundToInt (tuningKey->load());
+    e.a4 = std::round (a4->load() * 10.0) / 10.0; // 0.1 Hz steps: 440 is exactly 440
     return e;
 }
 
